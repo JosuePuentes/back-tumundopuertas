@@ -731,6 +731,10 @@ async def obtener_ventas_diarias(
         historial_pagos = pedido.get("historial_pagos", [])
         fecha_creacion = pedido.get("fecha_creacion", "")
 
+        # Primero contar cuántos abonos (no "pagado") hay en este pedido
+        abonos_count = sum(1 for p in historial_pagos if p.get("estado", "") != "pagado")
+        abono_index = 0
+
         # Procesar historial de pagos
         for pago in historial_pagos:
             monto = pago.get("monto", 0.0)
@@ -759,7 +763,8 @@ async def obtener_ventas_diarias(
                 total_ventas_firmes += monto
             else:
                 # Abono: pago parcial o inicial
-                tipo_abono = "inicial" if len(historial_pagos) == 1 else "proceso"
+                abono_index += 1
+                tipo_abono = "inicial" if abonos_count == 1 else "proceso"
                 abonos.append({
                     "cliente": cliente_nombre,
                     "monto": monto,
