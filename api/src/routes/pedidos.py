@@ -620,7 +620,7 @@ async def actualizar_pago(
         update["$set"]["total_abonado"] = new_total_abonado
 
         result = pedidos_collection.update_one(
-            {"_id": pedido_obj_id},
+            {"_id": ObjectId(pedido_id)},
             update
         )
     except Exception as e:
@@ -674,3 +674,121 @@ async def obtener_pagos(
         p["_id"] = str(p["_id"])
 
     return pedidos
+
+@router.get("/ventas-diarias")
+async def obtener_ventas_diarias(
+    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio en formato YYYY-MM-DD"),
+    fecha_fin: Optional[str] = Query(None, description="Fecha fin en formato YYYY-MM-DD"),
+):
+    """
+    Retorna el resumen de ventas diarias con dos listas separadas:
+    - ventasFirmes: pagos completos capturados desde 'mis pagos' 
+    - abonos: abonos iniciales registrados al crear pedido y abonos realizados en pedidos en proceso
+    """
+    
+    # Construir filtro de fecha
+    filtro = {}
+    if fecha_inicio and fecha_fin:
+        try:
+            inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            fin = datetime.strptime(fecha_fin, "%Y-%m-%d") + timedelta(days=1)
+            filtro["fecha_creacion"] = {"$gte": inicio, "$lt": fin}
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Formato de fecha inválido, use YYYY-MM-DD")
+    elif fecha_inicio:
+        try:
+            inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            fin = inicio + timedelta(days=1)
+            filtro["fecha_creacion"] = {"$gte": inicio, "$lt": fin}
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Formato de fecha inválido, use YYYY-MM-DD")
+
+    # Buscar todos los pedidos que coincidan con el filtro
+    pedidos = list(
+        pedidos_collection.find(
+            filtro,
+            {
+                "_id": 1,
+                "cliente_id": 1,
+                "cliente_nombre": 1,
+                "pago": 1,
+                "historial_pagos": 1,
+                "total_abonado": 1,
+                "fecha_creacion": 1,
+            },
+        )
+    )
+
+    ventas_firmes = []
+    abonos = []
+    total_ventas_firmes = 0.0
+    total_abonos = 0.0
+
+    for pedido in pedidos:
+        pedido_id = str(pedido["_id"])
+        cliente_nombre = pedido.get("cliente_nombre", "")
+        estado_pago = pedido.get("pago", "sin pago")
+        historial_pagos = pedido.get("historial_pagos", [])
+        fecha_creacion = pedido.get("fecha_creacion", "")
+
+        # Primero contar cuántos abonos (no "pagado") hay en este pedido
+        abonos_count = sum(1 for p in historial_pagos if p.get("estado", "") != "pagado")
+        abono_index = 0
+
+        # Procesar historial de pagos
+        for pago in historial_pagos:
+            monto = pago.get("monto", 0.0)
+            fecha_pago = pago.get("fecha", "")
+            estado_pago_historial = pago.get("estado", "")
+            
+            # Extraer hora de la fecha del pago
+            hora = ""
+            if fecha_pago:
+                try:
+                    fecha_obj = datetime.fromisoformat(fecha_pago.replace('Z', '+00:00'))
+                    hora = fecha_obj.strftime("%H:%M:%S")
+                except:
+                    hora = ""
+
+            # Determinar si es venta firme o abono
+            if estado_pago_historial == "pagado":
+                # Venta firme: pago completo
+                ventas_firmes.append({
+                    "cliente": cliente_nombre,
+                    "monto": monto,
+                    "pedidoId": pedido_id,
+                    "hora": hora,
+                    "fecha": fecha_pago
+                })
+                total_ventas_firmes += monto
+            else:
+                # Abono: pago parcial o inicial
+                abono_index += 1
+                tipo_abono = "inicial" if abonos_count == 1 else "proceso"
+                abonos.append({
+                    "cliente": cliente_nombre,
+                    "monto": monto,
+                    "pedidoId": pedido_id,
+                    "tipoAbono": tipo_abono,
+                    "hora": hora,
+                    "fecha": fecha_pago
+                })
+                total_abonos += monto
+
+    # Estructurar la respuesta
+    response = {
+        "fecha_consulta": fecha_inicio if fecha_inicio else datetime.now().strftime("%Y-%m-%d"),
+        "totales": {
+            "ventasFirmes": total_ventas_firmes,
+            "abonos": total_abonos,
+            "total": total_ventas_firmes + total_abonos
+        },
+        "ventasFirmes": ventas_firmes,
+        "abonos": abonos,
+        "cantidades": {
+            "ventasFirmes": len(ventas_firmes),
+            "abonos": len(abonos)
+        }
+    }
+
+    return response
