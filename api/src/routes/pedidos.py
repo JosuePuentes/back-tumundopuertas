@@ -42,8 +42,38 @@ async def get_pedido(pedido_id: str):
 async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
     pedido.creado_por = user.get("usuario")
     print("Creando pedido:", pedido)
+    
+    # Insertar el pedido
     result = pedidos_collection.insert_one(pedido.dict())
-    return {"message": "Pedido creado correctamente", "id": str(result.inserted_id), "cliente_nombre": pedido.cliente_nombre}
+    pedido_id = str(result.inserted_id)
+    
+    # Si hay abonos iniciales en el historial_pagos, incrementar el saldo de los métodos de pago
+    if pedido.historial_pagos:
+        print(f"DEBUG CREAR PEDIDO: Procesando {len(pedido.historial_pagos)} abonos iniciales")
+        for pago in pedido.historial_pagos:
+            if pago.metodo and pago.monto and pago.monto > 0:
+                print(f"DEBUG CREAR PEDIDO: Procesando abono de {pago.monto} con método {pago.metodo}")
+                try:
+                    # Buscar el método de pago por _id
+                    metodo_pago = metodos_pago_collection.find_one({"_id": ObjectId(pago.metodo)})
+                    if metodo_pago:
+                        saldo_actual = metodo_pago.get("saldo", 0.0)
+                        nuevo_saldo = saldo_actual + pago.monto
+                        print(f"DEBUG CREAR PEDIDO: Incrementando saldo de {saldo_actual} a {nuevo_saldo}")
+                        
+                        result_update = metodos_pago_collection.update_one(
+                            {"_id": metodo_pago["_id"]},
+                            {"$set": {"saldo": nuevo_saldo}}
+                        )
+                        print(f"DEBUG CREAR PEDIDO: Resultado de actualización: {result_update.modified_count} documentos modificados")
+                    else:
+                        print(f"DEBUG CREAR PEDIDO: Método de pago '{pago.metodo}' no encontrado")
+                except Exception as e:
+                    print(f"DEBUG CREAR PEDIDO: Error al actualizar saldo: {e}")
+                    import traceback
+                    print(f"DEBUG CREAR PEDIDO: Traceback: {traceback.format_exc()}")
+    
+    return {"message": "Pedido creado correctamente", "id": pedido_id, "cliente_nombre": pedido.cliente_nombre}
 
 @router.put("/subestados/")
 async def update_subestados(
