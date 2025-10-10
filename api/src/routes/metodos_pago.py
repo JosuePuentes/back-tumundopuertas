@@ -230,6 +230,49 @@ async def delete_metodo_pago(id: str):
         return {"message": "Método de pago eliminado correctamente"}
     raise HTTPException(status_code=404, detail="Método de pago no encontrado")
 
+@router.post("/{id}/deposito-simple")
+async def depositar_dinero_simple(id: str, request: DepositoRequest):
+    """Endpoint simplificado para depósito - solo para debug"""
+    print(f"DEBUG SIMPLE: Iniciando depósito simple para método {id}")
+    print(f"DEBUG SIMPLE: Request recibido: {request}")
+    
+    try:
+        # Validar ID básico
+        if not id or id == "undefined":
+            return {"error": "ID inválido", "id": id}
+        
+        # Verificar que el método existe
+        metodo = metodos_pago_collection.find_one({"_id": ObjectId(id)})
+        if not metodo:
+            return {"error": "Método no encontrado", "id": id}
+        
+        print(f"DEBUG SIMPLE: Método encontrado: {metodo.get('nombre', 'SIN_NOMBRE')}")
+        
+        # Solo incrementar el saldo (sin transacción por ahora)
+        result = metodos_pago_collection.update_one(
+            {"_id": ObjectId(id)},
+            {"$inc": {"saldo": request.monto}}
+        )
+        
+        print(f"DEBUG SIMPLE: Resultado update: {result.modified_count} documentos modificados")
+        
+        # Obtener el método actualizado
+        metodo_actualizado = metodos_pago_collection.find_one({"_id": ObjectId(id)})
+        
+        return {
+            "success": True,
+            "metodo": metodo_actualizado.get("nombre", "SIN_NOMBRE"),
+            "saldo_anterior": metodo.get("saldo", 0),
+            "saldo_nuevo": metodo_actualizado.get("saldo", 0),
+            "monto_depositado": request.monto
+        }
+        
+    except Exception as e:
+        print(f"DEBUG SIMPLE: Error: {e}")
+        import traceback
+        print(f"DEBUG SIMPLE: Traceback: {traceback.format_exc()}")
+        return {"error": str(e), "type": type(e).__name__}
+
 @router.post("/{id}/deposito", response_model=MetodoPago)
 async def depositar_dinero(id: str, request: DepositoRequest):
     """Depositar dinero en un método de pago"""
