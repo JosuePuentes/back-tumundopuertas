@@ -107,6 +107,7 @@ class RegistroPago(BaseModel):
     fecha: str   # ISO date
     monto: float
     estado: str  # "abonado", "pagado", "sin pago"
+    metodo: Optional[str] = None  # ID del método de pago
 
 
 class Pedido(BaseModel):
