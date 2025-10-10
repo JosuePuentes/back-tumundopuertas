@@ -6,8 +6,9 @@ from datetime import datetime
 class Transaccion(BaseModel):
     id: Optional[str] = Field(None, alias="_id")
     metodo_pago_id: str
-    tipo: str  # "carga" o "transferencia"
+    tipo: str  # "deposito" o "transferencia"
     monto: float
+    concepto: Optional[str] = None  # Concepto de la transacción
     fecha: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Body
-from typing import List
+from typing import List, Optional
 from bson import ObjectId
 from ..config.mongodb import db
 from ..models.pagosmodels import MetodoPago
@@ -18,6 +18,14 @@ def object_id_to_str(data):
 
 class MontoRequest(BaseModel):
     monto: float
+
+class DepositoRequest(BaseModel):
+    monto: float
+    concepto: Optional[str] = None
+
+class TransferenciaRequest(BaseModel):
+    monto: float
+    concepto: Optional[str] = None
 
 @router.post("/", response_model=MetodoPago)
 async def create_metodo_pago(metodo_pago: MetodoPago):
@@ -219,8 +227,9 @@ async def delete_metodo_pago(id: str):
         return {"message": "Método de pago eliminado correctamente"}
     raise HTTPException(status_code=404, detail="Método de pago no encontrado")
 
-@router.post("/{id}/cargar", response_model=MetodoPago)
-async def cargar_dinero(id: str, request: MontoRequest):
+@router.post("/{id}/deposito", response_model=MetodoPago)
+async def depositar_dinero(id: str, request: DepositoRequest):
+    """Depositar dinero en un método de pago"""
     # Incrementar el saldo
     updated_metodo = metodos_pago_collection.find_one_and_update(
         {"_id": ObjectId(id)},
@@ -230,11 +239,12 @@ async def cargar_dinero(id: str, request: MontoRequest):
     if not updated_metodo:
         raise HTTPException(status_code=404, detail="Método de pago no encontrado")
 
-    # Registrar la transaccion
+    # Registrar la transacción
     transaccion = Transaccion(
         metodo_pago_id=id,
-        tipo="carga",
-        monto=request.monto
+        tipo="deposito",
+        monto=request.monto,
+        concepto=request.concepto
     )
     transaccion_dict = transaccion.dict(by_alias=True)
     if "id" in transaccion_dict:
@@ -244,7 +254,8 @@ async def cargar_dinero(id: str, request: MontoRequest):
     return object_id_to_str(updated_metodo)
 
 @router.post("/{id}/transferir", response_model=MetodoPago)
-async def transferir_dinero(id: str, request: MontoRequest):
+async def transferir_dinero(id: str, request: TransferenciaRequest):
+    """Transferir dinero desde un método de pago"""
     # Verificar saldo suficiente
     metodo = metodos_pago_collection.find_one({"_id": ObjectId(id)})
     if not metodo:
@@ -259,11 +270,12 @@ async def transferir_dinero(id: str, request: MontoRequest):
         return_document=True
     )
 
-    # Registrar la transaccion
+    # Registrar la transacción
     transaccion = Transaccion(
         metodo_pago_id=id,
         tipo="transferencia",
-        monto=request.monto
+        monto=request.monto,
+        concepto=request.concepto
     )
     transaccion_dict = transaccion.dict(by_alias=True)
     if "id" in transaccion_dict:
@@ -278,7 +290,14 @@ async def get_all_metodos_pago_all():
     metodos = list(metodos_pago_collection.find())
     return [object_id_to_str(metodo) for metodo in metodos]
 
-@router.get("/{id}/transacciones", response_model=List[Transaccion])
-async def get_transacciones(id: str):
-    transacciones = list(transacciones_collection.find({"metodo_pago_id": id}))
+@router.get("/historial-completo", response_model=List[Transaccion])
+async def get_historial_completo():
+    """Obtener el historial completo de todas las transacciones"""
+    transacciones = list(transacciones_collection.find().sort("fecha", -1))
+    return [object_id_to_str(t) for t in transacciones]
+
+@router.get("/{id}/historial", response_model=List[Transaccion])
+async def get_historial_transacciones(id: str):
+    """Obtener el historial completo de transacciones de un método de pago"""
+    transacciones = list(transacciones_collection.find({"metodo_pago_id": id}).sort("fecha", -1))
     return [object_id_to_str(t) for t in transacciones]
