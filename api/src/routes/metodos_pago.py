@@ -230,6 +230,10 @@ async def delete_metodo_pago(id: str):
 @router.post("/{id}/deposito", response_model=MetodoPago)
 async def depositar_dinero(id: str, request: DepositoRequest):
     """Depositar dinero en un método de pago"""
+    # Validar ID
+    if not id or id == "undefined":
+        raise HTTPException(status_code=400, detail="ID de método de pago inválido")
+    
     # Incrementar el saldo
     updated_metodo = metodos_pago_collection.find_one_and_update(
         {"_id": ObjectId(id)},
@@ -256,6 +260,10 @@ async def depositar_dinero(id: str, request: DepositoRequest):
 @router.post("/{id}/transferir", response_model=MetodoPago)
 async def transferir_dinero(id: str, request: TransferenciaRequest):
     """Transferir dinero desde un método de pago"""
+    # Validar ID
+    if not id or id == "undefined":
+        raise HTTPException(status_code=400, detail="ID de método de pago inválido")
+    
     # Verificar saldo suficiente
     metodo = metodos_pago_collection.find_one({"_id": ObjectId(id)})
     if not metodo:
