@@ -639,20 +639,35 @@ async def actualizar_pago(
         # Si hay un método de pago y un monto, incrementar el saldo del método
         if metodo and monto is not None and monto > 0:
             print(f"DEBUG PAGO: Incrementando saldo del método '{metodo}' en {monto}")
+            print(f"DEBUG PAGO: Tipo de metodo: {type(metodo).__name__}")
             try:
                 # Buscar el método de pago por _id
                 metodo_pago = metodos_pago_collection.find_one({"_id": ObjectId(metodo)})
+                print(f"DEBUG PAGO: Método encontrado: {metodo_pago is not None}")
                 if metodo_pago:
-                    nuevo_saldo = metodo_pago.get("saldo", 0.0) + monto
-                    metodos_pago_collection.update_one(
+                    saldo_actual = metodo_pago.get("saldo", 0.0)
+                    nuevo_saldo = saldo_actual + monto
+                    print(f"DEBUG PAGO: Saldo actual: {saldo_actual}, Nuevo saldo: {nuevo_saldo}")
+                    
+                    result_update = metodos_pago_collection.update_one(
                         {"_id": metodo_pago["_id"]},
                         {"$set": {"saldo": nuevo_saldo}}
                     )
-                    print(f"DEBUG PAGO: Saldo actualizado de {metodo_pago.get('saldo', 0.0)} a {nuevo_saldo}")
+                    print(f"DEBUG PAGO: Resultado de actualización: {result_update.modified_count} documentos modificados")
+                    
+                    # Verificar que se actualizó correctamente
+                    metodo_verificado = metodos_pago_collection.find_one({"_id": ObjectId(metodo)})
+                    print(f"DEBUG PAGO: Saldo verificado después de actualizar: {metodo_verificado.get('saldo', 'ERROR')}")
                 else:
                     print(f"DEBUG PAGO: Método de pago '{metodo}' no encontrado")
+                    # Listar todos los métodos disponibles para debug
+                    todos_metodos = list(metodos_pago_collection.find({}, {"_id": 1, "nombre": 1}))
+                    print(f"DEBUG PAGO: Métodos disponibles: {[(str(m['_id']), m.get('nombre', 'SIN_NOMBRE')) for m in todos_metodos]}")
             except Exception as e:
                 print(f"DEBUG PAGO: Error al actualizar saldo: {e}")
+                print(f"DEBUG PAGO: Tipo de error: {type(e).__name__}")
+                import traceback
+                print(f"DEBUG PAGO: Traceback: {traceback.format_exc()}")
                 # No lanzamos excepción para no interrumpir el flujo principal
 
     except Exception as e:
