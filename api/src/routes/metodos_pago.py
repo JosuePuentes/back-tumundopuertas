@@ -313,8 +313,9 @@ async def depositar_dinero(id: str, request: DepositoRequest):
             concepto=request.concepto
         )
         transaccion_dict = transaccion.dict(by_alias=True)
-        if "id" in transaccion_dict:
-            del transaccion_dict["id"]
+        # No eliminar el campo _id, dejar que MongoDB genere uno automático
+        if "_id" in transaccion_dict and transaccion_dict["_id"] is None:
+            del transaccion_dict["_id"]
         
         print(f"DEBUG DEPOSITO: Insertando transacción: {transaccion_dict}")
         transacciones_collection.insert_one(transaccion_dict)
@@ -364,8 +365,10 @@ async def transferir_dinero(id: str, request: TransferenciaRequest):
         concepto=request.concepto
     )
     transaccion_dict = transaccion.dict(by_alias=True)
-    if "id" in transaccion_dict:
-        del transaccion_dict["id"]
+    # No eliminar el campo _id, dejar que MongoDB genere uno automático
+    if "_id" in transaccion_dict and transaccion_dict["_id"] is None:
+        del transaccion_dict["_id"]
+    
     transacciones_collection.insert_one(transaccion_dict)
 
     return object_id_to_str(updated_metodo)
