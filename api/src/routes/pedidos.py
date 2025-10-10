@@ -497,8 +497,56 @@ async def actualizar_estado_general_pedido(
 
 
 # Endpoint para terminar una asignación de artículo dentro de un pedido
-@router.put("/asignacion/terminar/")
+@router.put("/asignacion/terminar")
 async def terminar_asignacion_articulo(
+    pedido_id: str = Body(...),
+    orden: int = Body(...),
+    item_id: str = Body(...),
+    empleado_id: str = Body(...),
+    estado: str = Body(...),  # Debe ser "terminado"
+    fecha_fin: str = Body(...),
+):
+    """Endpoint para terminar una asignación de artículo"""
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"pedido_id no es un ObjectId válido: {str(e)}")
+    
+    pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    seguimiento = pedido.get("seguimiento", [])
+    actualizado = False
+    
+    for sub in seguimiento:
+        if int(sub.get("orden", -1)) == orden:
+            asignaciones = sub.get("asignaciones_articulos", [])
+            for asignacion in asignaciones:
+                if asignacion.get("itemId") == item_id and asignacion.get("empleadoId") == empleado_id:
+                    asignacion["estado"] = estado
+                    asignacion["fecha_fin"] = fecha_fin
+                    actualizado = True
+                    break
+            break
+    
+    if not actualizado:
+        raise HTTPException(status_code=404, detail="Asignación no encontrada")
+    
+    # Actualizar el pedido en la base de datos
+    result = pedidos_collection.update_one(
+        {"_id": pedido_obj_id},
+        {"$set": {"seguimiento": seguimiento}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=500, detail="Error al actualizar el pedido")
+    
+    return {"message": "Asignación terminada correctamente"}
+
+# Endpoint alternativo con barra al final (para compatibilidad)
+@router.put("/asignacion/terminar/")
+async def terminar_asignacion_articulo_alt(
     pedido_id: str = Body(...),
     orden: int = Body(...),
     item_id: str = Body(...),
@@ -527,16 +575,20 @@ async def terminar_asignacion_articulo(
             break
     if not actualizado:
         raise HTTPException(status_code=404, detail="Asignación no encontrada para actualizar")
+    
     try:
         result = pedidos_collection.update_one(
             {"_id": pedido_obj_id},
             {"$set": {"seguimiento": seguimiento}}
         )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=500, detail="Error al actualizar el pedido")
+        
+        return {"message": "Asignación terminada correctamente"}
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado al actualizar")
-    return {"message": "Asignación de artículo actualizada correctamente"}
+        raise HTTPException(status_code=500, detail=f"Error al actualizar: {str(e)}")
 @router.get("/estado/")
 async def get_pedidos_por_estados(
     estado_general: List[str] = Query(...),
