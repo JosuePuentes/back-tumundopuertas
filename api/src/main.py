@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -15,6 +15,7 @@ from .routes.metodos_pago import router as metodos_pago_router
 from dotenv import load_dotenv
 from passlib.context import CryptContext
 import os
+import traceback
 
 # Cargar variables de entorno
 dotenv_path = os.path.join(os.path.dirname(__file__), '../../.env')
@@ -72,6 +73,23 @@ app.add_middleware(
     ],
 )
 
+# Middleware para manejo de errores
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        print(f"ERROR MIDDLEWARE: {str(e)}")
+        print(f"ERROR MIDDLEWARE TRACEBACK: {traceback.format_exc()}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": f"Error interno del servidor: {str(e)}",
+                "error_type": type(e).__name__
+            }
+        )
+
 # Endpoint de prueba para verificar CORS
 @app.get("/health")
 async def health_check():
@@ -94,6 +112,11 @@ async def test_cors_put():
 @app.options("/{path:path}")
 async def options_handler(path: str):
     return {"message": "OK"}
+
+# Endpoint de prueba para métodos de pago
+@app.post("/test-metodos-pago")
+async def test_metodos_pago():
+    return {"message": "Endpoint de prueba funcionando", "status": "ok"}
 
 # Incluir routers segmentados
 app.include_router(auth_router, prefix="/auth", tags=["Autenticación"])

@@ -236,32 +236,58 @@ async def depositar_dinero(id: str, request: DepositoRequest):
     print(f"DEBUG DEPOSITO: Iniciando depósito para método {id}")
     print(f"DEBUG DEPOSITO: Request: {request.dict()}")
     
-    # Validar ID
-    if not id or id == "undefined":
-        raise HTTPException(status_code=400, detail="ID de método de pago inválido")
-    
-    # Incrementar el saldo
-    updated_metodo = metodos_pago_collection.find_one_and_update(
-        {"_id": ObjectId(id)},
-        {"$inc": {"saldo": request.monto}},
-        return_document=True
-    )
-    if not updated_metodo:
-        raise HTTPException(status_code=404, detail="Método de pago no encontrado")
+    try:
+        # Validar ID
+        if not id or id == "undefined":
+            print(f"DEBUG DEPOSITO: ID inválido: {id}")
+            raise HTTPException(status_code=400, detail="ID de método de pago inválido")
+        
+        # Verificar que el método existe
+        metodo = metodos_pago_collection.find_one({"_id": ObjectId(id)})
+        if not metodo:
+            print(f"DEBUG DEPOSITO: Método no encontrado")
+            raise HTTPException(status_code=404, detail="Método de pago no encontrado")
+        
+        print(f"DEBUG DEPOSITO: Método encontrado: {metodo.get('nombre', 'SIN_NOMBRE')}")
+        
+        # Incrementar el saldo
+        updated_metodo = metodos_pago_collection.find_one_and_update(
+            {"_id": ObjectId(id)},
+            {"$inc": {"saldo": request.monto}},
+            return_document=True
+        )
+        print(f"DEBUG DEPOSITO: Método actualizado: {updated_metodo is not None}")
+        
+        if not updated_metodo:
+            print(f"DEBUG DEPOSITO: Error al actualizar método")
+            raise HTTPException(status_code=500, detail="Error al actualizar método de pago")
 
-    # Registrar la transacción
-    transaccion = Transaccion(
-        metodo_pago_id=id,
-        tipo="deposito",
-        monto=request.monto,
-        concepto=request.concepto
-    )
-    transaccion_dict = transaccion.dict(by_alias=True)
-    if "id" in transaccion_dict:
-        del transaccion_dict["id"]
-    transacciones_collection.insert_one(transaccion_dict)
+        # Registrar la transacción
+        transaccion = Transaccion(
+            metodo_pago_id=id,
+            tipo="deposito",
+            monto=request.monto,
+            concepto=request.concepto
+        )
+        transaccion_dict = transaccion.dict(by_alias=True)
+        if "id" in transaccion_dict:
+            del transaccion_dict["id"]
+        
+        print(f"DEBUG DEPOSITO: Insertando transacción: {transaccion_dict}")
+        transacciones_collection.insert_one(transaccion_dict)
+        print(f"DEBUG DEPOSITO: Transacción insertada correctamente")
 
-    return object_id_to_str(updated_metodo)
+        result = object_id_to_str(updated_metodo)
+        print(f"DEBUG DEPOSITO: Retornando resultado: {result.get('nombre', 'SIN_NOMBRE')}")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"DEBUG DEPOSITO: Error inesperado: {e}")
+        import traceback
+        print(f"DEBUG DEPOSITO: Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al depositar: {str(e)}")
 
 @router.post("/{id}/transferir", response_model=MetodoPago)
 async def transferir_dinero(id: str, request: TransferenciaRequest):
