@@ -929,3 +929,39 @@ async def debug_venta_diaria_simple():
         
     except Exception as e:
         return {"error": str(e), "type": type(e).__name__}
+
+@router.get("/{pedido_id}/datos-impresion")
+async def get_datos_impresion(pedido_id: str, current_user = Depends(get_current_user)):
+    """Retornar datos del pedido para impresión"""
+    try:
+        # Buscar el pedido por ID
+        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Convertir ObjectId a string
+        pedido["_id"] = str(pedido["_id"])
+        
+        # Calcular saldo pendiente
+        total_pedido = sum(item.get("precio", 0) * item.get("cantidad", 0) for item in pedido.get("items", []))
+        total_abonado = pedido.get("total_abonado", 0)
+        saldo_pendiente = total_pedido - total_abonado
+        
+        return {
+            "pedido": pedido,
+            "cliente": {
+                "nombre": pedido.get("cliente_nombre", ""),
+                "id": pedido.get("cliente_id", "")
+            },
+            "items": pedido.get("items", []),
+            "pagos": pedido.get("historial_pagos", []),
+            "total": total_pedido,
+            "total_abonado": total_abonado,
+            "saldo_pendiente": saldo_pendiente,
+            "fecha_creacion": pedido.get("fecha_creacion", ""),
+            "estado_general": pedido.get("estado_general", ""),
+            "pago": pedido.get("pago", "")
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener datos de impresión: {str(e)}")

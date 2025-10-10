@@ -11,6 +11,7 @@ from .routes.inventario import router as inventario_router
 from .routes.users import router as usuarios_router
 from .routes.files import router as files_router
 from .routes.metodos_pago import router as metodos_pago_router
+from .routes.formatos_impresion import router as formatos_impresion_router
 
 from dotenv import load_dotenv
 from passlib.context import CryptContext
@@ -127,3 +128,4 @@ app.include_router(inventario_router, prefix="/inventario", tags=["Inventario"])
 app.include_router(usuarios_router, prefix="/usuarios", tags=["Usuarios"])
 app.include_router(files_router, prefix="/files", tags=["Archivos"])
 app.include_router(metodos_pago_router, prefix="/metodos-pago", tags=["Metodos de Pago"])
+app.include_router(formatos_impresion_router, prefix="/api", tags=["Formatos de Impresión"])
