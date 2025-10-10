@@ -507,30 +507,56 @@ async def terminar_asignacion_articulo(
     fecha_fin: str = Body(...),
 ):
     """Endpoint para terminar una asignación de artículo"""
+    print(f"DEBUG TERMINAR: Iniciando terminación de asignación")
+    print(f"DEBUG TERMINAR: pedido_id={pedido_id}, orden={orden}, item_id={item_id}, empleado_id={empleado_id}")
+    print(f"DEBUG TERMINAR: estado={estado}, fecha_fin={fecha_fin}")
+    
     try:
         pedido_obj_id = ObjectId(pedido_id)
     except Exception as e:
+        print(f"DEBUG TERMINAR: Error en ObjectId: {e}")
         raise HTTPException(status_code=400, detail=f"pedido_id no es un ObjectId válido: {str(e)}")
     
     pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
     if not pedido:
+        print(f"DEBUG TERMINAR: Pedido no encontrado")
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    print(f"DEBUG TERMINAR: Pedido encontrado: {pedido.get('cliente_nombre', 'SIN_NOMBRE')}")
     
     seguimiento = pedido.get("seguimiento", [])
     actualizado = False
+    asignacion_encontrada = None
     
     for sub in seguimiento:
         if int(sub.get("orden", -1)) == orden:
+            print(f"DEBUG TERMINAR: Encontrado subestado con orden {orden}")
             asignaciones = sub.get("asignaciones_articulos", [])
+            print(f"DEBUG TERMINAR: Asignaciones encontradas: {len(asignaciones)}")
+            
             for asignacion in asignaciones:
+                print(f"DEBUG TERMINAR: Revisando asignación: itemId={asignacion.get('itemId')}, empleadoId={asignacion.get('empleadoId')}")
                 if asignacion.get("itemId") == item_id and asignacion.get("empleadoId") == empleado_id:
+                    print(f"DEBUG TERMINAR: Asignación encontrada, estado actual: {asignacion.get('estado')}")
+                    
+                    # Actualizar todos los campos necesarios
                     asignacion["estado"] = estado
+                    asignacion["estado_subestado"] = "terminado"  # Cambiar estado_subestado
                     asignacion["fecha_fin"] = fecha_fin
+                    
+                    # Guardar copia para respuesta
+                    asignacion_encontrada = asignacion.copy()
                     actualizado = True
+                    
+                    print(f"DEBUG TERMINAR: Asignación actualizada:")
+                    print(f"  - estado: {asignacion.get('estado')}")
+                    print(f"  - estado_subestado: {asignacion.get('estado_subestado')}")
+                    print(f"  - fecha_fin: {asignacion.get('fecha_fin')}")
                     break
             break
     
     if not actualizado:
+        print(f"DEBUG TERMINAR: Asignación no encontrada")
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     
     # Actualizar el pedido en la base de datos
@@ -539,10 +565,25 @@ async def terminar_asignacion_articulo(
         {"$set": {"seguimiento": seguimiento}}
     )
     
+    print(f"DEBUG TERMINAR: Resultado de actualización: {result.modified_count} documentos modificados")
+    
     if result.modified_count == 0:
+        print(f"DEBUG TERMINAR: Error al actualizar el pedido")
         raise HTTPException(status_code=500, detail="Error al actualizar el pedido")
     
-    return {"message": "Asignación terminada correctamente"}
+    print(f"DEBUG TERMINAR: Asignación terminada exitosamente")
+    return {
+        "message": "Asignación terminada correctamente",
+        "success": True,
+        "asignacion_actualizada": asignacion_encontrada,
+        "pedido_id": pedido_id,
+        "orden": orden,
+        "item_id": item_id,
+        "empleado_id": empleado_id,
+        "estado_anterior": "en_proceso",
+        "estado_nuevo": "terminado",
+        "fecha_fin": fecha_fin
+    }
 
 # Endpoint alternativo con barra al final (para compatibilidad)
 @router.put("/asignacion/terminar/")
