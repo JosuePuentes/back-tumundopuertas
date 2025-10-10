@@ -11,9 +11,12 @@ metodos_pago_collection = db["metodos_pago"]
 transacciones_collection = db["transacciones"]
 
 def object_id_to_str(data):
-    if "_id" in data:
-        data["id"] = str(data["_id"])
-        del data["_id"]
+    if isinstance(data, dict):
+        data_copy = data.copy()
+        if "_id" in data_copy:
+            data_copy["id"] = str(data_copy["_id"])
+            del data_copy["_id"]
+        return data_copy
     return data
 
 class MontoRequest(BaseModel):
@@ -230,6 +233,9 @@ async def delete_metodo_pago(id: str):
 @router.post("/{id}/deposito", response_model=MetodoPago)
 async def depositar_dinero(id: str, request: DepositoRequest):
     """Depositar dinero en un método de pago"""
+    print(f"DEBUG DEPOSITO: Iniciando depósito para método {id}")
+    print(f"DEBUG DEPOSITO: Request: {request.dict()}")
+    
     # Validar ID
     if not id or id == "undefined":
         raise HTTPException(status_code=400, detail="ID de método de pago inválido")
@@ -260,6 +266,9 @@ async def depositar_dinero(id: str, request: DepositoRequest):
 @router.post("/{id}/transferir", response_model=MetodoPago)
 async def transferir_dinero(id: str, request: TransferenciaRequest):
     """Transferir dinero desde un método de pago"""
+    print(f"DEBUG TRANSFERIR: Iniciando transferencia para método {id}")
+    print(f"DEBUG TRANSFERIR: Request: {request.dict()}")
+    
     # Validar ID
     if not id or id == "undefined":
         raise HTTPException(status_code=400, detail="ID de método de pago inválido")
@@ -307,5 +316,15 @@ async def get_historial_completo():
 @router.get("/{id}/historial", response_model=List[Transaccion])
 async def get_historial_transacciones(id: str):
     """Obtener el historial completo de transacciones de un método de pago"""
-    transacciones = list(transacciones_collection.find({"metodo_pago_id": id}).sort("fecha", -1))
-    return [object_id_to_str(t) for t in transacciones]
+    print(f"DEBUG HISTORIAL: Buscando historial para método {id}")
+    try:
+        transacciones = list(transacciones_collection.find({"metodo_pago_id": id}).sort("fecha", -1))
+        print(f"DEBUG HISTORIAL: Encontradas {len(transacciones)} transacciones")
+        result = [object_id_to_str(t) for t in transacciones]
+        print(f"DEBUG HISTORIAL: Resultado procesado: {len(result)} elementos")
+        return result
+    except Exception as e:
+        print(f"DEBUG HISTORIAL: Error: {e}")
+        import traceback
+        print(f"DEBUG HISTORIAL: Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener historial: {str(e)}")
