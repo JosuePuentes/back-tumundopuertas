@@ -553,6 +553,58 @@ async def get_datos_reales_dashboard():
                     "modulo": {"$ne": "desconocido"}
                 }
             },
+            # Lookup para obtener las imágenes del item desde inventario
+            {
+                "$lookup": {
+                    "from": "inventario",
+                    "localField": "item_id",
+                    "foreignField": "_id",
+                    "as": "item_info"
+                }
+            },
+            {
+                "$addFields": {
+                    "imagenes_item": {
+                        "$cond": {
+                            "if": {"$gt": [{"$size": "$item_info"}, 0]},
+                            "then": {
+                                "$filter": {
+                                    "input": {
+                                        "$concatArrays": [
+                                            {"$ifNull": ["$item_info.imagen1", []]},
+                                            {"$ifNull": ["$item_info.imagen2", []]},
+                                            {"$ifNull": ["$item_info.imagen3", []]}
+                                        ]
+                                    },
+                                    "cond": {"$ne": ["$$this", ""]}
+                                }
+                            },
+                            "else": []
+                        }
+                    }
+                }
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "cliente_nombre": 1,
+                    "pedido_id": 1,
+                    "item_id": 1,
+                    "empleado_id": 1,
+                    "empleado_nombre": 1,
+                    "modulo": 1,
+                    "estado": 1,
+                    "estado_subestado": 1,
+                    "fecha_asignacion": 1,
+                    "fecha_fin": 1,
+                    "descripcionitem": 1,
+                    "detalleitem": 1,
+                    "costo_produccion": 1,
+                    "imagenes": 1,
+                    "imagenes_item": 1,  # Nuevas imágenes del item
+                    "orden": 1
+                }
+            },
             {
                 "$sort": {"orden": 1, "fecha_asignacion": -1}
             }
