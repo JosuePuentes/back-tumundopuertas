@@ -1662,18 +1662,41 @@ async def get_venta_diaria(
                 print(f"DEBUG VENTA DIARIA: Fechas parseadas - inicio: {inicio}, fin: {fin}")
                 
                 # Usar $expr para comparación de fechas más flexible
+                # Manejar el caso donde historial_pagos.fecha puede ser un array
                 filtro_fecha = {
                     "$expr": {
                         "$and": [
                             {
                                 "$gte": [
-                                    {"$dateToString": {"format": "%Y-%m-%d", "date": "$historial_pagos.fecha"}},
+                                    {
+                                        "$dateToString": {
+                                            "format": "%Y-%m-%d", 
+                                            "date": {
+                                                "$cond": {
+                                                    "if": {"$isArray": "$historial_pagos.fecha"},
+                                                    "then": {"$arrayElemAt": ["$historial_pagos.fecha", 0]},
+                                                    "else": "$historial_pagos.fecha"
+                                                }
+                                            }
+                                        }
+                                    },
                                     fecha_inicio
                                 ]
                             },
                             {
                                 "$lt": [
-                                    {"$dateToString": {"format": "%Y-%m-%d", "date": "$historial_pagos.fecha"}},
+                                    {
+                                        "$dateToString": {
+                                            "format": "%Y-%m-%d", 
+                                            "date": {
+                                                "$cond": {
+                                                    "if": {"$isArray": "$historial_pagos.fecha"},
+                                                    "then": {"$arrayElemAt": ["$historial_pagos.fecha", 0]},
+                                                    "else": "$historial_pagos.fecha"
+                                                }
+                                            }
+                                        }
+                                    },
                                     fecha_fin
                                 ]
                             }
