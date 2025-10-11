@@ -3,14 +3,13 @@ from typing import List, Optional
 from datetime import datetime
 from bson import ObjectId
 from ..auth.auth import get_current_user
-from ..database import get_database
+from ..config.mongodb import db
 from ..models.authmodels import Empleado
 
 router = APIRouter()
 
-# Obtener la base de datos
+# Obtener las colecciones
 def get_collections():
-    db = get_database()
     return {
         "asignaciones": db["asignaciones"],
         "empleados": db["empleados"],
