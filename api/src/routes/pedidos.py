@@ -25,6 +25,51 @@ async def test_terminar_endpoint():
         "timestamp": datetime.now().isoformat()
     }
 
+@router.get("/debug-seguimiento/{pedido_id}")
+async def debug_seguimiento_pedido(pedido_id: str):
+    """Endpoint para debuggear la estructura de seguimiento de un pedido"""
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"pedido_id no es un ObjectId válido: {str(e)}")
+    
+    pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    seguimiento = pedido.get("seguimiento", [])
+    
+    procesos_info = []
+    for i, sub in enumerate(seguimiento):
+        proceso_info = {
+            "indice": i,
+            "orden": sub.get("orden"),
+            "estado": sub.get("estado"),
+            "nombre": sub.get("nombre", "SIN_NOMBRE"),
+            "asignaciones_count": len(sub.get("asignaciones_articulos", [])),
+            "asignaciones": []
+        }
+        
+        # Detalles de asignaciones
+        for j, asignacion in enumerate(sub.get("asignaciones_articulos", [])):
+            asignacion_info = {
+                "indice": j,
+                "itemId": asignacion.get("itemId"),
+                "empleadoId": asignacion.get("empleadoId"),
+                "estado": asignacion.get("estado"),
+                "estado_subestado": asignacion.get("estado_subestado")
+            }
+            proceso_info["asignaciones"].append(asignacion_info)
+        
+        procesos_info.append(proceso_info)
+    
+    return {
+        "pedido_id": pedido_id,
+        "cliente_nombre": pedido.get("cliente_nombre", "SIN_NOMBRE"),
+        "total_procesos": len(seguimiento),
+        "procesos": procesos_info
+    }
+
 @router.put("/test-terminar-put")
 async def test_terminar_put_endpoint():
     """Endpoint de prueba PUT para verificar CORS"""
