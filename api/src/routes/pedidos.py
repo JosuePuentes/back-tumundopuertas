@@ -1124,6 +1124,32 @@ async def test_terminar():
     """Endpoint de prueba para verificar que el servidor responde"""
     return {"message": "Endpoint de terminar funcionando", "status": "ok"}
 
+# Endpoint de debug para ver empleados
+@router.get("/debug-empleados")
+async def debug_empleados():
+    """Endpoint para ver todos los empleados y sus identificadores"""
+    try:
+        empleados = list(empleados_collection.find({}, {
+            "_id": 1,
+            "identificador": 1,
+            "nombreCompleto": 1,
+            "pin": 1
+        }))
+        
+        # Convertir ObjectId a string
+        for empleado in empleados:
+            empleado["_id"] = str(empleado["_id"])
+            # Ocultar PIN por seguridad
+            if "pin" in empleado and empleado["pin"]:
+                empleado["pin"] = "***"
+        
+        return {
+            "total_empleados": len(empleados),
+            "empleados": empleados
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 # Endpoint para terminar una asignación de artículo dentro de un pedido
 @router.put("/asignacion/terminar")
 async def terminar_asignacion_articulo(
