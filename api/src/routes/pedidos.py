@@ -2015,6 +2015,66 @@ async def eliminar_pedido_prueba2():
         print(f"ERROR ELIMINAR: {str(e)}")
         return {"error": str(e), "type": type(e).__name__}
 
+@router.get("/debug-todas-fechas")
+async def debug_todas_fechas():
+    """Endpoint para ver todas las fechas de abonos"""
+    try:
+        pipeline = [
+            {"$unwind": "$historial_pagos"},
+            {
+                "$project": {
+                    "_id": 0,
+                    "pedido_id": "$_id",
+                    "cliente_nombre": "$cliente_nombre",
+                    "fecha": "$historial_pagos.fecha",
+                    "monto": "$historial_pagos.monto",
+                    "metodo": "$historial_pagos.metodo",
+                    "fecha_tipo": {"$type": "$historial_pagos.fecha"},
+                    "fecha_string": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%d", 
+                            "date": "$historial_pagos.fecha"
+                        }
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$fecha_string",
+                    "total_monto": {"$sum": "$monto"},
+                    "cantidad_abonos": {"$sum": 1},
+                    "ejemplos": {"$push": {
+                        "pedido_id": "$pedido_id",
+                        "cliente": "$cliente_nombre",
+                        "monto": "$monto",
+                        "metodo": "$metodo"
+                    }}
+                }
+            },
+            {"$sort": {"_id": -1}},
+            {"$limit": 20}
+        ]
+        
+        fechas_agrupadas = list(pedidos_collection.aggregate(pipeline))
+        
+        # Convertir ObjectId a string
+        for grupo in fechas_agrupadas:
+            for ejemplo in grupo.get("ejemplos", []):
+                ejemplo["pedido_id"] = str(ejemplo["pedido_id"])
+        
+        return {
+            "total_fechas_unicas": len(fechas_agrupadas),
+            "fechas_agrupadas": fechas_agrupadas,
+            "resumen": {
+                "total_general": sum(grupo["total_monto"] for grupo in fechas_agrupadas),
+                "fechas_con_abonos": [grupo["_id"] for grupo in fechas_agrupadas]
+            }
+        }
+        
+    except Exception as e:
+        print(f"ERROR DEBUG FECHAS: {str(e)}")
+        return {"error": str(e), "type": type(e).__name__}
+
 @router.get("/{pedido_id}/datos-impresion")
 async def get_datos_impresion(pedido_id: str, current_user = Depends(get_current_user)):
     """Retornar datos del pedido para impresión"""
