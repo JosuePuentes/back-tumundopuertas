@@ -603,9 +603,15 @@ async def terminar_asignacion_articulo(
         siguiente_orden = orden + 1
         proceso_siguiente = None
         
-        for sub in seguimiento:
-            if int(sub.get("orden", -1)) == siguiente_orden:
+        print(f"DEBUG TERMINAR: Buscando proceso siguiente con orden {siguiente_orden}")
+        print(f"DEBUG TERMINAR: Total de procesos en seguimiento: {len(seguimiento)}")
+        
+        for i, sub in enumerate(seguimiento):
+            orden_proceso = sub.get("orden", -1)
+            print(f"DEBUG TERMINAR: Proceso {i}: orden={orden_proceso}, estado={sub.get('estado', 'SIN_ESTADO')}")
+            if int(orden_proceso) == siguiente_orden:
                 proceso_siguiente = sub
+                print(f"DEBUG TERMINAR: Proceso siguiente encontrado: orden={siguiente_orden}")
                 break
         
         if proceso_siguiente and asignacion_terminada:
@@ -666,6 +672,17 @@ async def terminar_asignacion_articulo(
         raise HTTPException(status_code=500, detail="Error al actualizar el pedido")
     
     print(f"DEBUG TERMINAR: Asignación terminada exitosamente")
+    
+    # Información adicional para debug
+    debug_info = {
+        "proceso_actual_encontrado": proceso_actual is not None,
+        "asignacion_terminada_encontrada": asignacion_terminada is not None,
+        "proceso_siguiente_encontrado": proceso_siguiente is not None,
+        "siguiente_orden": siguiente_orden,
+        "asignaciones_restantes": len(proceso_actual.get("asignaciones_articulos", [])) if proceso_actual else 0
+    }
+    print(f"DEBUG TERMINAR: Info debug: {debug_info}")
+    
     return {
         "message": "Asignación terminada correctamente",
         "success": True,
@@ -679,7 +696,8 @@ async def terminar_asignacion_articulo(
         "fecha_fin": fecha_fin,
         "articulo_movido": proceso_siguiente is not None,
         "siguiente_proceso": siguiente_orden if proceso_siguiente else None,
-        "proceso_actual_vacio": len(proceso_actual.get("asignaciones_articulos", [])) == 0 if proceso_actual else False
+        "proceso_actual_vacio": len(proceso_actual.get("asignaciones_articulos", [])) == 0 if proceso_actual else False,
+        "debug_info": debug_info
     }
 
 # Endpoint alternativo con barra al final (para compatibilidad)
