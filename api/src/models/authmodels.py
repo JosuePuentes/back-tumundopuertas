@@ -64,6 +64,19 @@ class Empleado(BaseModel):
     permisos: List[str] = []
     nombreCompleto: Optional[str] = None
     identificador: Optional[str] = None
+    pin: Optional[str] = None  # PIN de 4 dígitos, opcional para empleados existentes
+
+class EmpleadoCreate(BaseModel):
+    permisos: List[str] = []
+    nombreCompleto: Optional[str] = None
+    identificador: Optional[str] = None
+    pin: str  # PIN obligatorio para nuevos empleados
+
+class EmpleadoUpdate(BaseModel):
+    permisos: Optional[List[str]] = None
+    nombreCompleto: Optional[str] = None
+    identificador: Optional[str] = None
+    pin: Optional[str] = None  # PIN opcional para actualizaciones
 
 class Cliente(BaseModel):
     nombre: str
