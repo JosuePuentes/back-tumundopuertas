@@ -1656,16 +1656,31 @@ async def get_venta_diaria(
         filtro_fecha = {}
         if fecha_inicio and fecha_fin:
             try:
-                inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+                # Crear fechas sin zona horaria para comparación más flexible
+                inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+                fin = datetime.strptime(fecha_fin, "%Y-%m-%d") + timedelta(days=1)
                 print(f"DEBUG VENTA DIARIA: Fechas parseadas - inicio: {inicio}, fin: {fin}")
                 
+                # Usar $expr para comparación de fechas más flexible
                 filtro_fecha = {
-                    "historial_pagos.fecha": {
-                        "$gte": inicio,
-                        "$lt": fin
+                    "$expr": {
+                        "$and": [
+                            {
+                                "$gte": [
+                                    {"$dateToString": {"format": "%Y-%m-%d", "date": "$historial_pagos.fecha"}},
+                                    fecha_inicio
+                                ]
+                            },
+                            {
+                                "$lt": [
+                                    {"$dateToString": {"format": "%Y-%m-%d", "date": "$historial_pagos.fecha"}},
+                                    fecha_fin
+                                ]
+                            }
+                        ]
                     }
                 }
+                print(f"DEBUG VENTA DIARIA: Filtro construido: {filtro_fecha}")
             except ValueError as e:
                 print(f"ERROR VENTA DIARIA: Error parsing fechas: {e}")
                 raise HTTPException(status_code=400, detail="Formato de fecha inválido, use YYYY-MM-DD")
