@@ -1776,6 +1776,63 @@ async def debug_venta_diaria_simple():
     except Exception as e:
         return {"error": str(e), "type": type(e).__name__}
 
+@router.get("/debug-venta-diaria-fecha")
+async def debug_venta_diaria_fecha(
+    fecha_inicio: str = Query(..., description="Fecha inicio en formato YYYY-MM-DD"),
+    fecha_fin: str = Query(..., description="Fecha fin en formato YYYY-MM-DD"),
+):
+    """Endpoint de debug para probar el filtro de fechas"""
+    try:
+        print(f"DEBUG VENTA DIARIA: Procesando fechas {fecha_inicio} a {fecha_fin}")
+        
+        # Probar el parsing de fechas
+        inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+        
+        print(f"DEBUG VENTA DIARIA: Fechas parseadas - inicio: {inicio}, fin: {fin}")
+        
+        # Probar la consulta simple
+        pipeline_simple = [
+            {"$unwind": "$historial_pagos"},
+            {
+                "$match": {
+                    "$expr": {
+                        "$and": [
+                            { "$gte": [ { "$toDate": "$historial_pagos.fecha" }, inicio ] },
+                            { "$lt": [ { "$toDate": "$historial_pagos.fecha" }, fin ] }
+                        ]
+                    }
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "pedido_id": "$_id",
+                    "cliente_nombre": "$cliente_nombre",
+                    "fecha": "$historial_pagos.fecha",
+                    "monto": "$historial_pagos.monto",
+                    "metodo": "$historial_pagos.metodo"
+                }
+            }
+        ]
+        
+        print(f"DEBUG VENTA DIARIA: Ejecutando pipeline simple")
+        resultado = list(pedidos_collection.aggregate(pipeline_simple))
+        print(f"DEBUG VENTA DIARIA: Encontrados {len(resultado)} registros")
+        
+        return {
+            "fecha_inicio": fecha_inicio,
+            "fecha_fin": fecha_fin,
+            "inicio_parsed": str(inicio),
+            "fin_parsed": str(fin),
+            "total_registros": len(resultado),
+            "registros": resultado[:5]  # Solo los primeros 5 para debug
+        }
+        
+    except Exception as e:
+        print(f"ERROR DEBUG VENTA DIARIA: {str(e)}")
+        return {"error": str(e), "type": type(e).__name__}
+
 @router.get("/{pedido_id}/datos-impresion")
 async def get_datos_impresion(pedido_id: str, current_user = Depends(get_current_user)):
     """Retornar datos del pedido para impresión"""
