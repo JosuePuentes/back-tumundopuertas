@@ -1668,8 +1668,15 @@ async def get_venta_diaria(
                         "$match": {
                             "$expr": {
                                 "$or": [
-                                    {"$eq": ["$_id", {"$toObjectId": "$$metodo_id"}]},
-                                    {"$eq": [{"$toString": "$_id"}, "$$metodo_id"]}
+                                    {
+                                        "$and": [
+                                            {"$ne": ["$$metodo_id", "None"]},
+                                            {"$ne": ["$$metodo_id", null]},
+                                            {"$eq": ["$_id", {"$toObjectId": "$$metodo_id"}]}
+                                        ]
+                                    },
+                                    {"$eq": [{"$toString": "$_id"}, "$$metodo_id"]},
+                                    {"$eq": ["$nombre", "$$metodo_id"]}
                                 ]
                             }
                         }
