@@ -399,6 +399,187 @@ async def poblar_datos_asignaciones(current_user = Depends(get_current_user)):
         print(f"ERROR POBLAR: Error al poblar datos: {e}")
         raise HTTPException(status_code=500, detail="Error al poblar datos de prueba")
 
+@router.post("/asignaciones/migrar-datos-reales")
+async def migrar_datos_reales_dashboard():
+    """Migrar datos reales del seguimiento de pedidos a la colección de asignaciones"""
+    try:
+        collections = get_collections()
+        
+        print(f"DEBUG MIGRAR: Iniciando migración de datos reales")
+        
+        # Obtener todos los pedidos con seguimiento
+        pedidos = list(collections["pedidos"].find({
+            "seguimiento": {"$exists": True, "$ne": []}
+        }))
+        
+        print(f"DEBUG MIGRAR: Encontrados {len(pedidos)} pedidos con seguimiento")
+        
+        asignaciones_migradas = []
+        modulo_orden = {
+            1: "herreria",
+            2: "masillar", 
+            3: "preparar",
+            4: "listo_facturar"
+        }
+        
+        for pedido in pedidos:
+            pedido_id = str(pedido["_id"])
+            cliente_nombre = pedido.get("cliente_nombre", "Sin nombre")
+            
+            print(f"DEBUG MIGRAR: Procesando pedido {pedido_id} - {cliente_nombre}")
+            
+            seguimiento = pedido.get("seguimiento", [])
+            
+            for sub in seguimiento:
+                orden = sub.get("orden")
+                modulo = modulo_orden.get(orden, "desconocido")
+                
+                if modulo == "desconocido":
+                    continue
+                
+                asignaciones_articulos = sub.get("asignaciones_articulos", [])
+                
+                for asignacion in asignaciones_articulos:
+                    # Crear asignación para el dashboard
+                    nueva_asignacion = {
+                        "pedido_id": pedido_id,
+                        "item_id": str(asignacion.get("itemId", "")),
+                        "empleado_id": asignacion.get("empleadoId"),
+                        "empleado_nombre": asignacion.get("nombreempleado", ""),
+                        "modulo": modulo,
+                        "estado": asignacion.get("estado", "pendiente"),
+                        "fecha_asignacion": asignacion.get("fecha_inicio"),
+                        "fecha_fin": asignacion.get("fecha_fin"),
+                        "descripcionitem": asignacion.get("descripcionitem", ""),
+                        "detalleitem": asignacion.get("detalleitem", ""),
+                        "cliente_nombre": cliente_nombre,
+                        "costo_produccion": asignacion.get("costoproduccion", 0),
+                        "imagenes": asignacion.get("imagenes", []),
+                        "orden": orden,
+                        "estado_subestado": asignacion.get("estado_subestado", "pendiente")
+                    }
+                    
+                    # Verificar si ya existe esta asignación
+                    asignacion_existente = collections["asignaciones"].find_one({
+                        "pedido_id": pedido_id,
+                        "item_id": nueva_asignacion["item_id"],
+                        "modulo": modulo
+                    })
+                    
+                    if not asignacion_existente:
+                        resultado = collections["asignaciones"].insert_one(nueva_asignacion)
+                        nueva_asignacion["_id"] = str(resultado.inserted_id)
+                        asignaciones_migradas.append(nueva_asignacion)
+                        print(f"DEBUG MIGRAR: Asignación migrada - {modulo} - {nueva_asignacion['descripcionitem']}")
+                    else:
+                        print(f"DEBUG MIGRAR: Asignación ya existe - {modulo} - {nueva_asignacion['descripcionitem']}")
+        
+        print(f"DEBUG MIGRAR: Migración completada - {len(asignaciones_migradas)} asignaciones migradas")
+        
+        return {
+            "message": f"Migración completada exitosamente",
+            "asignaciones_migradas": len(asignaciones_migradas),
+            "pedidos_procesados": len(pedidos),
+            "asignaciones": asignaciones_migradas[:10],  # Mostrar solo las primeras 10
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR MIGRAR: Error al migrar datos: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al migrar datos reales: {str(e)}")
+
+@router.get("/asignaciones/datos-reales")
+async def get_datos_reales_dashboard():
+    """Obtener datos reales directamente del seguimiento de pedidos para el dashboard"""
+    try:
+        collections = get_collections()
+        
+        print(f"DEBUG DATOS REALES: Obteniendo datos reales del seguimiento")
+        
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "asignaciones_articulos": {"$exists": True, "$ne": []}
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos": {"$exists": True, "$ne": []}
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "cliente_nombre": 1,
+                    "pedido_id": "$_id",
+                    "item_id": "$seguimiento.asignaciones_articulos.itemId",
+                    "empleado_id": "$seguimiento.asignaciones_articulos.empleadoId",
+                    "empleado_nombre": "$seguimiento.asignaciones_articulos.nombreempleado",
+                    "modulo": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$eq": ["$seguimiento.orden", 1]}, "then": "herreria"},
+                                {"case": {"$eq": ["$seguimiento.orden", 2]}, "then": "masillar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 3]}, "then": "preparar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 4]}, "then": "listo_facturar"}
+                            ],
+                            "default": "desconocido"
+                        }
+                    },
+                    "estado": "$seguimiento.asignaciones_articulos.estado",
+                    "estado_subestado": "$seguimiento.asignaciones_articulos.estado_subestado",
+                    "fecha_asignacion": "$seguimiento.asignaciones_articulos.fecha_inicio",
+                    "fecha_fin": "$seguimiento.asignaciones_articulos.fecha_fin",
+                    "descripcionitem": "$seguimiento.asignaciones_articulos.descripcionitem",
+                    "detalleitem": "$seguimiento.asignaciones_articulos.detalleitem",
+                    "costo_produccion": "$seguimiento.asignaciones_articulos.costoproduccion",
+                    "imagenes": "$seguimiento.asignaciones_articulos.imagenes",
+                    "orden": "$seguimiento.orden"
+                }
+            },
+            {
+                "$match": {
+                    "estado": {"$in": ["en_proceso", "pendiente"]},
+                    "modulo": {"$ne": "desconocido"}
+                }
+            },
+            {
+                "$sort": {"orden": 1, "fecha_asignacion": -1}
+            }
+        ]
+        
+        asignaciones = list(collections["pedidos"].aggregate(pipeline))
+        
+        # Convertir ObjectId a string para JSON
+        for asignacion in asignaciones:
+            asignacion["pedido_id"] = str(asignacion["pedido_id"])
+            asignacion["item_id"] = str(asignacion["item_id"])
+            if asignacion.get("_id"):
+                asignacion["_id"] = str(asignacion["_id"])
+        
+        print(f"DEBUG DATOS REALES: Encontradas {len(asignaciones)} asignaciones reales")
+        
+        return {
+            "asignaciones": asignaciones,
+            "total": len(asignaciones),
+            "fuente": "seguimiento_pedidos",
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR DATOS REALES: Error al obtener datos reales: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener datos reales: {str(e)}")
+
 @router.post("/asignaciones/asignar")
 async def asignar_articulo_a_empleado(
     pedido_id: str = Body(...),
