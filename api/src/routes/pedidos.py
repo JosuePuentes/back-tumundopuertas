@@ -1652,58 +1652,14 @@ async def get_venta_diaria(
         
         print(f"DEBUG VENTA DIARIA: Cargados {len(metodos_pago)} métodos de pago")
         
-        # Construir filtro de fechas
-        filtro_fecha = {}
+        # Convertir fecha de búsqueda al formato MM/DD/YYYY que está en la BD
+        fecha_busqueda_mmddyyyy = None
         if fecha_inicio and fecha_fin:
             try:
-                # Crear fechas sin zona horaria para comparación más flexible
-                inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-                fin = datetime.strptime(fecha_fin, "%Y-%m-%d") + timedelta(days=1)
-                print(f"DEBUG VENTA DIARIA: Fechas parseadas - inicio: {inicio}, fin: {fin}")
-                
-                # Usar $expr para comparación de fechas más flexible
-                # Manejar el caso donde historial_pagos.fecha puede ser un array
-                filtro_fecha = {
-                    "$expr": {
-                        "$and": [
-                            {
-                                "$gte": [
-                                    {
-                                        "$dateToString": {
-                                            "format": "%Y-%m-%d", 
-                                            "date": {
-                                                "$cond": {
-                                                    "if": {"$isArray": "$historial_pagos.fecha"},
-                                                    "then": {"$arrayElemAt": ["$historial_pagos.fecha", 0]},
-                                                    "else": "$historial_pagos.fecha"
-                                                }
-                                            }
-                                        }
-                                    },
-                                    fecha_inicio
-                                ]
-                            },
-                            {
-                                "$lt": [
-                                    {
-                                        "$dateToString": {
-                                            "format": "%Y-%m-%d", 
-                                            "date": {
-                                                "$cond": {
-                                                    "if": {"$isArray": "$historial_pagos.fecha"},
-                                                    "then": {"$arrayElemAt": ["$historial_pagos.fecha", 0]},
-                                                    "else": "$historial_pagos.fecha"
-                                                }
-                                            }
-                                        }
-                                    },
-                                    fecha_fin
-                                ]
-                            }
-                        ]
-                    }
-                }
-                print(f"DEBUG VENTA DIARIA: Filtro construido: {filtro_fecha}")
+                # Convertir YYYY-MM-DD a MM/DD/YYYY
+                fecha_obj = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+                fecha_busqueda_mmddyyyy = fecha_obj.strftime("%m/%d/%Y")
+                print(f"DEBUG VENTA DIARIA: Buscando fecha en formato MM/DD/YYYY: {fecha_busqueda_mmddyyyy}")
             except ValueError as e:
                 print(f"ERROR VENTA DIARIA: Error parsing fechas: {e}")
                 raise HTTPException(status_code=400, detail="Formato de fecha inválido, use YYYY-MM-DD")
@@ -1728,45 +1684,20 @@ async def get_venta_diaria(
         abonos_raw = list(pedidos_collection.aggregate(pipeline))
         print(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_raw)} abonos raw")
 
-        # Procesar los abonos manualmente y aplicar filtro de fechas en Python
+        # Procesar los abonos manualmente y aplicar filtro de fechas SIMPLE
         abonos = []
         for abono in abonos_raw:
-            # Aplicar filtro de fechas en Python si se especificó
-            if fecha_inicio and fecha_fin:
-                try:
-                    # Convertir fecha a string para comparación
-                    fecha_abono = abono.get("fecha")
-                    fecha_str = None
-                    
-                    if isinstance(fecha_abono, datetime):
-                        fecha_str = fecha_abono.strftime("%Y-%m-%d")
-                    elif isinstance(fecha_abono, str):
-                        # Manejar diferentes formatos de fecha
-                        if "/" in fecha_abono:
-                            # Formato MM/DD/YYYY -> convertir a YYYY-MM-DD
-                            try:
-                                fecha_obj = datetime.strptime(fecha_abono[:10], "%m/%d/%Y")
-                                fecha_str = fecha_obj.strftime("%Y-%m-%d")
-                            except ValueError:
-                                print(f"DEBUG VENTA DIARIA: Error parseando fecha MM/DD/YYYY: {fecha_abono}")
-                                continue
-                        else:
-                            fecha_str = fecha_abono[:10]  # Formato YYYY-MM-DD
-                    else:
-                        print(f"DEBUG VENTA DIARIA: Fecha inválida: {fecha_abono} (tipo: {type(fecha_abono)})")
-                        continue  # Saltar si no es fecha válida
-                    
-                    print(f"DEBUG VENTA DIARIA: Comparando fecha {fecha_str} con rango {fecha_inicio} a {fecha_fin}")
-                    
-                    # Verificar si está en el rango (fecha_fin ya incluye +1 día)
-                    if fecha_str < fecha_inicio or fecha_str >= fecha_fin:
-                        print(f"DEBUG VENTA DIARIA: Fecha {fecha_str} fuera del rango")
-                        continue
-                        
-                    print(f"DEBUG VENTA DIARIA: Abono dentro del rango: {fecha_str}")
-                except Exception as e:
-                    print(f"DEBUG VENTA DIARIA: Error procesando fecha: {e}")
+            # Filtro SIMPLE: solo comparar strings directamente
+            if fecha_busqueda_mmddyyyy:
+                fecha_abono = str(abono.get("fecha", ""))
+                print(f"DEBUG VENTA DIARIA: Comparando '{fecha_abono}' con '{fecha_busqueda_mmddyyyy}'")
+                
+                # Buscar si la fecha contiene la fecha que buscamos
+                if fecha_busqueda_mmddyyyy not in fecha_abono:
+                    print(f"DEBUG VENTA DIARIA: Fecha no coincide, saltando")
                     continue
+                    
+                print(f"DEBUG VENTA DIARIA: ¡Fecha encontrada! {fecha_abono}")
             
             metodo_id = abono.get("metodo_id")
             metodo_nombre = metodos_pago.get(str(metodo_id), metodos_pago.get(metodo_id, metodo_id))
