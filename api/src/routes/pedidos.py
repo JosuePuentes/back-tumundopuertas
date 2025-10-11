@@ -764,6 +764,116 @@ async def get_pedidos_enproceso():
         print(f"ERROR PEDIDOS ENPROCESO: Error al obtener pedidos: {e}")
         raise HTTPException(status_code=500, detail=f"Error al obtener pedidos: {str(e)}")
 
+@router.get("/debug/asignaciones-empleados")
+async def debug_asignaciones_empleados():
+    """Endpoint de debug para verificar asignaciones por empleado"""
+    try:
+        print(f"DEBUG EMPLEADOS: Analizando asignaciones por empleado")
+        
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "asignaciones_articulos": {"$exists": True, "$ne": []}
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos": {"$exists": True, "$ne": []}
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$project": {
+                    "pedido_id": "$_id",
+                    "item_id": "$seguimiento.asignaciones_articulos.itemId",
+                    "empleado_id": "$seguimiento.asignaciones_articulos.empleadoId",
+                    "empleado_nombre": "$seguimiento.asignaciones_articulos.nombreempleado",
+                    "modulo": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$eq": ["$seguimiento.orden", 1]}, "then": "herreria"},
+                                {"case": {"$eq": ["$seguimiento.orden", 2]}, "then": "masillar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 3]}, "then": "preparar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 4]}, "then": "listo_facturar"}
+                            ],
+                            "default": "desconocido"
+                        }
+                    },
+                    "estado": "$seguimiento.asignaciones_articulos.estado",
+                    "descripcionitem": "$seguimiento.asignaciones_articulos.descripcionitem"
+                }
+            },
+            {
+                "$match": {
+                    "estado": {"$in": ["en_proceso", "pendiente"]},
+                    "modulo": {"$ne": "desconocido"}
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$empleado_id",
+                    "empleado_nombre": {"$first": "$empleado_nombre"},
+                    "total_asignaciones": {"$sum": 1},
+                    "modulos": {"$addToSet": "$modulo"},
+                    "asignaciones": {
+                        "$push": {
+                            "pedido_id": "$pedido_id",
+                            "item_id": "$item_id",
+                            "modulo": "$modulo",
+                            "estado": "$estado",
+                            "descripcionitem": "$descripcionitem"
+                        }
+                    }
+                }
+            },
+            {
+                "$sort": {"total_asignaciones": -1}
+            }
+        ]
+        
+        empleados_con_asignaciones = list(pedidos_collection.aggregate(pipeline))
+        
+        # Convertir ObjectId a string
+        for empleado in empleados_con_asignaciones:
+            if empleado.get("_id"):
+                empleado["empleado_id"] = str(empleado["_id"])
+                del empleado["_id"]
+            
+            for asignacion in empleado.get("asignaciones", []):
+                asignacion["pedido_id"] = str(asignacion["pedido_id"])
+                asignacion["item_id"] = str(asignacion["item_id"])
+        
+        # Estadísticas generales
+        total_con_empleado = sum(1 for emp in empleados_con_asignaciones if emp.get("empleado_id"))
+        total_sin_empleado = len(empleados_con_asignaciones) - total_con_empleado
+        
+        print(f"DEBUG EMPLEADOS: Encontrados {len(empleados_con_asignaciones)} empleados con asignaciones")
+        print(f"DEBUG EMPLEADOS: Con empleado asignado: {total_con_empleado}")
+        print(f"DEBUG EMPLEADOS: Sin empleado asignado: {total_sin_empleado}")
+        
+        return {
+            "empleados_con_asignaciones": empleados_con_asignaciones,
+            "estadisticas": {
+                "total_empleados": len(empleados_con_asignaciones),
+                "con_empleado_asignado": total_con_empleado,
+                "sin_empleado_asignado": total_sin_empleado
+            },
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR DEBUG EMPLEADOS: Error al analizar empleados: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al analizar empleados: {str(e)}")
+
 @router.get("/filtrar/por-fecha/")
 async def get_pedidos_por_fecha(fecha_inicio: str = None, fecha_fin: str = None):
     filtro_fecha = None
