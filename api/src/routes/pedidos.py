@@ -584,6 +584,188 @@ async def actualizar_estado_general_pedido(
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return {"message": "Estado general actualizado correctamente"}
 
+@router.get("/asignaciones/modulo/{modulo}")
+async def get_asignaciones_modulo_produccion(modulo: str):
+    """Obtener asignaciones reales de un módulo específico para el dashboard"""
+    try:
+        print(f"DEBUG MODULO: Obteniendo asignaciones para módulo {modulo}")
+        
+        # Mapear módulos a órdenes
+        modulo_orden = {
+            "herreria": 1,
+            "masillar": 2, 
+            "preparar": 3,
+            "listo_facturar": 4
+        }
+        
+        orden = modulo_orden.get(modulo)
+        if not orden:
+            raise HTTPException(status_code=400, detail=f"Módulo no válido: {modulo}")
+        
+        print(f"DEBUG MODULO: Buscando pedidos con orden {orden}")
+        
+        # Buscar pedidos que tengan asignaciones en este módulo
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "orden": orden,
+                            "asignaciones_articulos": {"$exists": True, "$ne": []}
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.orden": orden
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "cliente_nombre": 1,
+                    "pedido_id": "$_id",
+                    "item_id": "$seguimiento.asignaciones_articulos.itemId",
+                    "empleado_id": "$seguimiento.asignaciones_articulos.empleadoId",
+                    "empleado_nombre": "$seguimiento.asignaciones_articulos.nombreempleado",
+                    "modulo": modulo,
+                    "estado": "$seguimiento.asignaciones_articulos.estado",
+                    "estado_subestado": "$seguimiento.asignaciones_articulos.estado_subestado",
+                    "fecha_asignacion": "$seguimiento.asignaciones_articulos.fecha_inicio",
+                    "fecha_fin": "$seguimiento.asignaciones_articulos.fecha_fin",
+                    "descripcionitem": "$seguimiento.asignaciones_articulos.descripcionitem",
+                    "detalleitem": "$seguimiento.asignaciones_articulos.detalleitem",
+                    "costo_produccion": "$seguimiento.asignaciones_articulos.costoproduccion",
+                    "imagenes": "$seguimiento.asignaciones_articulos.imagenes",
+                    "orden": "$seguimiento.orden"
+                }
+            },
+            {
+                "$match": {
+                    "estado": {"$in": ["en_proceso", "pendiente"]}
+                }
+            }
+        ]
+        
+        asignaciones = list(pedidos_collection.aggregate(pipeline))
+        
+        # Convertir ObjectId a string para JSON
+        for asignacion in asignaciones:
+            asignacion["pedido_id"] = str(asignacion["pedido_id"])
+            asignacion["item_id"] = str(asignacion["item_id"])
+            if asignacion.get("_id"):
+                asignacion["_id"] = str(asignacion["_id"])
+        
+        print(f"DEBUG MODULO: Encontradas {len(asignaciones)} asignaciones para módulo {modulo}")
+        
+        return {
+            "asignaciones": asignaciones,
+            "total": len(asignaciones),
+            "modulo": modulo,
+            "orden": orden,
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR MODULO: Error al obtener asignaciones: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener asignaciones del módulo: {str(e)}")
+
+@router.get("/asignaciones/todas")
+async def get_todas_asignaciones_produccion():
+    """Obtener todas las asignaciones de todos los módulos para el dashboard"""
+    try:
+        print(f"DEBUG TODAS: Obteniendo todas las asignaciones de producción")
+        
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "asignaciones_articulos": {"$exists": True, "$ne": []}
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos": {"$exists": True, "$ne": []}
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "cliente_nombre": 1,
+                    "pedido_id": "$_id",
+                    "item_id": "$seguimiento.asignaciones_articulos.itemId",
+                    "empleado_id": "$seguimiento.asignaciones_articulos.empleadoId",
+                    "empleado_nombre": "$seguimiento.asignaciones_articulos.nombreempleado",
+                    "modulo": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$eq": ["$seguimiento.orden", 1]}, "then": "herreria"},
+                                {"case": {"$eq": ["$seguimiento.orden", 2]}, "then": "masillar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 3]}, "then": "preparar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 4]}, "then": "listo_facturar"}
+                            ],
+                            "default": "desconocido"
+                        }
+                    },
+                    "estado": "$seguimiento.asignaciones_articulos.estado",
+                    "estado_subestado": "$seguimiento.asignaciones_articulos.estado_subestado",
+                    "fecha_asignacion": "$seguimiento.asignaciones_articulos.fecha_inicio",
+                    "fecha_fin": "$seguimiento.asignaciones_articulos.fecha_fin",
+                    "descripcionitem": "$seguimiento.asignaciones_articulos.descripcionitem",
+                    "detalleitem": "$seguimiento.asignaciones_articulos.detalleitem",
+                    "costo_produccion": "$seguimiento.asignaciones_articulos.costoproduccion",
+                    "imagenes": "$seguimiento.asignaciones_articulos.imagenes",
+                    "orden": "$seguimiento.orden"
+                }
+            },
+            {
+                "$match": {
+                    "estado": {"$in": ["en_proceso", "pendiente"]},
+                    "modulo": {"$ne": "desconocido"}
+                }
+            },
+            {
+                "$sort": {"orden": 1, "fecha_asignacion": -1}
+            }
+        ]
+        
+        asignaciones = list(pedidos_collection.aggregate(pipeline))
+        
+        # Convertir ObjectId a string para JSON
+        for asignacion in asignaciones:
+            asignacion["pedido_id"] = str(asignacion["pedido_id"])
+            asignacion["item_id"] = str(asignacion["item_id"])
+            if asignacion.get("_id"):
+                asignacion["_id"] = str(asignacion["_id"])
+        
+        print(f"DEBUG TODAS: Encontradas {len(asignaciones)} asignaciones totales")
+        
+        return {
+            "asignaciones": asignaciones,
+            "total": len(asignaciones),
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR TODAS: Error al obtener todas las asignaciones: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener asignaciones: {str(e)}")
+
 
 
 # Endpoint para terminar una asignación de artículo dentro de un pedido
@@ -595,11 +777,28 @@ async def terminar_asignacion_articulo(
     empleado_id: str = Body(...),
     estado: str = Body(...),  # Debe ser "terminado"
     fecha_fin: str = Body(...),
+    pin: Optional[str] = Body(None),  # PIN opcional para validación
 ):
     """Endpoint para terminar una asignación de artículo"""
     print(f"DEBUG TERMINAR: Iniciando terminación de asignación")
     print(f"DEBUG TERMINAR: pedido_id={pedido_id}, orden={orden}, item_id={item_id}, empleado_id={empleado_id}")
     print(f"DEBUG TERMINAR: estado={estado}, fecha_fin={fecha_fin}")
+    
+    # Validar PIN si se proporciona
+    if pin:
+        print(f"DEBUG TERMINAR: Validando PIN para empleado {empleado_id}")
+        empleado = empleados_collection.find_one({"identificador": empleado_id})
+        if not empleado:
+            print(f"ERROR TERMINAR: Empleado no encontrado: {empleado_id}")
+            raise HTTPException(status_code=404, detail="Empleado no encontrado")
+        
+        if empleado.get("pin") != pin:
+            print(f"ERROR TERMINAR: PIN incorrecto para empleado {empleado_id}")
+            raise HTTPException(status_code=400, detail="PIN incorrecto")
+        
+        print(f"DEBUG TERMINAR: PIN validado correctamente para empleado {empleado.get('nombreCompleto', empleado_id)}")
+    else:
+        print(f"DEBUG TERMINAR: No se proporcionó PIN, continuando sin validación")
     
     try:
         pedido_obj_id = ObjectId(pedido_id)

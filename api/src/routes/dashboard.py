@@ -54,8 +54,7 @@ def registrar_comision(asignacion: dict, empleado_id: str):
 
 @router.get("/asignaciones")
 async def get_dashboard_asignaciones(
-    empleado_id: Optional[str] = None,
-    current_user = Depends(get_current_user)
+    empleado_id: Optional[str] = None
 ):
     """Obtener asignaciones para el dashboard - filtradas por empleado si se especifica"""
     try:
@@ -281,7 +280,7 @@ async def get_asignaciones_modulo(
         raise HTTPException(status_code=500, detail="Error al obtener asignaciones del módulo")
 
 @router.get("/asignaciones/estadisticas")
-async def get_estadisticas_dashboard(current_user = Depends(get_current_user)):
+async def get_estadisticas_dashboard():
     """Obtener estadísticas generales del dashboard de asignaciones"""
     try:
         collections = get_collections()
