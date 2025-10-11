@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 from fastapi import APIRouter, HTTPException, Body, Depends
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
@@ -959,7 +959,7 @@ async def get_asignaciones_modulo_produccion(modulo: str):
                 "$match": {
                     "seguimiento": {
                         "$elemMatch": {
-                            "orden": orden,
+                            "orden": orden_int,
                             "asignaciones_articulos": {"$exists": True, "$ne": []}
                         }
                     }
@@ -1018,7 +1018,7 @@ async def get_asignaciones_modulo_produccion(modulo: str):
             "asignaciones": asignaciones,
             "total": len(asignaciones),
             "modulo": modulo,
-            "orden": orden,
+            "orden": orden_int,
             "success": True
         }
         
@@ -1121,7 +1121,7 @@ async def get_todas_asignaciones_produccion():
 @router.put("/asignacion/terminar")
 async def terminar_asignacion_articulo(
     pedido_id: str = Body(...),
-    orden: int = Body(...),
+    orden: Union[int, str] = Body(...),  # Aceptar tanto int como string
     item_id: str = Body(...),
     empleado_id: str = Body(...),
     estado: str = Body(...),  # Debe ser "terminado"
@@ -1130,8 +1130,16 @@ async def terminar_asignacion_articulo(
 ):
     """Endpoint para terminar una asignación de artículo"""
     print(f"DEBUG TERMINAR: Iniciando terminación de asignación")
-    print(f"DEBUG TERMINAR: pedido_id={pedido_id}, orden={orden}, item_id={item_id}, empleado_id={empleado_id}")
+    print(f"DEBUG TERMINAR: pedido_id={pedido_id}, orden={orden} (tipo: {type(orden)}), item_id={item_id}, empleado_id={empleado_id}")
     print(f"DEBUG TERMINAR: estado={estado}, fecha_fin={fecha_fin}")
+    
+    # Convertir orden a int si viene como string
+    try:
+        orden_int = int(orden) if isinstance(orden, str) else orden
+        print(f"DEBUG TERMINAR: Orden convertido a int: {orden_int}")
+    except (ValueError, TypeError) as e:
+        print(f"ERROR TERMINAR: Error convirtiendo orden a int: {e}")
+        raise HTTPException(status_code=400, detail=f"orden debe ser un número válido: {str(e)}")
     
     # Validar PIN si se proporciona
     if pin:
@@ -1167,8 +1175,8 @@ async def terminar_asignacion_articulo(
     asignacion_encontrada = None
     
     for sub in seguimiento:
-        if int(sub.get("orden", -1)) == orden:
-            print(f"DEBUG TERMINAR: Encontrado subestado con orden {orden}")
+        if int(sub.get("orden", -1)) == orden_int:
+            print(f"DEBUG TERMINAR: Encontrado subestado con orden {orden_int}")
             asignaciones = sub.get("asignaciones_articulos", [])
             print(f"DEBUG TERMINAR: Asignaciones encontradas: {len(asignaciones)}")
             
@@ -1338,7 +1346,7 @@ async def terminar_asignacion_articulo(
         "success": True,
         "asignacion_actualizada": asignacion_encontrada,
         "pedido_id": pedido_id,
-        "orden": orden,
+        "orden": orden_int,
         "item_id": item_id,
         "empleado_id": empleado_id,
         "estado_anterior": "en_proceso",
