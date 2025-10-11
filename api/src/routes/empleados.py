@@ -36,15 +36,15 @@ async def get_all_empleados():
 
 @router.post("/")
 async def create_empleado(empleado: EmpleadoCreate):
-    # Validar formato del PIN
-    if not validar_pin(empleado.pin):
+    # Validar formato del PIN solo si se proporciona
+    if empleado.pin and not validar_pin(empleado.pin):
         raise HTTPException(
             status_code=400, 
             detail="El PIN debe tener exactamente 4 dígitos numéricos"
         )
     
-    # Verificar que el PIN sea único
-    if not verificar_pin_unico(empleado.pin):
+    # Verificar que el PIN sea único solo si se proporciona
+    if empleado.pin and not verificar_pin_unico(empleado.pin):
         raise HTTPException(
             status_code=400, 
             detail="El PIN ya está en uso por otro empleado"

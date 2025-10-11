@@ -70,7 +70,7 @@ class EmpleadoCreate(BaseModel):
     permisos: List[str] = []
     nombreCompleto: Optional[str] = None
     identificador: Optional[str] = None
-    pin: str  # PIN obligatorio para nuevos empleados
+    pin: Optional[str] = None  # PIN opcional para nuevos empleados
 
 class EmpleadoUpdate(BaseModel):
     permisos: Optional[List[str]] = None
