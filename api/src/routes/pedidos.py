@@ -1704,17 +1704,58 @@ async def get_venta_diaria(
         print(f"DEBUG VENTA DIARIA: Ejecutando pipeline con {len(pipeline)} etapas")
         abonos_raw = list(pedidos_collection.aggregate(pipeline))
         print(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_raw)} abonos raw")
+        
+        # DEBUG: Mostrar ejemplos de fechas reales en la BD
+        if abonos_raw:
+            print(f"DEBUG VENTA DIARIA: === EJEMPLOS DE FECHAS EN LA BD ===")
+            for i, abono in enumerate(abonos_raw[:5]):  # Solo los primeros 5
+                fecha = abono.get("fecha")
+                print(f"DEBUG VENTA DIARIA: Abono {i+1}: fecha={fecha} (tipo: {type(fecha)})")
+                if isinstance(fecha, str):
+                    print(f"DEBUG VENTA DIARIA:   - String completo: '{fecha}'")
+                    print(f"DEBUG VENTA DIARIA:   - Primeros 10 chars: '{fecha[:10]}'")
+                elif isinstance(fecha, datetime):
+                    print(f"DEBUG VENTA DIARIA:   - Datetime: {fecha}")
+                    print(f"DEBUG VENTA DIARIA:   - ISO string: {fecha.isoformat()}")
+            print(f"DEBUG VENTA DIARIA: === FIN EJEMPLOS ===")
 
-        # Procesar los abonos manualmente y aplicar filtro de fechas SIMPLE
+        # Procesar los abonos manualmente y aplicar filtro de fechas MEJORADO
         abonos = []
         for abono in abonos_raw:
-            # Filtro SIMPLE: solo comparar strings directamente
+            # Aplicar filtro de fechas si se especificó
             if fecha_busqueda_mmddyyyy:
-                fecha_abono = str(abono.get("fecha", ""))
-                print(f"DEBUG VENTA DIARIA: Comparando '{fecha_abono}' con '{fecha_busqueda_mmddyyyy}'")
+                fecha_abono = abono.get("fecha")
+                fecha_coincide = False
                 
-                # Buscar si la fecha contiene la fecha que buscamos
-                if fecha_busqueda_mmddyyyy not in fecha_abono:
+                if isinstance(fecha_abono, datetime):
+                    # Si es datetime, convertir a string para comparar
+                    fecha_str = fecha_abono.strftime("%m/%d/%Y")
+                    print(f"DEBUG VENTA DIARIA: Datetime {fecha_abono} -> {fecha_str}")
+                    fecha_coincide = fecha_str == fecha_busqueda_mmddyyyy
+                    
+                elif isinstance(fecha_abono, str):
+                    # Si es string, buscar diferentes patrones
+                    fecha_str = str(fecha_abono)
+                    print(f"DEBUG VENTA DIARIA: String fecha: '{fecha_str}'")
+                    
+                    # Patrón 1: Buscar MM/DD/YYYY directamente
+                    if fecha_busqueda_mmddyyyy in fecha_str:
+                        fecha_coincide = True
+                        print(f"DEBUG VENTA DIARIA: Encontrado patrón MM/DD/YYYY")
+                    
+                    # Patrón 2: Si es formato ISO (YYYY-MM-DD), convertir y comparar
+                    elif len(fecha_str) >= 10 and fecha_str[4] == '-' and fecha_str[7] == '-':
+                        try:
+                            fecha_iso = datetime.strptime(fecha_str[:10], "%Y-%m-%d")
+                            fecha_mmddyyyy = fecha_iso.strftime("%m/%d/%Y")
+                            fecha_coincide = fecha_mmddyyyy == fecha_busqueda_mmddyyyy
+                            print(f"DEBUG VENTA DIARIA: ISO {fecha_str[:10]} -> {fecha_mmddyyyy}")
+                        except ValueError:
+                            print(f"DEBUG VENTA DIARIA: Error parseando ISO: {fecha_str[:10]}")
+                
+                print(f"DEBUG VENTA DIARIA: Comparando '{fecha_abono}' con '{fecha_busqueda_mmddyyyy}' -> {fecha_coincide}")
+                
+                if not fecha_coincide:
                     print(f"DEBUG VENTA DIARIA: Fecha no coincide, saltando")
                     continue
                     
