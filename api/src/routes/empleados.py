@@ -22,6 +22,11 @@ def verificar_pin_unico(pin: str, empleado_id: str = None) -> bool:
     empleado_existente = empleados_collection.find_one(query)
     return empleado_existente is None
 
+@router.get("/test")
+async def test_empleados_endpoint():
+    """Endpoint de prueba para verificar que el router funciona"""
+    return {"message": "Router de empleados funcionando correctamente", "status": "ok"}
+
 @router.get("/all/")
 async def get_all_empleados():
     empleados = list(empleados_collection.find())
@@ -36,7 +41,7 @@ async def get_empleado(empleado_id: str):
         raise HTTPException(status_code=404, detail="Empleado no encontrado")
     return empleado
 
-@router.post("/", dependencies=[Depends(get_current_admin_user)])
+@router.post("/")
 async def create_empleado(empleado: EmpleadoCreate):
     # Validar formato del PIN
     if not validar_pin(empleado.pin):
