@@ -1183,10 +1183,28 @@ async def terminar_asignacion_articulo(
     # Validar PIN si se proporciona
     if pin:
         print(f"DEBUG TERMINAR: Validando PIN para empleado {empleado_id}")
-        empleado = empleados_collection.find_one({"identificador": empleado_id})
+        
+        # Buscar empleado por identificador (tanto string como número)
+        empleado = None
+        try:
+            # Intentar primero como string
+            empleado = empleados_collection.find_one({"identificador": empleado_id})
+            print(f"DEBUG TERMINAR: Búsqueda como string: {empleado is not None}")
+            
+            # Si no se encuentra, intentar como número
+            if not empleado:
+                empleado_id_num = int(empleado_id)
+                empleado = empleados_collection.find_one({"identificador": empleado_id_num})
+                print(f"DEBUG TERMINAR: Búsqueda como número: {empleado is not None}")
+                
+        except ValueError:
+            print(f"DEBUG TERMINAR: No se pudo convertir a número: {empleado_id}")
+        
         if not empleado:
             print(f"ERROR TERMINAR: Empleado no encontrado: {empleado_id}")
             raise HTTPException(status_code=404, detail="Empleado no encontrado")
+        
+        print(f"DEBUG TERMINAR: Empleado encontrado: {empleado.get('nombreCompleto', empleado_id)}")
         
         if empleado.get("pin") != pin:
             print(f"ERROR TERMINAR: PIN incorrecto para empleado {empleado_id}")
