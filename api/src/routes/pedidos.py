@@ -1150,6 +1150,41 @@ async def debug_empleados():
     except Exception as e:
         return {"error": str(e)}
 
+# Endpoint para buscar específicamente a ANUBIS PUENTES
+@router.get("/debug-buscar-anubis")
+async def debug_buscar_anubis():
+    """Endpoint para buscar específicamente a ANUBIS PUENTES"""
+    try:
+        # Buscar por nombre
+        anubis_por_nombre = list(empleados_collection.find({
+            "nombreCompleto": {"$regex": "ANUBIS", "$options": "i"}
+        }))
+        
+        # Buscar por identificador
+        anubis_por_id = list(empleados_collection.find({
+            "identificador": "24241240"
+        }))
+        
+        # Buscar por identificador como número
+        anubis_por_id_num = list(empleados_collection.find({
+            "identificador": 24241240
+        }))
+        
+        # Buscar todos los empleados con identificador similar
+        anubis_similar = list(empleados_collection.find({
+            "identificador": {"$regex": "24241240"}
+        }))
+        
+        return {
+            "por_nombre": anubis_por_nombre,
+            "por_id_string": anubis_por_id,
+            "por_id_numero": anubis_por_id_num,
+            "por_id_similar": anubis_similar,
+            "total_encontrados": len(anubis_por_nombre) + len(anubis_por_id) + len(anubis_por_id_num) + len(anubis_similar)
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 # Endpoint para terminar una asignación de artículo dentro de un pedido
 @router.put("/asignacion/terminar")
 async def terminar_asignacion_articulo(
