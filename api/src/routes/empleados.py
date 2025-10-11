@@ -34,7 +34,7 @@ async def get_all_empleados():
         empleado["_id"] = str(empleado["_id"])
     return empleados
 
-@router.post("/")
+@router.post("/crear")
 async def create_empleado(empleado: EmpleadoCreate):
     # Validar formato del PIN solo si se proporciona
     if empleado.pin and not validar_pin(empleado.pin):
