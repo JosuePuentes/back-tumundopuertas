@@ -1120,25 +1120,24 @@ async def get_todas_asignaciones_produccion():
 # Endpoint para terminar una asignación de artículo dentro de un pedido
 @router.put("/asignacion/terminar")
 async def terminar_asignacion_articulo(
-    request_data: dict = Body(...)  # Recibir todo como dict para debug
+    pedido_id: str = Body(...),
+    orden: Union[int, str] = Body(...),
+    item_id: str = Body(...),
+    empleado_id: str = Body(...),
+    estado: str = Body(...),
+    fecha_fin: str = Body(...),
+    pin: Optional[str] = Body(None)  # PIN opcional
 ):
     """Endpoint para terminar una asignación de artículo"""
     print(f"DEBUG TERMINAR: === DATOS RECIBIDOS ===")
-    print(f"DEBUG TERMINAR: request_data completo: {request_data}")
-    print(f"DEBUG TERMINAR: Tipo de datos: {type(request_data)}")
+    print(f"DEBUG TERMINAR: pedido_id={pedido_id}")
+    print(f"DEBUG TERMINAR: orden={orden} (tipo: {type(orden)})")
+    print(f"DEBUG TERMINAR: item_id={item_id}")
+    print(f"DEBUG TERMINAR: empleado_id={empleado_id}")
+    print(f"DEBUG TERMINAR: estado={estado}")
+    print(f"DEBUG TERMINAR: fecha_fin={fecha_fin}")
+    print(f"DEBUG TERMINAR: pin={'***' if pin else None}")
     print(f"DEBUG TERMINAR: === FIN DATOS RECIBIDOS ===")
-    
-    # Extraer datos del request
-    pedido_id = request_data.get("pedido_id")
-    orden = request_data.get("orden")
-    item_id = request_data.get("item_id")
-    empleado_id = request_data.get("empleado_id")
-    estado = request_data.get("estado")
-    fecha_fin = request_data.get("fecha_fin")
-    pin = request_data.get("pin")
-    
-    print(f"DEBUG TERMINAR: pedido_id={pedido_id}, orden={orden} (tipo: {type(orden)}), item_id={item_id}, empleado_id={empleado_id}")
-    print(f"DEBUG TERMINAR: estado={estado}, fecha_fin={fecha_fin}, pin={'***' if pin else None}")
     
     # Convertir orden a int si viene como string
     try:
