@@ -54,15 +54,28 @@ def registrar_comision(asignacion: dict, empleado_id: str):
         return False
 
 @router.get("/asignaciones")
-async def get_dashboard_asignaciones(current_user = Depends(get_current_user)):
-    """Obtener todas las asignaciones para el dashboard"""
+async def get_dashboard_asignaciones(
+    empleado_id: Optional[str] = None,
+    current_user = Depends(get_current_user)
+):
+    """Obtener asignaciones para el dashboard - filtradas por empleado si se especifica"""
     try:
         collections = get_collections()
         
-        # Obtener todas las asignaciones activas
-        asignaciones = list(collections["asignaciones"].find({
+        # Construir query base
+        query = {
             "estado": {"$in": ["en_proceso", "pendiente"]}
-        }).sort("fecha_asignacion", -1))
+        }
+        
+        # Si se especifica empleado_id, filtrar por ese empleado
+        if empleado_id:
+            query["empleado_id"] = empleado_id
+            print(f"DEBUG DASHBOARD: Filtrando asignaciones para empleado {empleado_id}")
+        else:
+            print(f"DEBUG DASHBOARD: Obteniendo todas las asignaciones activas")
+        
+        # Obtener asignaciones
+        asignaciones = list(collections["asignaciones"].find(query).sort("fecha_asignacion", -1))
         
         # Convertir ObjectId a string para JSON
         for asignacion in asignaciones:
@@ -77,6 +90,7 @@ async def get_dashboard_asignaciones(current_user = Depends(get_current_user)):
         return {
             "asignaciones": asignaciones,
             "total": len(asignaciones),
+            "empleado_filtrado": empleado_id,
             "success": True
         }
         
@@ -150,25 +164,35 @@ async def terminar_asignacion_dashboard(
         nueva_asignacion_creada = False
         if siguiente_modulo != "completado":
             try:
-                nueva_asignacion = {
-                    "pedido_id": asignacion.get("pedido_id"),
+                # Verificar si ya existe una asignación pendiente para este item en el siguiente módulo
+                asignacion_existente = collections["asignaciones"].find_one({
                     "item_id": asignacion.get("item_id"),
-                    "empleado_id": None,  # Sin asignar aún
-                    "empleado_nombre": "",
                     "modulo": siguiente_modulo,
-                    "estado": "pendiente",
-                    "fecha_asignacion": None,
-                    "fecha_fin": None,
-                    "descripcionitem": asignacion.get("descripcionitem", ""),
-                    "detalleitem": asignacion.get("detalleitem", ""),
-                    "cliente_nombre": asignacion.get("cliente_nombre", ""),
-                    "costo_produccion": asignacion.get("costo_produccion", 0),
-                    "imagenes": asignacion.get("imagenes", [])
-                }
+                    "estado": "pendiente"
+                })
                 
-                collections["asignaciones"].insert_one(nueva_asignacion)
-                nueva_asignacion_creada = True
-                print(f"DEBUG DASHBOARD TERMINAR: Nueva asignación creada para módulo {siguiente_modulo}")
+                if not asignacion_existente:
+                    nueva_asignacion = {
+                        "pedido_id": asignacion.get("pedido_id"),
+                        "item_id": asignacion.get("item_id"),
+                        "empleado_id": None,  # Sin asignar aún
+                        "empleado_nombre": "",
+                        "modulo": siguiente_modulo,
+                        "estado": "pendiente",
+                        "fecha_asignacion": None,
+                        "fecha_fin": None,
+                        "descripcionitem": asignacion.get("descripcionitem", ""),
+                        "detalleitem": asignacion.get("detalleitem", ""),
+                        "cliente_nombre": asignacion.get("cliente_nombre", ""),
+                        "costo_produccion": asignacion.get("costo_produccion", 0),
+                        "imagenes": asignacion.get("imagenes", [])
+                    }
+                    
+                    collections["asignaciones"].insert_one(nueva_asignacion)
+                    nueva_asignacion_creada = True
+                    print(f"DEBUG DASHBOARD TERMINAR: Nueva asignación creada para módulo {siguiente_modulo}")
+                else:
+                    print(f"DEBUG DASHBOARD TERMINAR: Ya existe asignación pendiente en módulo {siguiente_modulo}")
                 
             except Exception as e:
                 print(f"ERROR DASHBOARD TERMINAR: Error al crear nueva asignación: {e}")
@@ -257,6 +281,59 @@ async def get_asignaciones_modulo(
         print(f"ERROR DASHBOARD MODULO: Error al obtener asignaciones: {e}")
         raise HTTPException(status_code=500, detail="Error al obtener asignaciones del módulo")
 
+@router.get("/asignaciones/estadisticas")
+async def get_estadisticas_dashboard(current_user = Depends(get_current_user)):
+    """Obtener estadísticas generales del dashboard de asignaciones"""
+    try:
+        collections = get_collections()
+        
+        # Estadísticas por módulo
+        estadisticas = {}
+        modulos = ["herreria", "masillar", "preparar", "listo_facturar"]
+        
+        for modulo in modulos:
+            total = collections["asignaciones"].count_documents({
+                "modulo": modulo,
+                "estado": {"$in": ["en_proceso", "pendiente"]}
+            })
+            
+            en_proceso = collections["asignaciones"].count_documents({
+                "modulo": modulo,
+                "estado": "en_proceso"
+            })
+            
+            pendientes = collections["asignaciones"].count_documents({
+                "modulo": modulo,
+                "estado": "pendiente"
+            })
+            
+            estadisticas[modulo] = {
+                "total": total,
+                "en_proceso": en_proceso,
+                "pendientes": pendientes
+            }
+        
+        # Estadísticas generales
+        total_asignaciones = sum(stats["total"] for stats in estadisticas.values())
+        total_en_proceso = sum(stats["en_proceso"] for stats in estadisticas.values())
+        total_pendientes = sum(stats["pendientes"] for stats in estadisticas.values())
+        
+        print(f"DEBUG ESTADISTICAS: Total asignaciones activas: {total_asignaciones}")
+        
+        return {
+            "estadisticas_por_modulo": estadisticas,
+            "totales": {
+                "total_asignaciones": total_asignaciones,
+                "total_en_proceso": total_en_proceso,
+                "total_pendientes": total_pendientes
+            },
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR ESTADISTICAS: Error al obtener estadísticas: {e}")
+        raise HTTPException(status_code=500, detail="Error al obtener estadísticas")
+
 @router.post("/asignaciones/poblar-datos")
 async def poblar_datos_asignaciones(current_user = Depends(get_current_user)):
     """Endpoint para poblar datos de prueba en la colección de asignaciones"""
@@ -323,3 +400,123 @@ async def poblar_datos_asignaciones(current_user = Depends(get_current_user)):
     except Exception as e:
         print(f"ERROR POBLAR: Error al poblar datos: {e}")
         raise HTTPException(status_code=500, detail="Error al poblar datos de prueba")
+
+@router.post("/asignaciones/asignar")
+async def asignar_articulo_a_empleado(
+    pedido_id: str = Body(...),
+    item_id: str = Body(...),
+    empleado_id: str = Body(...),
+    modulo: str = Body(...),
+    current_user = Depends(get_current_user)
+):
+    """Asignar un artículo específico a un empleado desde los módulos de producción"""
+    try:
+        collections = get_collections()
+        
+        print(f"DEBUG ASIGNAR: Iniciando asignación de artículo")
+        print(f"DEBUG ASIGNAR: pedido_id={pedido_id}, item_id={item_id}, empleado_id={empleado_id}, modulo={modulo}")
+        
+        # 1. Verificar que el empleado existe
+        empleado = collections["empleados"].find_one({"identificador": empleado_id})
+        if not empleado:
+            print(f"ERROR ASIGNAR: Empleado no encontrado: {empleado_id}")
+            raise HTTPException(status_code=404, detail="Empleado no encontrado")
+        
+        empleado_nombre = empleado.get("nombreCompleto", empleado_id)
+        print(f"DEBUG ASIGNAR: Empleado encontrado: {empleado_nombre}")
+        
+        # 2. Obtener información del pedido e item
+        pedido_obj_id = ObjectId(pedido_id)
+        pedido = collections["pedidos"].find_one({"_id": pedido_obj_id})
+        
+        if not pedido:
+            print(f"ERROR ASIGNAR: Pedido no encontrado: {pedido_id}")
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Buscar el item específico en el pedido
+        item_encontrado = None
+        for item in pedido.get("items", []):
+            if str(item.get("id")) == item_id:
+                item_encontrado = item
+                break
+        
+        if not item_encontrado:
+            print(f"ERROR ASIGNAR: Item no encontrado en pedido: {item_id}")
+            raise HTTPException(status_code=404, detail="Item no encontrado en el pedido")
+        
+        print(f"DEBUG ASIGNAR: Item encontrado: {item_encontrado.get('descripcion', 'Sin descripción')}")
+        
+        # 3. Crear la asignación
+        nueva_asignacion = {
+            "pedido_id": pedido_id,
+            "item_id": item_id,
+            "empleado_id": empleado_id,
+            "empleado_nombre": empleado_nombre,
+            "modulo": modulo,
+            "estado": "en_proceso",
+            "fecha_asignacion": datetime.now(),
+            "fecha_fin": None,
+            "descripcionitem": item_encontrado.get("descripcion", ""),
+            "detalleitem": item_encontrado.get("detalle", ""),
+            "cliente_nombre": pedido.get("cliente", {}).get("nombre", ""),
+            "costo_produccion": item_encontrado.get("costoproduccion", 0),
+            "imagenes": item_encontrado.get("imagenes", [])
+        }
+        
+        # 4. Insertar la asignación
+        resultado = collections["asignaciones"].insert_one(nueva_asignacion)
+        asignacion_id = str(resultado.inserted_id)
+        
+        print(f"DEBUG ASIGNAR: Asignación creada con ID: {asignacion_id}")
+        
+        return {
+            "message": "Artículo asignado exitosamente",
+            "success": True,
+            "asignacion_id": asignacion_id,
+            "empleado_nombre": empleado_nombre,
+            "modulo": modulo,
+            "descripcionitem": nueva_asignacion["descripcionitem"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR ASIGNAR: Error inesperado: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+@router.get("/asignaciones/empleado/{empleado_id}")
+async def get_asignaciones_empleado_dashboard(
+    empleado_id: str,
+    current_user = Depends(get_current_user)
+):
+    """Obtener asignaciones de un empleado específico para el dashboard"""
+    try:
+        collections = get_collections()
+        
+        print(f"DEBUG DASHBOARD EMPLEADO: Obteniendo asignaciones para empleado {empleado_id}")
+        
+        asignaciones = list(collections["asignaciones"].find({
+            "empleado_id": empleado_id,
+            "estado": {"$in": ["en_proceso", "pendiente"]}
+        }).sort("fecha_asignacion", -1))
+        
+        # Convertir ObjectId a string para JSON
+        for asignacion in asignaciones:
+            asignacion["_id"] = str(asignacion["_id"])
+            if "pedido_id" in asignacion:
+                asignacion["pedido_id"] = str(asignacion["pedido_id"])
+            if "item_id" in asignacion:
+                asignacion["item_id"] = str(asignacion["item_id"])
+        
+        print(f"DEBUG DASHBOARD EMPLEADO: Encontradas {len(asignaciones)} asignaciones para empleado {empleado_id}")
+        
+        return {
+            "asignaciones": asignaciones,
+            "total": len(asignaciones),
+            "empleado_id": empleado_id,
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR DASHBOARD EMPLEADO: Error al obtener asignaciones: {e}")
+        raise HTTPException(status_code=500, detail="Error al obtener asignaciones del empleado")
