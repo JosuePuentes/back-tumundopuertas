@@ -78,6 +78,53 @@ class EmpleadoUpdate(BaseModel):
     identificador: Optional[str] = None
     pin: Optional[str] = None  # PIN opcional para actualizaciones
 
+class Asignacion(BaseModel):
+    pedido_id: str
+    item_id: str
+    empleado_id: Optional[str] = None
+    empleado_nombre: Optional[str] = None
+    modulo: str  # herreria|masillar|preparar|listo_facturar
+    estado: str = "pendiente"  # en_proceso|terminado|pendiente
+    fecha_asignacion: Optional[datetime] = None
+    fecha_fin: Optional[datetime] = None
+    descripcionitem: str
+    detalleitem: Optional[str] = None
+    cliente_nombre: str
+    costo_produccion: float
+    imagenes: List[str] = []
+
+class AsignacionCreate(BaseModel):
+    pedido_id: str
+    item_id: str
+    empleado_id: Optional[str] = None
+    empleado_nombre: Optional[str] = None
+    modulo: str
+    estado: str = "pendiente"
+    descripcionitem: str
+    detalleitem: Optional[str] = None
+    cliente_nombre: str
+    costo_produccion: float
+    imagenes: List[str] = []
+
+class AsignacionUpdate(BaseModel):
+    empleado_id: Optional[str] = None
+    empleado_nombre: Optional[str] = None
+    estado: Optional[str] = None
+    fecha_asignacion: Optional[datetime] = None
+    fecha_fin: Optional[datetime] = None
+
+class Comision(BaseModel):
+    empleado_id: str
+    asignacion_id: str
+    pedido_id: Optional[str] = None
+    item_id: Optional[str] = None
+    costo_produccion: float
+    fecha: datetime
+    modulo: str
+    descripcion: str
+    cliente_nombre: Optional[str] = None
+    empleado_nombre: Optional[str] = None
+
 class Cliente(BaseModel):
     nombre: str
     rif: str
