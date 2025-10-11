@@ -1857,6 +1857,68 @@ async def debug_fechas_abonos():
     except Exception as e:
         return {"error": str(e), "type": type(e).__name__}
 
+@router.get("/debug-filtro-fechas")
+async def debug_filtro_fechas(
+    fecha_inicio: str = "2025-10-11",
+    fecha_fin: str = "2025-10-11"
+):
+    """Endpoint para debuggear el filtro de fechas"""
+    try:
+        print(f"DEBUG FILTRO: Iniciando debug con fechas {fecha_inicio} a {fecha_fin}")
+        
+        # Construir filtro como en el endpoint principal
+        inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+        
+        print(f"DEBUG FILTRO: Fechas parseadas - inicio: {inicio}, fin: {fin}")
+        
+        filtro_fecha = {
+            "historial_pagos.fecha": {
+                "$gte": inicio,
+                "$lt": fin
+            }
+        }
+        
+        print(f"DEBUG FILTRO: Filtro construido: {filtro_fecha}")
+        
+        # Probar el filtro directamente
+        pedidos_con_filtro = list(pedidos_collection.find(filtro_fecha))
+        print(f"DEBUG FILTRO: Pedidos encontrados con filtro: {len(pedidos_con_filtro)}")
+        
+        # Probar sin filtro
+        todos_pedidos = list(pedidos_collection.find({}))
+        print(f"DEBUG FILTRO: Total pedidos: {len(todos_pedidos)}")
+        
+        # Ver algunos ejemplos de fechas
+        pipeline_ejemplos = [
+            {"$unwind": "$historial_pagos"},
+            {
+                "$project": {
+                    "_id": 0,
+                    "pedido_id": "$_id",
+                    "fecha": "$historial_pagos.fecha",
+                    "fecha_tipo": {"$type": "$historial_pagos.fecha"},
+                    "fecha_string": {"$dateToString": {"format": "%Y-%m-%d", "date": "$historial_pagos.fecha"}}
+                }
+            },
+            {"$limit": 5}
+        ]
+        
+        ejemplos = list(pedidos_collection.aggregate(pipeline_ejemplos))
+        
+        return {
+            "filtro_aplicado": filtro_fecha,
+            "pedidos_con_filtro": len(pedidos_con_filtro),
+            "total_pedidos": len(todos_pedidos),
+            "ejemplos_fechas": ejemplos,
+            "fecha_inicio_parsed": str(inicio),
+            "fecha_fin_parsed": str(fin)
+        }
+        
+    except Exception as e:
+        print(f"ERROR DEBUG FILTRO: {str(e)}")
+        return {"error": str(e), "type": type(e).__name__}
+
 @router.get("/{pedido_id}/datos-impresion")
 async def get_datos_impresion(pedido_id: str, current_user = Depends(get_current_user)):
     """Retornar datos del pedido para impresión"""
