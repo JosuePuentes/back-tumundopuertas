@@ -1977,6 +1977,50 @@ async def debug_filtro_fechas(
         print(f"ERROR DEBUG FILTRO: {str(e)}")
         return {"error": str(e), "type": type(e).__name__}
 
+@router.delete("/eliminar-pedido-prueba2")
+async def eliminar_pedido_prueba2():
+    """Endpoint para eliminar pedidos con método de pago PRUEBA 2"""
+    try:
+        print("DEBUG ELIMINAR: Buscando pedidos con método PRUEBA 2")
+        
+        # Buscar pedidos que tengan método de pago "PRUEBA 2"
+        pedidos_problema = list(pedidos_collection.find({
+            "historial_pagos.metodo": "PRUEBA 2"
+        }))
+        
+        print(f"DEBUG ELIMINAR: Encontrados {len(pedidos_problema)} pedidos con PRUEBA 2")
+        
+        pedidos_eliminados = []
+        for pedido in pedidos_problema:
+            pedido_id = str(pedido["_id"])
+            cliente_nombre = pedido.get("cliente_nombre", "SIN_NOMBRE")
+            
+            print(f"DEBUG ELIMINAR: Eliminando pedido {pedido_id} - Cliente: {cliente_nombre}")
+            
+            # Eliminar el pedido
+            result = pedidos_collection.delete_one({"_id": pedido["_id"]})
+            
+            if result.deleted_count > 0:
+                pedidos_eliminados.append({
+                    "pedido_id": pedido_id,
+                    "cliente_nombre": cliente_nombre,
+                    "eliminado": True
+                })
+                print(f"DEBUG ELIMINAR: Pedido {pedido_id} eliminado exitosamente")
+            else:
+                print(f"ERROR ELIMINAR: No se pudo eliminar pedido {pedido_id}")
+        
+        return {
+            "mensaje": f"Eliminados {len(pedidos_eliminados)} pedidos con método PRUEBA 2",
+            "pedidos_eliminados": pedidos_eliminados,
+            "total_encontrados": len(pedidos_problema),
+            "total_eliminados": len(pedidos_eliminados)
+        }
+        
+    except Exception as e:
+        print(f"ERROR ELIMINAR: {str(e)}")
+        return {"error": str(e), "type": type(e).__name__}
+
 @router.get("/{pedido_id}/datos-impresion")
 async def get_datos_impresion(pedido_id: str, current_user = Depends(get_current_user)):
     """Retornar datos del pedido para impresión"""
