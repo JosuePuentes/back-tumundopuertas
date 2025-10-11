@@ -1708,36 +1708,9 @@ async def get_venta_diaria(
                 print(f"ERROR VENTA DIARIA: Error parsing fechas: {e}")
                 raise HTTPException(status_code=400, detail="Formato de fecha inválido, use YYYY-MM-DD")
         
-        # Pipeline simplificado sin $lookup problemático
+        # Pipeline simplificado sin filtros problemáticos
         pipeline = [
-            {"$unwind": "$historial_pagos"}
-        ]
-        
-        # Aplicar filtro de fechas DESPUÉS del $unwind
-        if filtro_fecha:
-            # Simplificar el filtro para usar después del $unwind
-            pipeline.append({
-                "$match": {
-                    "$expr": {
-                        "$and": [
-                            {
-                                "$gte": [
-                                    {"$dateToString": {"format": "%Y-%m-%d", "date": "$historial_pagos.fecha"}},
-                                    fecha_inicio
-                                ]
-                            },
-                            {
-                                "$lt": [
-                                    {"$dateToString": {"format": "%Y-%m-%d", "date": "$historial_pagos.fecha"}},
-                                    fecha_fin
-                                ]
-                            }
-                        ]
-                    }
-                }
-            })
-        
-        pipeline.extend([
+            {"$unwind": "$historial_pagos"},
             {
                 "$project": {
                     "_id": 0,
@@ -1749,15 +1722,36 @@ async def get_venta_diaria(
                 }
             },
             {"$sort": {"fecha": -1}},
-        ])
+        ]
 
         print(f"DEBUG VENTA DIARIA: Ejecutando pipeline con {len(pipeline)} etapas")
         abonos_raw = list(pedidos_collection.aggregate(pipeline))
         print(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_raw)} abonos raw")
 
-        # Procesar los abonos manualmente para evitar problemas con $lookup
+        # Procesar los abonos manualmente y aplicar filtro de fechas en Python
         abonos = []
         for abono in abonos_raw:
+            # Aplicar filtro de fechas en Python si se especificó
+            if fecha_inicio and fecha_fin:
+                try:
+                    # Convertir fecha a string para comparación
+                    fecha_abono = abono.get("fecha")
+                    if isinstance(fecha_abono, datetime):
+                        fecha_str = fecha_abono.strftime("%Y-%m-%d")
+                    elif isinstance(fecha_abono, str):
+                        fecha_str = fecha_abono[:10]  # Tomar solo la parte de fecha
+                    else:
+                        continue  # Saltar si no es fecha válida
+                    
+                    # Verificar si está en el rango
+                    if fecha_str < fecha_inicio or fecha_str >= fecha_fin:
+                        continue
+                        
+                    print(f"DEBUG VENTA DIARIA: Abono dentro del rango: {fecha_str}")
+                except Exception as e:
+                    print(f"DEBUG VENTA DIARIA: Error procesando fecha: {e}")
+                    continue
+            
             metodo_id = abono.get("metodo_id")
             metodo_nombre = metodos_pago.get(str(metodo_id), metodos_pago.get(metodo_id, metodo_id))
             
