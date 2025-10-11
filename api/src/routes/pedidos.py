@@ -8,6 +8,7 @@ from ..auth.auth import get_current_user
 
 router = APIRouter()
 metodos_pago_collection = db["metodos_pago"]
+empleados_collection = db["empleados"]
 
 def obtener_siguiente_modulo(orden_actual: int) -> str:
     """Determinar el siguiente módulo según el orden actual"""
