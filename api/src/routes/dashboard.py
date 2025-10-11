@@ -580,6 +580,97 @@ async def get_datos_reales_dashboard():
         print(f"ERROR DATOS REALES: Error al obtener datos reales: {e}")
         raise HTTPException(status_code=500, detail=f"Error al obtener datos reales: {str(e)}")
 
+@router.get("/asignaciones/test-migracion")
+async def test_migracion_dashboard():
+    """Endpoint de prueba para verificar si hay datos para migrar"""
+    try:
+        collections = get_collections()
+        
+        print(f"DEBUG TEST: Verificando datos para migración")
+        
+        # Contar pedidos con seguimiento
+        pedidos_con_seguimiento = collections["pedidos"].count_documents({
+            "seguimiento": {"$exists": True, "$ne": []}
+        })
+        
+        # Contar asignaciones existentes en dashboard
+        asignaciones_existentes = collections["asignaciones"].count_documents({})
+        
+        # Obtener muestra de datos
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "asignaciones_articulos": {"$exists": True, "$ne": []}
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos": {"$exists": True, "$ne": []}
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$project": {
+                    "pedido_id": "$_id",
+                    "cliente_nombre": 1,
+                    "modulo": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$eq": ["$seguimiento.orden", 1]}, "then": "herreria"},
+                                {"case": {"$eq": ["$seguimiento.orden", 2]}, "then": "masillar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 3]}, "then": "preparar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 4]}, "then": "listo_facturar"}
+                            ],
+                            "default": "desconocido"
+                        }
+                    },
+                    "estado": "$seguimiento.asignaciones_articulos.estado",
+                    "empleado_id": "$seguimiento.asignaciones_articulos.empleadoId",
+                    "descripcionitem": "$seguimiento.asignaciones_articulos.descripcionitem"
+                }
+            },
+            {
+                "$match": {
+                    "estado": {"$in": ["en_proceso", "pendiente"]},
+                    "modulo": {"$ne": "desconocido"}
+                }
+            },
+            {
+                "$limit": 5
+            }
+        ]
+        
+        muestra_datos = list(collections["pedidos"].aggregate(pipeline))
+        
+        # Convertir ObjectId a string
+        for item in muestra_datos:
+            item["pedido_id"] = str(item["pedido_id"])
+        
+        print(f"DEBUG TEST: Pedidos con seguimiento: {pedidos_con_seguimiento}")
+        print(f"DEBUG TEST: Asignaciones en dashboard: {asignaciones_existentes}")
+        print(f"DEBUG TEST: Muestra de datos: {len(muestra_datos)}")
+        
+        return {
+            "pedidos_con_seguimiento": pedidos_con_seguimiento,
+            "asignaciones_en_dashboard": asignaciones_existentes,
+            "necesita_migracion": pedidos_con_seguimiento > 0 and asignaciones_existentes == 0,
+            "muestra_datos": muestra_datos,
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR TEST: Error al verificar datos: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al verificar datos: {str(e)}")
+
 @router.post("/asignaciones/asignar")
 async def asignar_articulo_a_empleado(
     pedido_id: str = Body(...),
