@@ -1741,10 +1741,14 @@ async def get_venta_diaria(
                     elif isinstance(fecha_abono, str):
                         fecha_str = fecha_abono[:10]  # Tomar solo la parte de fecha
                     else:
+                        print(f"DEBUG VENTA DIARIA: Fecha inválida: {fecha_abono} (tipo: {type(fecha_abono)})")
                         continue  # Saltar si no es fecha válida
+                    
+                    print(f"DEBUG VENTA DIARIA: Comparando fecha {fecha_str} con rango {fecha_inicio} a {fecha_fin}")
                     
                     # Verificar si está en el rango (fecha_fin ya incluye +1 día)
                     if fecha_str < fecha_inicio or fecha_str >= fecha_fin:
+                        print(f"DEBUG VENTA DIARIA: Fecha {fecha_str} fuera del rango")
                         continue
                         
                     print(f"DEBUG VENTA DIARIA: Abono dentro del rango: {fecha_str}")
