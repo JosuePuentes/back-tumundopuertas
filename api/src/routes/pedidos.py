@@ -1736,10 +1736,22 @@ async def get_venta_diaria(
                 try:
                     # Convertir fecha a string para comparación
                     fecha_abono = abono.get("fecha")
+                    fecha_str = None
+                    
                     if isinstance(fecha_abono, datetime):
                         fecha_str = fecha_abono.strftime("%Y-%m-%d")
                     elif isinstance(fecha_abono, str):
-                        fecha_str = fecha_abono[:10]  # Tomar solo la parte de fecha
+                        # Manejar diferentes formatos de fecha
+                        if "/" in fecha_abono:
+                            # Formato MM/DD/YYYY -> convertir a YYYY-MM-DD
+                            try:
+                                fecha_obj = datetime.strptime(fecha_abono[:10], "%m/%d/%Y")
+                                fecha_str = fecha_obj.strftime("%Y-%m-%d")
+                            except ValueError:
+                                print(f"DEBUG VENTA DIARIA: Error parseando fecha MM/DD/YYYY: {fecha_abono}")
+                                continue
+                        else:
+                            fecha_str = fecha_abono[:10]  # Formato YYYY-MM-DD
                     else:
                         print(f"DEBUG VENTA DIARIA: Fecha inválida: {fecha_abono} (tipo: {type(fecha_abono)})")
                         continue  # Saltar si no es fecha válida
