@@ -34,13 +34,6 @@ async def get_all_empleados():
         empleado["_id"] = str(empleado["_id"])
     return empleados
 
-@router.get("/{empleado_id}/")
-async def get_empleado(empleado_id: str):
-    empleado = empleados_collection.find_one({"_id": empleado_id})
-    if not empleado:
-        raise HTTPException(status_code=404, detail="Empleado no encontrado")
-    return empleado
-
 @router.post("/")
 async def create_empleado(empleado: EmpleadoCreate):
     # Validar formato del PIN
@@ -64,6 +57,13 @@ async def create_empleado(empleado: EmpleadoCreate):
     
     result = empleados_collection.insert_one(empleado.dict())
     return {"message": "Empleado creado correctamente", "id": str(result.inserted_id)}
+
+@router.get("/{empleado_id}/")
+async def get_empleado(empleado_id: str):
+    empleado = empleados_collection.find_one({"_id": empleado_id})
+    if not empleado:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado")
+    return empleado
 
 @router.put("/{empleado_id}/", dependencies=[Depends(get_current_admin_user)])
 async def update_empleado(empleado_id: str, empleado: EmpleadoUpdate):
