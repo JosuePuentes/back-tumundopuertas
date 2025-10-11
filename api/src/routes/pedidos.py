@@ -9,6 +9,15 @@ from ..auth.auth import get_current_user
 router = APIRouter()
 metodos_pago_collection = db["metodos_pago"]
 
+def obtener_siguiente_modulo(orden_actual: int) -> str:
+    """Determinar el siguiente módulo según el orden actual"""
+    flujo = {
+        1: "masillar",      # Herrería → Masillar
+        2: "preparar",      # Masillar → Preparar  
+        3: "listo_facturar" # Preparar → Listo para Facturar
+    }
+    return flujo.get(orden_actual, "completado")
+
 @router.get("/all/")
 async def get_all_pedidos():
     pedidos = list(pedidos_collection.find())
@@ -640,6 +649,34 @@ async def terminar_asignacion_articulo(
         print(f"DEBUG TERMINAR: Asignación no encontrada")
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     
+    # ACTUALIZAR ESTADO_SUBESTADO DEL ARTÍCULO PARA MOVER AL SIGUIENTE MÓDULO
+    print(f"DEBUG TERMINAR: Actualizando estado_subestado del artículo")
+    siguiente_modulo = obtener_siguiente_modulo(orden)
+    print(f"DEBUG TERMINAR: Siguiente módulo: {siguiente_modulo}")
+    
+    try:
+        # Actualizar el estado_subestado del artículo específico
+        result_item = pedidos_collection.update_one(
+            {
+                "_id": pedido_obj_id,
+                "items.id": item_id
+            },
+            {
+                "$set": {
+                    "items.$.estado_subestado": siguiente_modulo,
+                    "items.$.fecha_progreso": datetime.now().isoformat()
+                }
+            }
+        )
+        print(f"DEBUG TERMINAR: Artículo actualizado: {result_item.modified_count} documentos modificados")
+        
+        if result_item.modified_count == 0:
+            print(f"DEBUG TERMINAR: Advertencia: No se pudo actualizar el estado_subestado del artículo")
+    except Exception as e:
+        print(f"DEBUG TERMINAR: Error al actualizar estado_subestado: {e}")
+        import traceback
+        print(f"DEBUG TERMINAR: Traceback: {traceback.format_exc()}")
+    
     # MOVER EL ARTÍCULO INDIVIDUAL AL SIGUIENTE PROCESO
     print(f"DEBUG TERMINAR: Moviendo artículo individual al siguiente proceso")
     proceso_actual = None
@@ -734,6 +771,20 @@ async def terminar_asignacion_articulo(
         raise HTTPException(status_code=500, detail="Error al actualizar el pedido")
     
     print(f"DEBUG TERMINAR: Asignación terminada exitosamente")
+    
+    # Información adicional para debug
+    debug_info = {
+        "proceso_actual_encontrado": proceso_actual is not None,
+        "asignacion_terminada_encontrada": asignacion_terminada is not None,
+        "proceso_siguiente_encontrado": proceso_siguiente is not None,
+        "siguiente_orden": siguiente_orden,
+        "asignaciones_restantes": len(proceso_actual.get("asignaciones_articulos", [])) if proceso_actual else 0,
+        "total_procesos": len(seguimiento),
+        "siguiente_modulo": siguiente_modulo,
+        "estado_subestado_actualizado": result_item.modified_count > 0 if 'result_item' in locals() else False
+    }
+    print(f"DEBUG TERMINAR: Info debug: {debug_info}")
+    
     return {
         "message": "Asignación terminada correctamente",
         "success": True,
@@ -747,7 +798,8 @@ async def terminar_asignacion_articulo(
         "fecha_fin": fecha_fin,
         "articulo_movido": proceso_siguiente is not None,
         "siguiente_proceso": siguiente_orden if proceso_siguiente else None,
-        "proceso_actual_vacio": len(proceso_actual.get("asignaciones_articulos", [])) == 0 if proceso_actual else False
+        "proceso_actual_vacio": len(proceso_actual.get("asignaciones_articulos", [])) == 0 if proceso_actual else False,
+        "debug_info": debug_info
     }
 
 # Endpoint alternativo con barra al final (para compatibilidad)
