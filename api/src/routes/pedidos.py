@@ -1709,13 +1709,33 @@ async def get_venta_diaria(
                 raise HTTPException(status_code=400, detail="Formato de fecha inválido, use YYYY-MM-DD")
         
         # Pipeline simplificado sin $lookup problemático
-        pipeline = []
+        pipeline = [
+            {"$unwind": "$historial_pagos"}
+        ]
         
-        # Aplicar filtro de fechas ANTES del $unwind
+        # Aplicar filtro de fechas DESPUÉS del $unwind
         if filtro_fecha:
-            pipeline.append({"$match": filtro_fecha})
-        
-        pipeline.append({"$unwind": "$historial_pagos"})
+            # Simplificar el filtro para usar después del $unwind
+            pipeline.append({
+                "$match": {
+                    "$expr": {
+                        "$and": [
+                            {
+                                "$gte": [
+                                    {"$dateToString": {"format": "%Y-%m-%d", "date": "$historial_pagos.fecha"}},
+                                    fecha_inicio
+                                ]
+                            },
+                            {
+                                "$lt": [
+                                    {"$dateToString": {"format": "%Y-%m-%d", "date": "$historial_pagos.fecha"}},
+                                    fecha_fin
+                                ]
+                            }
+                        ]
+                    }
+                }
+            })
         
         pipeline.extend([
             {
