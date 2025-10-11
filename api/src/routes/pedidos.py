@@ -143,12 +143,25 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
             if pago.metodo and pago.monto and pago.monto > 0:
                 print(f"DEBUG CREAR PEDIDO: Procesando abono de {pago.monto} con método {pago.metodo}")
                 try:
-                    # Buscar el método de pago por _id
-                    metodo_pago = metodos_pago_collection.find_one({"_id": ObjectId(pago.metodo)})
+                    # Buscar el método de pago por _id o por nombre
+                    metodo_pago = None
+                    
+                    # Intentar buscar por ObjectId primero
+                    try:
+                        metodo_pago = metodos_pago_collection.find_one({"_id": ObjectId(pago.metodo)})
+                        print(f"DEBUG CREAR PEDIDO: Buscando por ObjectId: {pago.metodo}")
+                    except:
+                        print(f"DEBUG CREAR PEDIDO: No es ObjectId válido, buscando por nombre: {pago.metodo}")
+                    
+                    # Si no se encontró por ObjectId, buscar por nombre
+                    if not metodo_pago:
+                        metodo_pago = metodos_pago_collection.find_one({"nombre": pago.metodo})
+                        print(f"DEBUG CREAR PEDIDO: Buscando por nombre: {pago.metodo}")
+                    
                     if metodo_pago:
                         saldo_actual = metodo_pago.get("saldo", 0.0)
                         nuevo_saldo = saldo_actual + pago.monto
-                        print(f"DEBUG CREAR PEDIDO: Incrementando saldo de {saldo_actual} a {nuevo_saldo}")
+                        print(f"DEBUG CREAR PEDIDO: Incrementando saldo de {saldo_actual} a {nuevo_saldo} para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
                         
                         result_update = metodos_pago_collection.update_one(
                             {"_id": metodo_pago["_id"]},
@@ -156,7 +169,7 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                         )
                         print(f"DEBUG CREAR PEDIDO: Resultado de actualización: {result_update.modified_count} documentos modificados")
                     else:
-                        print(f"DEBUG CREAR PEDIDO: Método de pago '{pago.metodo}' no encontrado")
+                        print(f"DEBUG CREAR PEDIDO: Método de pago '{pago.metodo}' no encontrado ni por ID ni por nombre")
                 except Exception as e:
                     print(f"DEBUG CREAR PEDIDO: Error al actualizar saldo: {e}")
                     import traceback
@@ -1517,13 +1530,26 @@ async def actualizar_pago(
             print(f"DEBUG PAGO: Incrementando saldo del método '{metodo}' en {monto}")
             print(f"DEBUG PAGO: Tipo de metodo: {type(metodo).__name__}")
             try:
-                # Buscar el método de pago por _id
-                metodo_pago = metodos_pago_collection.find_one({"_id": ObjectId(metodo)})
+                # Buscar el método de pago por _id o por nombre
+                metodo_pago = None
+                
+                # Intentar buscar por ObjectId primero
+                try:
+                    metodo_pago = metodos_pago_collection.find_one({"_id": ObjectId(metodo)})
+                    print(f"DEBUG PAGO: Buscando por ObjectId: {metodo}")
+                except:
+                    print(f"DEBUG PAGO: No es ObjectId válido, buscando por nombre: {metodo}")
+                
+                # Si no se encontró por ObjectId, buscar por nombre
+                if not metodo_pago:
+                    metodo_pago = metodos_pago_collection.find_one({"nombre": metodo})
+                    print(f"DEBUG PAGO: Buscando por nombre: {metodo}")
+                
                 print(f"DEBUG PAGO: Método encontrado: {metodo_pago is not None}")
                 if metodo_pago:
                     saldo_actual = metodo_pago.get("saldo", 0.0)
                     nuevo_saldo = saldo_actual + monto
-                    print(f"DEBUG PAGO: Saldo actual: {saldo_actual}, Nuevo saldo: {nuevo_saldo}")
+                    print(f"DEBUG PAGO: Saldo actual: {saldo_actual}, Nuevo saldo: {nuevo_saldo} para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
                     
                     result_update = metodos_pago_collection.update_one(
                         {"_id": metodo_pago["_id"]},
