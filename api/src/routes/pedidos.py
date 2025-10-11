@@ -1188,14 +1188,23 @@ async def terminar_asignacion_articulo(
         empleado = None
         try:
             # Intentar primero como string
+            print(f"DEBUG TERMINAR: Buscando empleado con identificador string: '{empleado_id}'")
             empleado = empleados_collection.find_one({"identificador": empleado_id})
             print(f"DEBUG TERMINAR: Búsqueda como string: {empleado is not None}")
             
             # Si no se encuentra, intentar como número
             if not empleado:
                 empleado_id_num = int(empleado_id)
+                print(f"DEBUG TERMINAR: Buscando empleado con identificador número: {empleado_id_num}")
                 empleado = empleados_collection.find_one({"identificador": empleado_id_num})
                 print(f"DEBUG TERMINAR: Búsqueda como número: {empleado is not None}")
+                
+            # Si aún no se encuentra, mostrar algunos empleados de ejemplo
+            if not empleado:
+                print(f"DEBUG TERMINAR: Empleado no encontrado. Mostrando algunos empleados de ejemplo:")
+                empleados_ejemplo = list(empleados_collection.find({}, {"identificador": 1, "nombreCompleto": 1}).limit(5))
+                for emp in empleados_ejemplo:
+                    print(f"DEBUG TERMINAR: - {emp.get('nombreCompleto', 'SIN_NOMBRE')} (ID: {emp.get('identificador')} tipo: {type(emp.get('identificador'))})")
                 
         except ValueError:
             print(f"DEBUG TERMINAR: No se pudo convertir a número: {empleado_id}")
