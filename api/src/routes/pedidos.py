@@ -481,20 +481,45 @@ async def get_comisiones_produccion_terminadas_por_empleado(
     return asignaciones_empleado
 
 @router.get("/comisiones/produccion/enproceso/")
-async def get_asignaciones_enproceso_empleado(empleado_id: str):
+async def get_asignaciones_enproceso_empleado(empleado_id: str = None, modulo: str = None):
+    print(f"DEBUG COMISIONES: empleado_id={empleado_id}, modulo={modulo}")
+    
+    # Mapear módulos a órdenes
+    modulo_orden = {
+        "herreria": 1,
+        "masillar": 2, 
+        "preparar": 3,
+        "listo_facturar": 4
+    }
+    
+    orden_filtro = None
+    if modulo:
+        orden_filtro = modulo_orden.get(modulo)
+        if not orden_filtro:
+            raise HTTPException(status_code=400, detail=f"Módulo no válido: {modulo}")
+        print(f"DEBUG COMISIONES: Filtrando por módulo {modulo} (orden {orden_filtro})")
+    
     pedidos = list(pedidos_collection.find({}))
     resultado = []
     for pedido in pedidos:
         pedido_id = str(pedido.get("_id"))
         seguimiento = pedido.get("seguimiento", [])
         for sub in seguimiento:
+            # Filtrar por módulo si se especifica
+            if modulo and sub.get("orden") != orden_filtro:
+                continue
+                
             if "asignaciones_articulos" in sub:
                 asignaciones = sub.get("asignaciones_articulos")
                 if isinstance(asignaciones, list):
                     for asignacion in asignaciones:
                         # Mostrar tanto asignaciones en_proceso como terminadas
+                        filtro_empleado = True
+                        if empleado_id:
+                            filtro_empleado = asignacion.get("empleadoId") == empleado_id
+                        
                         if (
-                            asignacion.get("empleadoId") == empleado_id and
+                            filtro_empleado and
                             asignacion.get("estado") in ["en_proceso", "terminado"]
                         ):
                             # Buscar el detalleitem en pedido["items"] por itemId
@@ -517,9 +542,17 @@ async def get_asignaciones_enproceso_empleado(empleado_id: str):
                                 "cliente_email": pedido.get("cliente_email"),
                                 # Agrega aquí otros campos relevantes del cliente si existen
                             }
+                            # Determinar el módulo basado en el orden
+                            modulo_nombre = "desconocido"
+                            for mod, ord in modulo_orden.items():
+                                if ord == sub.get("orden"):
+                                    modulo_nombre = mod
+                                    break
+                            
                             asignacion_data = {
                                 "pedido_id": pedido_id,
                                 "orden": sub.get("orden"),
+                                "modulo": modulo_nombre,
                                 "nombre_subestado": sub.get("nombre_subestado"),
                                 "estado_subestado": sub.get("estado"),
                                 "fecha_inicio_subestado": sub.get("fecha_inicio"),
@@ -536,7 +569,19 @@ async def get_asignaciones_enproceso_empleado(empleado_id: str):
                                 "cliente": cliente_info,
                                 "imagenes": imagenes}
                             resultado.append(asignacion_data)
-    return resultado
+    
+    print(f"DEBUG COMISIONES: Encontradas {len(resultado)} asignaciones")
+    print(f"DEBUG COMISIONES: Filtros aplicados - empleado_id: {empleado_id}, modulo: {modulo}")
+    
+    return {
+        "asignaciones": resultado,
+        "total": len(resultado),
+        "filtros": {
+            "empleado_id": empleado_id,
+            "modulo": modulo
+        },
+        "success": True
+    }
 
 @router.get("/filtrar/por-fecha/")
 async def get_pedidos_por_fecha(fecha_inicio: str = None, fecha_fin: str = None):
