@@ -1656,13 +1656,34 @@ async def get_venta_diaria(
         fecha_busqueda_mmddyyyy = None
         if fecha_inicio and fecha_fin:
             try:
-                # Convertir YYYY-MM-DD a MM/DD/YYYY
-                fecha_obj = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+                # Intentar diferentes formatos de fecha
+                fecha_obj = None
+                
+                # Formato 1: YYYY-MM-DD
+                try:
+                    fecha_obj = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+                    print(f"DEBUG VENTA DIARIA: Fecha parseada como YYYY-MM-DD: {fecha_inicio}")
+                except ValueError:
+                    pass
+                
+                # Formato 2: MM/DD/YYYY
+                if fecha_obj is None:
+                    try:
+                        fecha_obj = datetime.strptime(fecha_inicio, "%m/%d/%Y")
+                        print(f"DEBUG VENTA DIARIA: Fecha parseada como MM/DD/YYYY: {fecha_inicio}")
+                    except ValueError:
+                        pass
+                
+                if fecha_obj is None:
+                    raise ValueError(f"No se pudo parsear la fecha: {fecha_inicio}")
+                
+                # Convertir a formato MM/DD/YYYY para buscar en la BD
                 fecha_busqueda_mmddyyyy = fecha_obj.strftime("%m/%d/%Y")
                 print(f"DEBUG VENTA DIARIA: Buscando fecha en formato MM/DD/YYYY: {fecha_busqueda_mmddyyyy}")
+                
             except ValueError as e:
                 print(f"ERROR VENTA DIARIA: Error parsing fechas: {e}")
-                raise HTTPException(status_code=400, detail="Formato de fecha inválido, use YYYY-MM-DD")
+                raise HTTPException(status_code=400, detail=f"Formato de fecha inválido: {fecha_inicio}. Use YYYY-MM-DD o MM/DD/YYYY")
         
         # Pipeline simplificado sin filtros problemáticos
         pipeline = [
