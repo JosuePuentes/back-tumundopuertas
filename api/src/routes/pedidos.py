@@ -590,12 +590,23 @@ async def terminar_asignacion_articulo(
     print(f"DEBUG TERMINAR: Pedido encontrado: {pedido.get('cliente_nombre', 'SIN_NOMBRE')}")
     
     seguimiento = pedido.get("seguimiento", [])
+    
+    # DEBUG: Mostrar estructura completa de seguimiento
+    print(f"DEBUG TERMINAR: Estructura completa de seguimiento:")
+    print(f"DEBUG TERMINAR: Total procesos: {len(seguimiento)}")
+    for i, sub in enumerate(seguimiento):
+        orden_proceso = sub.get("orden", -1)
+        estado_proceso = sub.get("estado", "SIN_ESTADO")
+        nombre_proceso = sub.get("nombre", "SIN_NOMBRE")
+        asignaciones_count = len(sub.get("asignaciones_articulos", []))
+        print(f"DEBUG TERMINAR: Proceso {i}: orden={orden_proceso}, estado={estado_proceso}, nombre={nombre_proceso}, asignaciones={asignaciones_count}")
     actualizado = False
     asignacion_encontrada = None
     
     for sub in seguimiento:
         if int(sub.get("orden", -1)) == orden:
-            print(f"DEBUG TERMINAR: Encontrado subestado con orden {orden}")
+            nombre_proceso = sub.get("nombre", "SIN_NOMBRE")
+            print(f"DEBUG TERMINAR: Encontrado subestado con orden {orden} - Proceso: {nombre_proceso}")
             asignaciones = sub.get("asignaciones_articulos", [])
             print(f"DEBUG TERMINAR: Asignaciones encontradas: {len(asignaciones)}")
             
@@ -603,6 +614,7 @@ async def terminar_asignacion_articulo(
                 print(f"DEBUG TERMINAR: Revisando asignación: itemId={asignacion.get('itemId')}, empleadoId={asignacion.get('empleadoId')}")
                 if asignacion.get("itemId") == item_id and asignacion.get("empleadoId") == empleado_id:
                     print(f"DEBUG TERMINAR: Asignación encontrada, estado actual: {asignacion.get('estado')}")
+                    print(f"DEBUG TERMINAR: Terminando asignación en proceso: {nombre_proceso}")
                     
                     # Actualizar todos los campos necesarios
                     asignacion["estado"] = estado
