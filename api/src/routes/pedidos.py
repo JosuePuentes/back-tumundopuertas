@@ -80,6 +80,22 @@ async def test_terminar_put_endpoint():
         "timestamp": datetime.now().isoformat()
     }
 
+@router.put("/test-terminar-simple")
+async def test_terminar_simple():
+    """Endpoint de prueba simple para verificar que el servidor funciona"""
+    try:
+        return {
+            "message": "Endpoint simple funcionando",
+            "status": "ok",
+            "timestamp": datetime.now().isoformat(),
+            "test": "simple"
+        }
+    except Exception as e:
+        print(f"ERROR TEST SIMPLE: {e}")
+        import traceback
+        print(f"ERROR TEST SIMPLE TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error en test simple: {str(e)}")
+
 @router.get("/all/{orden}")
 async def get_all_pedidos_por_orden(orden: str):
     pedidos = list(pedidos_collection.find({"orden": orden}))
@@ -590,23 +606,12 @@ async def terminar_asignacion_articulo(
     print(f"DEBUG TERMINAR: Pedido encontrado: {pedido.get('cliente_nombre', 'SIN_NOMBRE')}")
     
     seguimiento = pedido.get("seguimiento", [])
-    
-    # DEBUG: Mostrar estructura completa de seguimiento
-    print(f"DEBUG TERMINAR: Estructura completa de seguimiento:")
-    print(f"DEBUG TERMINAR: Total procesos: {len(seguimiento)}")
-    for i, sub in enumerate(seguimiento):
-        orden_proceso = sub.get("orden", -1)
-        estado_proceso = sub.get("estado", "SIN_ESTADO")
-        nombre_proceso = sub.get("nombre", "SIN_NOMBRE")
-        asignaciones_count = len(sub.get("asignaciones_articulos", []))
-        print(f"DEBUG TERMINAR: Proceso {i}: orden={orden_proceso}, estado={estado_proceso}, nombre={nombre_proceso}, asignaciones={asignaciones_count}")
     actualizado = False
     asignacion_encontrada = None
     
     for sub in seguimiento:
         if int(sub.get("orden", -1)) == orden:
-            nombre_proceso = sub.get("nombre", "SIN_NOMBRE")
-            print(f"DEBUG TERMINAR: Encontrado subestado con orden {orden} - Proceso: {nombre_proceso}")
+            print(f"DEBUG TERMINAR: Encontrado subestado con orden {orden}")
             asignaciones = sub.get("asignaciones_articulos", [])
             print(f"DEBUG TERMINAR: Asignaciones encontradas: {len(asignaciones)}")
             
@@ -614,7 +619,6 @@ async def terminar_asignacion_articulo(
                 print(f"DEBUG TERMINAR: Revisando asignación: itemId={asignacion.get('itemId')}, empleadoId={asignacion.get('empleadoId')}")
                 if asignacion.get("itemId") == item_id and asignacion.get("empleadoId") == empleado_id:
                     print(f"DEBUG TERMINAR: Asignación encontrada, estado actual: {asignacion.get('estado')}")
-                    print(f"DEBUG TERMINAR: Terminando asignación en proceso: {nombre_proceso}")
                     
                     # Actualizar todos los campos necesarios
                     asignacion["estado"] = estado
@@ -636,86 +640,6 @@ async def terminar_asignacion_articulo(
         print(f"DEBUG TERMINAR: Asignación no encontrada")
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     
-    # MOVER EL ARTÍCULO INDIVIDUAL AL SIGUIENTE PROCESO
-    print(f"DEBUG TERMINAR: Moviendo artículo individual al siguiente proceso")
-    proceso_actual = None
-    asignacion_terminada = None
-    
-    try:
-        # Encontrar el proceso actual y la asignación terminada
-        for sub in seguimiento:
-            if int(sub.get("orden", -1)) == orden:
-                proceso_actual = sub
-                asignaciones = sub.get("asignaciones_articulos", [])
-                print(f"DEBUG TERMINAR: Proceso actual tiene {len(asignaciones)} asignaciones")
-                
-                for asignacion in asignaciones:
-                    if asignacion.get("itemId") == item_id and asignacion.get("empleadoId") == empleado_id:
-                        asignacion_terminada = asignacion.copy()
-                        print(f"DEBUG TERMINAR: Asignación encontrada para mover: {asignacion.get('itemId')}")
-                        break
-                break
-        
-        # Buscar el siguiente proceso
-        siguiente_orden = orden + 1
-        proceso_siguiente = None
-        
-        print(f"DEBUG TERMINAR: Buscando proceso siguiente con orden {siguiente_orden}")
-        print(f"DEBUG TERMINAR: Total de procesos en seguimiento: {len(seguimiento)}")
-        
-        for i, sub in enumerate(seguimiento):
-            orden_proceso = sub.get("orden", -1)
-            print(f"DEBUG TERMINAR: Proceso {i}: orden={orden_proceso}, estado={sub.get('estado', 'SIN_ESTADO')}")
-            if int(orden_proceso) == siguiente_orden:
-                proceso_siguiente = sub
-                print(f"DEBUG TERMINAR: Proceso siguiente encontrado: orden={siguiente_orden}")
-                break
-        
-        if proceso_siguiente and asignacion_terminada:
-            print(f"DEBUG TERMINAR: Moviendo artículo {item_id} al siguiente proceso (orden {siguiente_orden})")
-            
-            # Inicializar asignaciones_articulos si no existe
-            if "asignaciones_articulos" not in proceso_siguiente:
-                proceso_siguiente["asignaciones_articulos"] = []
-            
-            # Crear nueva asignación para el siguiente proceso
-            nueva_asignacion = {
-                "itemId": asignacion_terminada.get("itemId"),
-                "empleadoId": None,  # Sin asignar aún
-                "nombreempleado": "",
-                "descripcionitem": asignacion_terminada.get("descripcionitem"),
-                "costoproduccion": asignacion_terminada.get("costoproduccion"),
-                "estado": "pendiente",  # Pendiente de asignar
-                "estado_subestado": "pendiente",
-                "fecha_inicio": None,
-                "fecha_fin": None
-            }
-            
-            # Agregar al siguiente proceso
-            proceso_siguiente["asignaciones_articulos"].append(nueva_asignacion)
-            proceso_siguiente["estado"] = "en_proceso"
-            
-            # Remover la asignación del proceso actual
-            if proceso_actual and "asignaciones_articulos" in proceso_actual:
-                proceso_actual["asignaciones_articulos"] = [
-                    a for a in proceso_actual["asignaciones_articulos"] 
-                    if not (a.get("itemId") == item_id and a.get("empleadoId") == empleado_id)
-                ]
-                print(f"DEBUG TERMINAR: Asignación removida del proceso actual")
-            
-            print(f"DEBUG TERMINAR: Artículo movido exitosamente al siguiente proceso")
-        else:
-            print(f"DEBUG TERMINAR: No hay siguiente proceso o asignación no encontrada")
-            if not proceso_siguiente:
-                print(f"DEBUG TERMINAR: No se encontró proceso con orden {siguiente_orden}")
-            if not asignacion_terminada:
-                print(f"DEBUG TERMINAR: No se encontró asignación terminada")
-                
-    except Exception as e:
-        print(f"DEBUG TERMINAR: Error en movimiento de artículo: {e}")
-        import traceback
-        print(f"DEBUG TERMINAR: Traceback: {traceback.format_exc()}")
-    
     # Actualizar el pedido en la base de datos
     result = pedidos_collection.update_one(
         {"_id": pedido_obj_id},
@@ -729,17 +653,6 @@ async def terminar_asignacion_articulo(
         raise HTTPException(status_code=500, detail="Error al actualizar el pedido")
     
     print(f"DEBUG TERMINAR: Asignación terminada exitosamente")
-    
-    # Información adicional para debug
-    debug_info = {
-        "proceso_actual_encontrado": proceso_actual is not None,
-        "asignacion_terminada_encontrada": asignacion_terminada is not None,
-        "proceso_siguiente_encontrado": proceso_siguiente is not None,
-        "siguiente_orden": siguiente_orden,
-        "asignaciones_restantes": len(proceso_actual.get("asignaciones_articulos", [])) if proceso_actual else 0
-    }
-    print(f"DEBUG TERMINAR: Info debug: {debug_info}")
-    
     return {
         "message": "Asignación terminada correctamente",
         "success": True,
@@ -750,11 +663,7 @@ async def terminar_asignacion_articulo(
         "empleado_id": empleado_id,
         "estado_anterior": "en_proceso",
         "estado_nuevo": "terminado",
-        "fecha_fin": fecha_fin,
-        "articulo_movido": proceso_siguiente is not None,
-        "siguiente_proceso": siguiente_orden if proceso_siguiente else None,
-        "proceso_actual_vacio": len(proceso_actual.get("asignaciones_articulos", [])) == 0 if proceso_actual else False,
-        "debug_info": debug_info
+        "fecha_fin": fecha_fin
     }
 
 # Endpoint alternativo con barra al final (para compatibilidad)
