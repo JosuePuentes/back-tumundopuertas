@@ -8,6 +8,7 @@ interface empleado {
     id: string;
   nombreCompleto: string;
   permisos: string[];
+  pin: string;
 }
 
 const permisosDisponibles = [
@@ -26,6 +27,7 @@ const CrearEmpleado: React.FC = () => {
         id: "",
         nombreCompleto: "",
         permisos: [],
+        pin: "",
     });
     const [mensaje, setMensaje] = useState<string>("");
     const [errorMsg, setErrorMsg] = useState<string>("");
@@ -48,8 +50,14 @@ const CrearEmpleado: React.FC = () => {
         e.preventDefault();
         setMensaje("");
         setErrorMsg("");
-        if (!empleado.id || !empleado.nombreCompleto) {
+        if (!empleado.id || !empleado.nombreCompleto || !empleado.pin) {
             setErrorMsg("Completa todos los campos obligatorios.");
+            return;
+        }
+        
+        // Validar que el PIN tenga exactamente 4 dígitos
+        if (!/^\d{4}$/.test(empleado.pin)) {
+            setErrorMsg("El PIN debe tener exactamente 4 dígitos numéricos.");
             return;
         }
         try {
@@ -61,6 +69,7 @@ const CrearEmpleado: React.FC = () => {
                     identificador: empleado.id,
                     nombreCompleto: empleado.nombreCompleto,
                     permisos: empleado.permisos,
+                    pin: empleado.pin,
                 }),
             });
             if (!response.ok) {
@@ -68,7 +77,7 @@ const CrearEmpleado: React.FC = () => {
                 throw new Error(errorData.detail || "Error de red o servidor.");
             }
             setMensaje("Empleado creado correctamente ✅");
-            setEmpleado({ id: "", nombreCompleto: "", permisos: [] });
+            setEmpleado({ id: "", nombreCompleto: "", permisos: [], pin: "" });
         } catch (err: any) {
             setErrorMsg(err?.message || "Error de red o servidor.");
         }
