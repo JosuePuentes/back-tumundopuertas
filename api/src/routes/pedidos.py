@@ -1743,7 +1743,7 @@ async def get_venta_diaria(
                     else:
                         continue  # Saltar si no es fecha válida
                     
-                    # Verificar si está en el rango
+                    # Verificar si está en el rango (fecha_fin ya incluye +1 día)
                     if fecha_str < fecha_inicio or fecha_str >= fecha_fin:
                         continue
                         
