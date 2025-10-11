@@ -583,6 +583,189 @@ async def get_asignaciones_enproceso_empleado(empleado_id: str = None, modulo: s
         "success": True
     }
 
+# Endpoints adicionales para compatibilidad con frontend
+@router.get("/comisiones/produccion/enproceso")
+async def get_asignaciones_enproceso_empleado_sin_slash(empleado_id: str = None, modulo: str = None):
+    """Endpoint sin barra final para compatibilidad"""
+    return await get_asignaciones_enproceso_empleado(empleado_id, modulo)
+
+@router.get("/comisiones/produccion")
+async def get_comisiones_produccion_general():
+    """Endpoint general para comisiones de producción"""
+    try:
+        collections = get_collections()
+        
+        # Obtener estadísticas generales
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "asignaciones_articulos": {"$exists": True, "$ne": []}
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos": {"$exists": True, "$ne": []}
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$project": {
+                    "modulo": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$eq": ["$seguimiento.orden", 1]}, "then": "herreria"},
+                                {"case": {"$eq": ["$seguimiento.orden", 2]}, "then": "masillar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 3]}, "then": "preparar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 4]}, "then": "listo_facturar"}
+                            ],
+                            "default": "desconocido"
+                        }
+                    },
+                    "estado": "$seguimiento.asignaciones_articulos.estado"
+                }
+            },
+            {
+                "$match": {
+                    "modulo": {"$ne": "desconocido"}
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "modulo": "$modulo",
+                        "estado": "$estado"
+                    },
+                    "count": {"$sum": 1}
+                }
+            }
+        ]
+        
+        estadisticas = list(collections["pedidos"].aggregate(pipeline))
+        
+        return {
+            "estadisticas": estadisticas,
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR COMISIONES GENERAL: Error al obtener estadísticas: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener estadísticas: {str(e)}")
+
+@router.get("/produccion/enproceso")
+async def get_produccion_enproceso():
+    """Endpoint para producción en proceso"""
+    try:
+        collections = get_collections()
+        
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "asignaciones_articulos": {"$exists": True, "$ne": []}
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos": {"$exists": True, "$ne": []}
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "cliente_nombre": 1,
+                    "pedido_id": "$_id",
+                    "item_id": "$seguimiento.asignaciones_articulos.itemId",
+                    "empleado_id": "$seguimiento.asignaciones_articulos.empleadoId",
+                    "empleado_nombre": "$seguimiento.asignaciones_articulos.nombreempleado",
+                    "modulo": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$eq": ["$seguimiento.orden", 1]}, "then": "herreria"},
+                                {"case": {"$eq": ["$seguimiento.orden", 2]}, "then": "masillar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 3]}, "then": "preparar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 4]}, "then": "listo_facturar"}
+                            ],
+                            "default": "desconocido"
+                        }
+                    },
+                    "estado": "$seguimiento.asignaciones_articulos.estado",
+                    "descripcionitem": "$seguimiento.asignaciones_articulos.descripcionitem",
+                    "costo_produccion": "$seguimiento.asignaciones_articulos.costoproduccion",
+                    "orden": "$seguimiento.orden"
+                }
+            },
+            {
+                "$match": {
+                    "estado": {"$in": ["en_proceso", "pendiente"]},
+                    "modulo": {"$ne": "desconocido"}
+                }
+            },
+            {
+                "$sort": {"orden": 1, "pedido_id": 1}
+            }
+        ]
+        
+        asignaciones = list(collections["pedidos"].aggregate(pipeline))
+        
+        # Convertir ObjectId a string
+        for asignacion in asignaciones:
+            asignacion["pedido_id"] = str(asignacion["pedido_id"])
+            asignacion["item_id"] = str(asignacion["item_id"])
+            if asignacion.get("_id"):
+                asignacion["_id"] = str(asignacion["_id"])
+        
+        return {
+            "asignaciones": asignaciones,
+            "total": len(asignaciones),
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR PRODUCCION ENPROCESO: Error al obtener datos: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener datos: {str(e)}")
+
+@router.get("/enproceso")
+async def get_pedidos_enproceso():
+    """Endpoint para pedidos en proceso"""
+    try:
+        collections = get_collections()
+        
+        pedidos = list(collections["pedidos"].find({
+            "estado_general": {"$in": ["en_proceso", "pendiente"]}
+        }))
+        
+        # Convertir ObjectId a string
+        for pedido in pedidos:
+            pedido["_id"] = str(pedido["_id"])
+        
+        return {
+            "pedidos": pedidos,
+            "total": len(pedidos),
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR PEDIDOS ENPROCESO: Error al obtener pedidos: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener pedidos: {str(e)}")
+
 @router.get("/filtrar/por-fecha/")
 async def get_pedidos_por_fecha(fecha_inicio: str = None, fecha_fin: str = None):
     filtro_fecha = None
