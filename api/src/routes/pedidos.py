@@ -593,7 +593,7 @@ async def get_asignaciones_enproceso_empleado_sin_slash(empleado_id: str = None,
 async def get_comisiones_produccion_general():
     """Endpoint general para comisiones de producción"""
     try:
-        collections = get_collections()
+        print(f"DEBUG COMISIONES GENERAL: Iniciando endpoint general")
         
         # Obtener estadísticas generales
         pipeline = [
@@ -649,7 +649,7 @@ async def get_comisiones_produccion_general():
             }
         ]
         
-        estadisticas = list(collections["pedidos"].aggregate(pipeline))
+        estadisticas = list(pedidos_collection.aggregate(pipeline))
         
         return {
             "estadisticas": estadisticas,
@@ -723,7 +723,7 @@ async def get_produccion_enproceso():
             }
         ]
         
-        asignaciones = list(collections["pedidos"].aggregate(pipeline))
+        asignaciones = list(pedidos_collection.aggregate(pipeline))
         
         # Convertir ObjectId a string
         for asignacion in asignaciones:
@@ -746,9 +746,7 @@ async def get_produccion_enproceso():
 async def get_pedidos_enproceso():
     """Endpoint para pedidos en proceso"""
     try:
-        collections = get_collections()
-        
-        pedidos = list(collections["pedidos"].find({
+        pedidos = list(pedidos_collection.find({
             "estado_general": {"$in": ["en_proceso", "pendiente"]}
         }))
         
