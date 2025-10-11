@@ -16,6 +16,15 @@ async def get_all_pedidos():
         pedido["_id"] = str(pedido["_id"])
     return pedidos
 
+@router.get("/test-terminar")
+async def test_terminar_endpoint():
+    """Endpoint de prueba para verificar que el servidor está funcionando"""
+    return {
+        "message": "Endpoint de prueba funcionando",
+        "status": "ok",
+        "timestamp": datetime.now().isoformat()
+    }
+
 @router.get("/all/{orden}")
 async def get_all_pedidos_por_orden(orden: str):
     pedidos = list(pedidos_collection.find({"orden": orden}))
