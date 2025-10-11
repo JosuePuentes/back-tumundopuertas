@@ -1633,131 +1633,102 @@ async def get_venta_diaria(
     Retorna un resumen de todos los abonos (pagos) realizados,
     filtrando por rango de fechas si se especifica.
     """
-    filtro_fecha = None
-    if fecha_inicio and fecha_fin:
-        try:
-            inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
-            filtro_fecha = (inicio, fin)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Formato de fecha inválido, use YYYY-MM-DD")
-
-    pipeline = [
-        {"$unwind": "$historial_pagos"},
-    ]
-
-    if filtro_fecha:
-        pipeline.append({
-            "$match": {
-                "$expr": {
-                    "$and": [
-                        { "$gte": [ { "$toDate": "$historial_pagos.fecha" }, filtro_fecha[0] ] },
-                        { "$lt": [ { "$toDate": "$historial_pagos.fecha" }, filtro_fecha[1] ] }
-                    ]
-                }
-            }
-        })
-    
-    pipeline.extend([
-        {
-            "$lookup": {
-                "from": "metodos_pago",
-                "let": {"metodo_id": "$historial_pagos.metodo"},
-                "pipeline": [
-                    {
-                        "$match": {
-                            "$expr": {
-                                "$or": [
-                                    {
-                                        "$and": [
-                                            {"$ne": ["$$metodo_id", "None"]},
-                                            {"$ne": ["$$metodo_id", null]},
-                                            {"$eq": ["$_id", {"$toObjectId": "$$metodo_id"}]}
-                                        ]
-                                    },
-                                    {"$eq": [{"$toString": "$_id"}, "$$metodo_id"]},
-                                    {"$eq": ["$nombre", "$$metodo_id"]}
-                                ]
-                            }
-                        }
-                    }
-                ],
-                "as": "metodo_pago_info"
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "pedido_id": "$_id",
-                "cliente_nombre": "$cliente_nombre",
-                "fecha": "$historial_pagos.fecha",
-                "monto": "$historial_pagos.monto",
-                "metodo": {
-                    "$cond": {
-                        "if": {"$gt": [{"$size": "$metodo_pago_info"}, 0]},
-                        "then": {"$arrayElemAt": ["$metodo_pago_info.nombre", 0]},
-                        "else": "$historial_pagos.metodo"
-                    }
-                },
-            }
-        },
-        {"$sort": {"fecha": -1}},
-    ])
-
     try:
-        abonos = list(pedidos_collection.aggregate(pipeline))
+        print(f"DEBUG VENTA DIARIA: Iniciando consulta con fechas {fecha_inicio} a {fecha_fin}")
+        
+        # Obtener todos los métodos de pago primero
+        metodos_pago = {}
+        for metodo in metodos_pago_collection.find({}):
+            metodos_pago[str(metodo["_id"])] = metodo["nombre"]
+            metodos_pago[metodo["nombre"]] = metodo["nombre"]
+        
+        print(f"DEBUG VENTA DIARIA: Cargados {len(metodos_pago)} métodos de pago")
+        
+        # Construir filtro de fechas
+        filtro_fecha = {}
+        if fecha_inicio and fecha_fin:
+            try:
+                inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+                print(f"DEBUG VENTA DIARIA: Fechas parseadas - inicio: {inicio}, fin: {fin}")
+                
+                filtro_fecha = {
+                    "historial_pagos.fecha": {
+                        "$gte": inicio,
+                        "$lt": fin
+                    }
+                }
+            except ValueError as e:
+                print(f"ERROR VENTA DIARIA: Error parsing fechas: {e}")
+                raise HTTPException(status_code=400, detail="Formato de fecha inválido, use YYYY-MM-DD")
+        
+        # Pipeline simplificado sin $lookup problemático
+        pipeline = [
+            {"$unwind": "$historial_pagos"},
+        ]
+        
+        if filtro_fecha:
+            pipeline.append({"$match": filtro_fecha})
+        
+        pipeline.extend([
+            {
+                "$project": {
+                    "_id": 0,
+                    "pedido_id": "$_id",
+                    "cliente_nombre": "$cliente_nombre",
+                    "fecha": "$historial_pagos.fecha",
+                    "monto": "$historial_pagos.monto",
+                    "metodo_id": "$historial_pagos.metodo"
+                }
+            },
+            {"$sort": {"fecha": -1}},
+        ])
+
+        print(f"DEBUG VENTA DIARIA: Ejecutando pipeline con {len(pipeline)} etapas")
+        abonos_raw = list(pedidos_collection.aggregate(pipeline))
+        print(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_raw)} abonos raw")
+
+        # Procesar los abonos manualmente para evitar problemas con $lookup
+        abonos = []
+        for abono in abonos_raw:
+            metodo_id = abono.get("metodo_id")
+            metodo_nombre = metodos_pago.get(str(metodo_id), metodos_pago.get(metodo_id, metodo_id))
+            
+            abono_procesado = {
+                "pedido_id": str(abono["pedido_id"]),
+                "cliente_nombre": abono.get("cliente_nombre"),
+                "fecha": abono.get("fecha"),
+                "monto": abono.get("monto", 0),
+                "metodo": metodo_nombre
+            }
+            abonos.append(abono_procesado)
+
+        print(f"DEBUG VENTA DIARIA: Procesados {len(abonos)} abonos")
+
+        # Calcular totales
+        total_ingresos = sum(abono.get("monto", 0) for abono in abonos)
+
+        ingresos_por_metodo = {}
+        for abono in abonos:
+            metodo = abono.get("metodo", "Desconocido")
+            if metodo not in ingresos_por_metodo:
+                ingresos_por_metodo[metodo] = 0
+            ingresos_por_metodo[metodo] += abono.get("monto", 0)
+
+        print(f"DEBUG VENTA DIARIA: Total ingresos: {total_ingresos}, Métodos: {len(ingresos_por_metodo)}")
+
+        return {
+            "total_ingresos": total_ingresos,
+            "abonos": abonos,
+            "ingresos_por_metodo": ingresos_por_metodo,
+        }
+        
     except Exception as e:
-        print(f"ERROR VENTA DIARIA: Error en consulta MongoDB: {str(e)}")
+        print(f"ERROR VENTA DIARIA: Error completo: {str(e)}")
         print(f"ERROR VENTA DIARIA: Tipo de error: {type(e).__name__}")
-        # Intentar consulta simplificada como fallback
-        try:
-            print("ERROR VENTA DIARIA: Intentando consulta simplificada...")
-            pipeline_simple = [{"$unwind": "$historial_pagos"}]
-            if filtro_fecha:
-                pipeline_simple.append({
-                    "$match": {
-                        "historial_pagos.fecha": {
-                            "$gte": filtro_fecha[0],
-                            "$lt": filtro_fecha[1]
-                        }
-                    }
-                })
-            pipeline_simple.extend([
-                {
-                    "$project": {
-                        "_id": 0,
-                        "pedido_id": "$_id",
-                        "cliente_nombre": "$cliente_nombre",
-                        "fecha": "$historial_pagos.fecha",
-                        "monto": "$historial_pagos.monto",
-                        "metodo": "$historial_pagos.metodo"
-                    }
-                },
-                {"$sort": {"fecha": -1}}
-            ])
-            abonos = list(pedidos_collection.aggregate(pipeline_simple))
-            print(f"ERROR VENTA DIARIA: Consulta simplificada exitosa, {len(abonos)} registros")
-        except Exception as e2:
-            print(f"ERROR VENTA DIARIA: Consulta simplificada también falló: {str(e2)}")
-            raise HTTPException(status_code=500, detail=f"Error en la consulta a la DB: {str(e)}")
-
-    total_ingresos = sum(abono.get("monto", 0) for abono in abonos)
-
-    ingresos_por_metodo = {}
-    for abono in abonos:
-        metodo = abono.get("metodo", "Desconocido")
-        if metodo not in ingresos_por_metodo:
-            ingresos_por_metodo[metodo] = 0
-        ingresos_por_metodo[metodo] += abono.get("monto", 0)
-
-    for abono in abonos:
-        abono["pedido_id"] = str(abono["pedido_id"])
-
-    return {
-        "total_ingresos": total_ingresos,
-        "abonos": abonos,
-        "ingresos_por_metodo": ingresos_por_metodo,
-    }
+        import traceback
+        print(f"ERROR VENTA DIARIA: Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error en la consulta a la DB: {str(e)}")
 
 @router.get("/venta-diaria", include_in_schema=False)
 async def get_venta_diaria_no_slash(
