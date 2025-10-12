@@ -1426,47 +1426,49 @@ async def terminar_asignacion_articulo(
         print(f"ERROR TERMINAR: Error convirtiendo orden a int: {e}")
         raise HTTPException(status_code=400, detail=f"orden debe ser un número válido: {str(e)}")
     
-    # Validar PIN si se proporciona
+    # VALIDAR PIN - ES OBLIGATORIO
+    if not pin:
+        print(f"ERROR TERMINAR: PIN es obligatorio para terminar asignación")
+        raise HTTPException(status_code=400, detail="PIN es obligatorio para terminar asignación")
+    
+    print(f"DEBUG TERMINAR: Validando PIN para empleado {empleado_id}")
+    
+    # Buscar empleado por identificador (tanto string como número)
     empleado = None
-    if pin:
-        print(f"DEBUG TERMINAR: Validando PIN para empleado {empleado_id}")
+    try:
+        # Intentar primero como string
+        print(f"DEBUG TERMINAR: Buscando empleado con identificador string: '{empleado_id}'")
+        empleado = empleados_collection.find_one({"identificador": empleado_id})
+        print(f"DEBUG TERMINAR: Búsqueda como string: {empleado is not None}")
         
-        # Buscar empleado por identificador (tanto string como número)
-        try:
-            # Intentar primero como string
-            print(f"DEBUG TERMINAR: Buscando empleado con identificador string: '{empleado_id}'")
-            empleado = empleados_collection.find_one({"identificador": empleado_id})
-            print(f"DEBUG TERMINAR: Búsqueda como string: {empleado is not None}")
-            
-            # Si no se encuentra, intentar como número
-            if not empleado:
-                empleado_id_num = int(empleado_id)
-                print(f"DEBUG TERMINAR: Buscando empleado con identificador número: {empleado_id_num}")
-                empleado = empleados_collection.find_one({"identificador": empleado_id_num})
-                print(f"DEBUG TERMINAR: Búsqueda como número: {empleado is not None}")
-                
-        except ValueError:
-            print(f"DEBUG TERMINAR: No se pudo convertir a número: {empleado_id}")
-        
+        # Si no se encuentra, intentar como número
         if not empleado:
-            print(f"WARNING TERMINAR: Empleado no encontrado: {empleado_id}")
-            print(f"WARNING TERMINAR: Continuando sin validación de PIN")
-            empleado = {"nombreCompleto": f"Empleado {empleado_id}", "pin": None}
-            print(f"DEBUG TERMINAR: Saltando validación de PIN para empleado no encontrado")
-        else:
-            print(f"DEBUG TERMINAR: Empleado encontrado: {empleado.get('nombreCompleto', empleado_id)}")
+            empleado_id_num = int(empleado_id)
+            print(f"DEBUG TERMINAR: Buscando empleado con identificador número: {empleado_id_num}")
+            empleado = empleados_collection.find_one({"identificador": empleado_id_num})
+            print(f"DEBUG TERMINAR: Búsqueda como número: {empleado is not None}")
             
-            # Solo validar PIN si el empleado existe y tiene PIN
-            if empleado.get("pin") and empleado.get("pin") != pin:
-                print(f"ERROR TERMINAR: PIN incorrecto para empleado {empleado_id}")
-                raise HTTPException(status_code=400, detail="PIN incorrecto")
-            
-            if empleado.get("pin"):
-                print(f"DEBUG TERMINAR: PIN validado correctamente para empleado {empleado.get('nombreCompleto', empleado_id)}")
-            else:
-                print(f"DEBUG TERMINAR: Empleado sin PIN configurado, saltando validación")
-    else:
-        print(f"DEBUG TERMINAR: No se proporcionó PIN, continuando sin validación")
+    except ValueError:
+        print(f"DEBUG TERMINAR: No se pudo convertir a número: {empleado_id}")
+    
+    if not empleado:
+        print(f"ERROR TERMINAR: Empleado no encontrado: {empleado_id}")
+        raise HTTPException(status_code=404, detail=f"Empleado {empleado_id} no encontrado en la base de datos")
+    
+    print(f"DEBUG TERMINAR: Empleado encontrado: {empleado.get('nombreCompleto', empleado_id)}")
+    
+    # Validar que el empleado tenga PIN configurado
+    if not empleado.get("pin"):
+        print(f"ERROR TERMINAR: Empleado {empleado_id} no tiene PIN configurado")
+        raise HTTPException(status_code=400, detail="Empleado no tiene PIN configurado")
+    
+    # Validar que el PIN sea correcto
+    if empleado.get("pin") != pin:
+        print(f"ERROR TERMINAR: PIN incorrecto para empleado {empleado_id}")
+        print(f"ERROR TERMINAR: PIN recibido: {pin}, PIN esperado: {empleado.get('pin')}")
+        raise HTTPException(status_code=400, detail="PIN incorrecto")
+    
+    print(f"DEBUG TERMINAR: PIN validado correctamente para empleado {empleado.get('nombreCompleto', empleado_id)}")
     
     try:
         pedido_obj_id = ObjectId(pedido_id)
