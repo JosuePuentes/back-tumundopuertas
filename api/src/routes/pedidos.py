@@ -1773,12 +1773,18 @@ async def terminar_asignacion_articulo(
         
         for i, sub in enumerate(seguimiento):
             orden_proceso = sub.get("orden", -1)
-            nombre_proceso = sub.get("nombre", "SIN_NOMBRE")
+            nombre_proceso = sub.get("nombre_subestado", "SIN_NOMBRE")
             print(f"DEBUG TERMINAR: Proceso {i}: orden={orden_proceso}, nombre={nombre_proceso}, estado={sub.get('estado', 'SIN_ESTADO')}")
             if int(orden_proceso) == siguiente_orden:
                 proceso_siguiente = sub
                 print(f"DEBUG TERMINAR: Proceso siguiente encontrado: orden={siguiente_orden}, nombre={nombre_proceso}")
                 break
+        
+        if not proceso_siguiente:
+            print(f"DEBUG TERMINAR: ERROR - No se encontró proceso con orden {siguiente_orden}")
+            print(f"DEBUG TERMINAR: Procesos disponibles:")
+            for i, sub in enumerate(seguimiento):
+                print(f"  - Proceso {i}: orden={sub.get('orden')}, nombre={sub.get('nombre_subestado')}")
         
         if proceso_siguiente and asignacion_terminada:
             print(f"DEBUG TERMINAR: Moviendo artículo {item_id} al siguiente proceso (orden {siguiente_orden})")
@@ -1810,29 +1816,29 @@ async def terminar_asignacion_articulo(
             proceso_siguiente["asignaciones_articulos"].append(nueva_asignacion)
             proceso_siguiente["estado"] = "en_proceso"
             
-            # Remover COMPLETAMENTE la asignación del proceso actual
+            # MARCAR LA ASIGNACIÓN COMO COMPLETADA EN EL PROCESO ACTUAL (NO REMOVER)
             if proceso_actual and "asignaciones_articulos" in proceso_actual:
-                asignaciones_originales = len(proceso_actual["asignaciones_articulos"])
-                proceso_actual["asignaciones_articulos"] = [
-                    a for a in proceso_actual["asignaciones_articulos"] 
-                    if not (a.get("itemId") == item_id and a.get("empleadoId") == empleado_id)
-                ]
-                asignaciones_restantes = len(proceso_actual["asignaciones_articulos"])
-                print(f"DEBUG TERMINAR: Asignación removida del proceso actual: {asignaciones_originales} -> {asignaciones_restantes}")
+                for asignacion in proceso_actual["asignaciones_articulos"]:
+                    if (asignacion.get("itemId") == item_id and 
+                        asignacion.get("empleadoId") == empleado_id):
+                        # Marcar como completado en lugar de remover
+                        asignacion["estado"] = "completado"
+                        asignacion["estado_subestado"] = "completado"
+                        asignacion["fecha_fin"] = fecha_fin
+                        print(f"DEBUG TERMINAR: Asignación marcada como completada en proceso actual")
+                        break
                 
-                # Si no quedan asignaciones en el proceso actual, cambiar su estado
-                if asignaciones_restantes == 0:
+                # Verificar si todas las asignaciones del proceso están completadas
+                asignaciones_activas = [
+                    a for a in proceso_actual["asignaciones_articulos"] 
+                    if a.get("estado") not in ["completado", "terminado"]
+                ]
+                
+                if len(asignaciones_activas) == 0:
                     proceso_actual["estado"] = "completado"
-                    print(f"DEBUG TERMINAR: Proceso actual marcado como completado (sin asignaciones)")
+                    print(f"DEBUG TERMINAR: Proceso actual marcado como completado (todas las asignaciones completadas)")
                 else:
-                    # Verificar si todas las asignaciones restantes están terminadas
-                    todas_terminadas = all(
-                        a.get("estado") == "terminado" 
-                        for a in proceso_actual["asignaciones_articulos"]
-                    )
-                    if todas_terminadas:
-                        proceso_actual["estado"] = "completado"
-                        print(f"DEBUG TERMINAR: Proceso actual marcado como completado (todas terminadas)")
+                    print(f"DEBUG TERMINAR: Proceso actual mantiene estado - {len(asignaciones_activas)} asignaciones activas restantes")
             
             print(f"DEBUG TERMINAR: Artículo movido exitosamente al siguiente proceso")
         else:
