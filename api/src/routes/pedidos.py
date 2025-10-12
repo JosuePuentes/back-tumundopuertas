@@ -2837,7 +2837,12 @@ async def get_progreso_pedido(pedido_id: str):
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
         
         seguimiento = pedido.get("seguimiento", [])
+        if seguimiento is None:
+            seguimiento = []
+            
         items = pedido.get("items", [])
+        if items is None:
+            items = []
         
         # Calcular progreso por módulo
         modulos = [
@@ -2857,9 +2862,15 @@ async def get_progreso_pedido(pedido_id: str):
                 
                 # Buscar si el item está completado en este módulo
                 for proceso in seguimiento:
+                    if proceso is None:
+                        continue
                     if proceso.get("orden") == modulo_orden:
                         asignaciones = proceso.get("asignaciones_articulos", [])
+                        if asignaciones is None:
+                            asignaciones = []
                         for asignacion in asignaciones:
+                            if asignacion is None:
+                                continue
                             if asignacion.get("itemId") == item_id and asignacion.get("estado") == "completado":
                                 modulo["completado"] += 1
                                 break
