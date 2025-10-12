@@ -2704,3 +2704,185 @@ async def get_datos_impresion(pedido_id: str, current_user = Depends(get_current
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener datos de impresión: {str(e)}")
+
+# ========================================
+# NUEVOS ENDPOINTS PARA FLUJO DE PRODUCCIÓN INTELIGENTE
+# ========================================
+
+@router.get("/empleados-por-modulo/{pedido_id}/{item_id}")
+async def get_empleados_por_modulo(pedido_id: str, item_id: str):
+    """Obtener empleados disponibles para asignar según el módulo actual del item"""
+    try:
+        print(f"DEBUG EMPLEADOS MODULO: Buscando empleados para pedido {pedido_id}, item {item_id}")
+        
+        # Obtener el pedido
+        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Encontrar el item específico
+        item_encontrado = None
+        for item in pedido.get("items", []):
+            if str(item.get("_id")) == item_id:
+                item_encontrado = item
+                break
+        
+        if not item_encontrado:
+            raise HTTPException(status_code=404, detail="Item no encontrado en el pedido")
+        
+        # Determinar el módulo actual del item
+        seguimiento = pedido.get("seguimiento", [])
+        modulo_actual = None
+        
+        for proceso in seguimiento:
+            asignaciones = proceso.get("asignaciones_articulos", [])
+            for asignacion in asignaciones:
+                if asignacion.get("itemId") == item_id:
+                    modulo_actual = proceso.get("orden")
+                    break
+            if modulo_actual:
+                break
+        
+        # Si no hay asignación activa, determinar el primer módulo disponible
+        if not modulo_actual:
+            # Buscar el primer módulo que no tenga el item completado
+            for proceso in seguimiento:
+                asignaciones = proceso.get("asignaciones_articulos", [])
+                item_en_modulo = False
+                for asignacion in asignaciones:
+                    if asignacion.get("itemId") == item_id:
+                        item_en_modulo = True
+                        break
+                
+                if not item_en_modulo:
+                    modulo_actual = proceso.get("orden")
+                    break
+        
+        print(f"DEBUG EMPLEADOS MODULO: Módulo actual: {modulo_actual}")
+        
+        # Determinar qué tipo de empleados mostrar según el módulo
+        empleados_filtrados = []
+        
+        if modulo_actual == 1:  # Herreria/Soldadura
+            # Mostrar herreros y ayudantes
+            empleados = list(empleados_collection.find({
+                "$or": [
+                    {"permisos": {"$in": ["herrero", "HERRERO"]}},
+                    {"permisos": {"$in": ["ayudante", "AYUDANTE"]}}
+                ]
+            }))
+        elif modulo_actual == 2:  # Masillar/Pintar
+            # Mostrar masilladores/pintores y ayudantes
+            empleados = list(empleados_collection.find({
+                "$or": [
+                    {"permisos": {"$in": ["masillador", "MASILLADOR", "pintor", "PINTOR"]}},
+                    {"permisos": {"$in": ["ayudante", "AYUDANTE"]}}
+                ]
+            }))
+        elif modulo_actual == 3:  # Manillar/Preparar
+            # Mostrar preparadores y ayudantes
+            empleados = list(empleados_collection.find({
+                "$or": [
+                    {"permisos": {"$in": ["preparador", "PREPARADOR", "manillar", "MANILLAR"]}},
+                    {"permisos": {"$in": ["ayudante", "AYUDANTE"]}}
+                ]
+            }))
+        elif modulo_actual == 4:  # Facturar
+            # Mostrar todos los empleados (para facturación)
+            empleados = list(empleados_collection.find({}))
+        else:
+            # Módulo desconocido, mostrar todos
+            empleados = list(empleados_collection.find({}))
+        
+        # Formatear empleados
+        for empleado in empleados:
+            empleados_filtrados.append({
+                "id": str(empleado["_id"]),
+                "identificador": empleado.get("identificador"),
+                "nombre": empleado.get("nombre"),
+                "permisos": empleado.get("permisos", []),
+                "pin": empleado.get("pin")
+            })
+        
+        print(f"DEBUG EMPLEADOS MODULO: Encontrados {len(empleados_filtrados)} empleados para módulo {modulo_actual}")
+        
+        return {
+            "empleados": empleados_filtrados,
+            "modulo_actual": modulo_actual,
+            "modulo_nombre": {
+                1: "Herreria/Soldadura",
+                2: "Masillar/Pintar", 
+                3: "Manillar/Preparar",
+                4: "Facturar"
+            }.get(modulo_actual, "Desconocido"),
+            "total_empleados": len(empleados_filtrados)
+        }
+        
+    except Exception as e:
+        print(f"ERROR EMPLEADOS MODULO: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener empleados: {str(e)}")
+
+@router.get("/progreso-pedido/{pedido_id}")
+async def get_progreso_pedido(pedido_id: str):
+    """Obtener el estado de progreso de un pedido con barra de progreso"""
+    try:
+        print(f"DEBUG PROGRESO: Obteniendo progreso para pedido {pedido_id}")
+        
+        # Obtener el pedido
+        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        seguimiento = pedido.get("seguimiento", [])
+        items = pedido.get("items", [])
+        
+        # Calcular progreso por módulo
+        modulos = [
+            {"orden": 1, "nombre": "Herreria/Soldadura", "completado": 0, "total": 0},
+            {"orden": 2, "nombre": "Masillar/Pintar", "completado": 0, "total": 0},
+            {"orden": 3, "nombre": "Manillar/Preparar", "completado": 0, "total": 0},
+            {"orden": 4, "nombre": "Facturar", "completado": 0, "total": 0}
+        ]
+        
+        # Contar items por módulo
+        for item in items:
+            item_id = str(item.get("_id"))
+            
+            for modulo in modulos:
+                modulo_orden = modulo["orden"]
+                modulo["total"] += 1
+                
+                # Buscar si el item está completado en este módulo
+                for proceso in seguimiento:
+                    if proceso.get("orden") == modulo_orden:
+                        asignaciones = proceso.get("asignaciones_articulos", [])
+                        for asignacion in asignaciones:
+                            if asignacion.get("itemId") == item_id and asignacion.get("estado") == "completado":
+                                modulo["completado"] += 1
+                                break
+                        break
+        
+        # Calcular porcentajes
+        for modulo in modulos:
+            if modulo["total"] > 0:
+                modulo["porcentaje"] = round((modulo["completado"] / modulo["total"]) * 100, 1)
+            else:
+                modulo["porcentaje"] = 0
+        
+        # Determinar estado general
+        total_items = len(items)
+        items_completados = sum(1 for modulo in modulos for _ in range(modulo["completado"]))
+        progreso_general = round((items_completados / (total_items * 4)) * 100, 1) if total_items > 0 else 0
+        
+        return {
+            "pedido_id": pedido_id,
+            "modulos": modulos,
+            "progreso_general": progreso_general,
+            "total_items": total_items,
+            "items_completados": items_completados,
+            "estado": "completado" if progreso_general == 100 else "en_proceso"
+        }
+        
+    except Exception as e:
+        print(f"ERROR PROGRESO: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener progreso: {str(e)}")
