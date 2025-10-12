@@ -331,6 +331,8 @@ async def get_empleados_comisiones_produccion_terminadas(
     fecha_inicio: str = None,
     fecha_fin: str = None
 ):
+    print(f"DEBUG COMISIONES TERMINADAS: Iniciando endpoint con fechas: {fecha_inicio} - {fecha_fin}")
+    
     # Parsear fechas si se proporcionan
     filtro_fecha = None
     if fecha_inicio and fecha_fin:
@@ -340,59 +342,81 @@ async def get_empleados_comisiones_produccion_terminadas(
             filtro_fecha = (fecha_inicio_dt, fecha_fin_dt)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Formato de fecha inválido: {str(e)}")
+    
     pedidos = list(pedidos_collection.find({}))
     resultado = {}
+    
+    print(f"DEBUG COMISIONES TERMINADAS: Procesando {len(pedidos)} pedidos")
+    
     for pedido in pedidos:
         pedido_id = str(pedido.get("_id"))
-        seguimiento = pedido.get("seguimiento", [])
-        for sub in seguimiento:
-            if sub.get("estado") == "terminado" and "asignaciones_articulos" in sub:
-                asignaciones = sub.get("asignaciones_articulos")
-                if isinstance(asignaciones, list):
-                    for idx, asignacion in enumerate(asignaciones):
-                        empleado_id = asignacion.get("empleadoId")
-                        nombre_empleado = asignacion.get("nombreempleado")
-                        item_id = asignacion.get("itemId")
-                        descripcion_item = asignacion.get("descripcionitem")
-                        costo_produccion = asignacion.get("costoproduccion")
-                        key = f"{item_id}-{idx}"
-                        # Filtrar por fecha si corresponde
-                        if filtro_fecha:
-                            fecha_fin_asignacion = asignacion.get("fecha_fin")
-                            if not fecha_fin_asignacion:
-                                continue
-                            try:
-                                fecha_fin_dt_asignacion = datetime.strptime(fecha_fin_asignacion[:10], "%Y-%m-%d")
-                            except Exception:
-                                continue
-                            if not (filtro_fecha[0] <= fecha_fin_dt_asignacion <= filtro_fecha[1]):
-                                continue
-                        asignacion_data = {
-                            "pedido_id": pedido_id,
-                            "orden": sub.get("orden"),
-                            "nombre_subestado": sub.get("nombre_subestado"),
-                            "estado_subestado": sub.get("estado"),
-                            "fecha_inicio_subestado": sub.get("fecha_inicio"),
-                            "fecha_fin_subestado": sub.get("fecha_fin"),
-                            "item_id": item_id,
-                            "key": key,
-                            "empleadoId": empleado_id,
-                            "nombreempleado": nombre_empleado,
-                            "fecha_inicio": asignacion.get("fecha_inicio"),
-                            "estado": asignacion.get("estado"),
-                            "descripcionitem": descripcion_item,
-                            "costoproduccion": costo_produccion,
-                            "fecha_fin": asignacion.get("fecha_fin"),
-                            "cantidad": next((item.get("cantidad") for item in pedido.get("items", []) if item.get("id") == item_id), 1),
-                            "precio_item": next((item.get("precio") for item in pedido.get("items", []) if item.get("id") == item_id), 0)
-                        }
-                        if empleado_id not in resultado:
-                            resultado[empleado_id] = {
-                                "empleado_id": empleado_id,
-                                "nombre_empleado": nombre_empleado,
-                                "asignaciones": []
-                            }
-                        resultado[empleado_id]["asignaciones"].append(asignacion_data)
+        
+        # LEER COMISIONES DEL ARRAY COMISIONES DEL PEDIDO
+        comisiones_pedido = pedido.get("comisiones", [])
+        print(f"DEBUG COMISIONES TERMINADAS: Pedido {pedido_id} tiene {len(comisiones_pedido)} comisiones")
+        
+        for comision in comisiones_pedido:
+            empleado_id = comision.get("empleado_id")
+            nombre_empleado = comision.get("empleado_nombre")
+            item_id = comision.get("item_id")
+            descripcion_item = comision.get("descripcion", "")
+            costo_produccion = comision.get("costo_produccion", 0)
+            modulo = comision.get("modulo", "")
+            fecha_comision = comision.get("fecha")
+            
+            print(f"DEBUG COMISIONES TERMINADAS: Comisión encontrada - empleado: {empleado_id}, costo: {costo_produccion}")
+            
+            # Filtrar por fecha si corresponde
+            if filtro_fecha and fecha_comision:
+                try:
+                    if isinstance(fecha_comision, str):
+                        fecha_comision_dt = datetime.strptime(fecha_comision[:10], "%Y-%m-%d")
+                    else:
+                        fecha_comision_dt = fecha_comision.date()
+                        fecha_comision_dt = datetime.combine(fecha_comision_dt, datetime.min.time())
+                    
+                    if not (filtro_fecha[0] <= fecha_comision_dt <= filtro_fecha[1]):
+                        continue
+                except Exception as e:
+                    print(f"DEBUG COMISIONES TERMINADAS: Error procesando fecha: {e}")
+                    continue
+            
+            # Buscar información del item en el pedido
+            item_info = next((item for item in pedido.get("items", []) if item.get("id") == item_id), {})
+            
+            asignacion_data = {
+                "pedido_id": pedido_id,
+                "orden": 1 if modulo == "herreria" else 2 if modulo == "masillar" else 3 if modulo == "preparar" else 0,
+                "nombre_subestado": f"{modulo.title()} / Completado",
+                "estado_subestado": "terminado",
+                "fecha_inicio_subestado": None,
+                "fecha_fin_subestado": fecha_comision,
+                "item_id": item_id,
+                "key": f"{item_id}-{empleado_id}",
+                "empleadoId": empleado_id,
+                "nombreempleado": nombre_empleado,
+                "fecha_inicio": None,
+                "estado": "completado",
+                "descripcionitem": descripcion_item,
+                "costoproduccion": costo_produccion,
+                "fecha_fin": fecha_comision,
+                "cantidad": item_info.get("cantidad", 1),
+                "precio_item": item_info.get("precio", 0),
+                "modulo": modulo
+            }
+            
+            if empleado_id not in resultado:
+                resultado[empleado_id] = {
+                    "empleado_id": empleado_id,
+                    "nombre_empleado": nombre_empleado,
+                    "asignaciones": []
+                }
+            resultado[empleado_id]["asignaciones"].append(asignacion_data)
+    
+    print(f"DEBUG COMISIONES TERMINADAS: Total empleados con comisiones: {len(resultado)}")
+    for empleado_id, data in resultado.items():
+        print(f"DEBUG COMISIONES TERMINADAS: Empleado {empleado_id} ({data['nombre_empleado']}): {len(data['asignaciones'])} comisiones")
+    
     # Devuelve como lista
     return list(resultado.values())
 
