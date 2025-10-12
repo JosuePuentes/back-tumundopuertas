@@ -30,8 +30,47 @@ async def test_empleados_endpoint():
 @router.get("/all/")
 async def get_all_empleados():
     empleados = list(empleados_collection.find())
+    
+    # Mapear cargo a permisos automáticamente
+    def mapear_cargo_a_permisos(cargo, nombre_completo):
+        permisos = []
+        cargo_lower = (cargo or "").lower()
+        nombre_lower = (nombre_completo or "").lower()
+        
+        # Mapear cargos específicos a permisos
+        if "herrero" in cargo_lower or "herrero" in nombre_lower:
+            permisos.append("herreria")
+        if "masillador" in cargo_lower or "masillador" in nombre_lower or "masillar" in cargo_lower:
+            permisos.append("masillar")
+        if "pintor" in cargo_lower or "pintor" in nombre_lower or "pintar" in cargo_lower:
+            permisos.append("pintar")
+        if "manillar" in cargo_lower or "manillar" in nombre_lower or "preparador" in cargo_lower:
+            permisos.append("manillar")
+        if "ayudante" in nombre_lower:
+            permisos.append("ayudante")
+        if "facturacion" in cargo_lower or "facturar" in cargo_lower:
+            permisos.append("facturacion")
+        if "envio" in cargo_lower or "envios" in cargo_lower:
+            permisos.append("envios")
+        if "produccion" in cargo_lower:
+            permisos.append("produccion")
+        if "mantenimiento" in cargo_lower:
+            permisos.append("mantenimiento")
+        if "fabricacion" in cargo_lower:
+            permisos.append("fabricacion")
+        
+        return permisos
+    
     for empleado in empleados:
         empleado["_id"] = str(empleado["_id"])
+        
+        # Si no tiene permisos, mapear desde cargo
+        if "permisos" not in empleado or not empleado["permisos"]:
+            empleado["permisos"] = mapear_cargo_a_permisos(
+                empleado.get("cargo"), 
+                empleado.get("nombreCompleto")
+            )
+    
     return empleados
 
 @router.post("/crear")
