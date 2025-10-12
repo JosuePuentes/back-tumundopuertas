@@ -1586,7 +1586,7 @@ async def terminar_asignacion_articulo(
             print(f"DEBUG TERMINAR: Moviendo artículo {item_id} al siguiente proceso (orden {siguiente_orden})")
             
             # Inicializar asignaciones_articulos si no existe
-            if "asignaciones_articulos" not in proceso_siguiente:
+            if "asignaciones_articulos" not in proceso_siguiente or proceso_siguiente["asignaciones_articulos"] is None:
                 proceso_siguiente["asignaciones_articulos"] = []
             
             # Crear nueva asignación para el siguiente proceso
@@ -1666,6 +1666,16 @@ async def terminar_asignacion_articulo(
         print(f"DEBUG TERMINAR: Buscando item en inventario...")
         item = items_collection.find_one({"_id": ObjectId(item_id)})
         print(f"DEBUG TERMINAR: Item encontrado: {item is not None}")
+        
+        # Si no se encuentra en inventario, buscar en el pedido
+        if not item:
+            print(f"DEBUG TERMINAR: Item no encontrado en inventario, buscando en pedido...")
+            for item_pedido in pedido.get("items", []):
+                if item_pedido.get("id") == item_id:
+                    item = item_pedido
+                    print(f"DEBUG TERMINAR: Item encontrado en pedido: {item is not None}")
+                    break
+        
         costo_produccion = item.get("costoProduccion", 0) if item else 0
         print(f"DEBUG TERMINAR: Costo de producción: {costo_produccion}")
         
