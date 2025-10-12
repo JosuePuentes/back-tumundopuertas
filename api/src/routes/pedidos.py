@@ -2758,7 +2758,9 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
                     break
             
             if not item_existe_en_pedido:
-                raise HTTPException(status_code=404, detail="Item no encontrado en el pedido")
+                # Si el item no existe, devolver empleados del módulo 1 (Herrería) por defecto
+                print(f"DEBUG EMPLEADOS MODULO: Item {item_id} no existe en el pedido, usando módulo por defecto: 1")
+                modulo_actual = 1
             
             # Si el item existe pero no está en asignaciones, usar módulo 1 (Herrería) por defecto
             modulo_actual = 1
