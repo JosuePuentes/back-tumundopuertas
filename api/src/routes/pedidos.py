@@ -1250,6 +1250,60 @@ async def debug_comisiones():
     except Exception as e:
         return {"error": str(e)}
 
+# Endpoint para sincronizar TODOS los empleados
+@router.get("/sync-todos-empleados")
+async def sync_todos_empleados():
+    """Sincronizar todos los empleados del frontend al backend"""
+    try:
+        print(f"DEBUG SYNC: Iniciando sincronización de todos los empleados")
+        
+        # Lista de empleados que necesitan ser sincronizados
+        empleados_para_sync = [
+            {"identificador": "4764175", "nombreCompleto": "Empleado 4764175", "pin": "1234"},
+            {"identificador": "15436114", "nombreCompleto": "ANGEL GONZALEZ (HERRERO)", "pin": "1234"},
+            {"identificador": "7799999", "nombreCompleto": "JORGE BRICEÑO (HERRERO)", "pin": "1234"},
+            {"identificador": "18344340", "nombreCompleto": "JIMMY ALCIBIADES (HERRERO)", "pin": "1234"},
+            {"identificador": "24241240", "nombreCompleto": "ANUBIS PUENTES", "pin": "1234"}
+        ]
+        
+        empleados_sincronizados = []
+        empleados_ya_existentes = []
+        
+        for empleado_data in empleados_para_sync:
+            identificador = empleado_data["identificador"]
+            
+            # Verificar si ya existe
+            empleado_existente = empleados_collection.find_one({"identificador": identificador})
+            
+            if empleado_existente:
+                print(f"DEBUG SYNC: Empleado {identificador} ya existe")
+                empleados_ya_existentes.append(identificador)
+            else:
+                # Crear nuevo empleado
+                nuevo_empleado = {
+                    "identificador": identificador,
+                    "nombreCompleto": empleado_data["nombreCompleto"],
+                    "pin": empleado_data["pin"],
+                    "fecha_creacion": datetime.now(),
+                    "activo": True
+                }
+                
+                result = empleados_collection.insert_one(nuevo_empleado)
+                print(f"DEBUG SYNC: Empleado {identificador} sincronizado con ID: {result.inserted_id}")
+                empleados_sincronizados.append(identificador)
+        
+        return {
+            "mensaje": "Sincronización completada",
+            "empleados_sincronizados": empleados_sincronizados,
+            "empleados_ya_existentes": empleados_ya_existentes,
+            "total_sincronizados": len(empleados_sincronizados),
+            "total_ya_existentes": len(empleados_ya_existentes)
+        }
+        
+    except Exception as e:
+        print(f"ERROR SYNC: Error sincronizando empleados: {e}")
+        return {"error": str(e)}
+
 # Endpoint simple para sincronizar ANUBIS PUENTES
 @router.get("/sync-anubis")
 async def sync_anubis_simple():
