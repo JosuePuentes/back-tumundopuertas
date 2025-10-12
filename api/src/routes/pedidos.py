@@ -2744,7 +2744,21 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
                 break
         
         if not item_encontrado:
-            # Si el item no está en asignaciones, usar módulo 1 (Herrería) por defecto
+            # Verificar si el item existe en el pedido
+            items = pedido.get("items", [])
+            if items is None:
+                items = []
+            
+            item_existe_en_pedido = False
+            for item in items:
+                if str(item.get("_id")) == item_id:
+                    item_existe_en_pedido = True
+                    break
+            
+            if not item_existe_en_pedido:
+                raise HTTPException(status_code=404, detail="Item no encontrado en el pedido")
+            
+            # Si el item existe pero no está en asignaciones, usar módulo 1 (Herrería) por defecto
             modulo_actual = 1
             print(f"DEBUG EMPLEADOS MODULO: Item no encontrado en asignaciones, usando módulo por defecto: {modulo_actual}")
         
