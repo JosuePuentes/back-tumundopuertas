@@ -1150,6 +1150,47 @@ async def debug_empleados():
     except Exception as e:
         return {"error": str(e)}
 
+# Endpoint para verificar empleados en la BD del backend
+@router.get("/debug-verificar-empleados")
+async def debug_verificar_empleados():
+    """Endpoint para verificar todos los empleados en la BD del backend"""
+    try:
+        # Obtener todos los empleados
+        empleados = list(empleados_collection.find({}, {
+            "_id": 1,
+            "identificador": 1,
+            "nombreCompleto": 1,
+            "pin": 1
+        }))
+        
+        # Convertir ObjectId a string
+        for empleado in empleados:
+            empleado["_id"] = str(empleado["_id"])
+            # Ocultar PIN por seguridad
+            if "pin" in empleado and empleado["pin"]:
+                empleado["pin"] = "***"
+        
+        # Buscar específicamente a ANUBIS PUENTES
+        anubis = list(empleados_collection.find({
+            "nombreCompleto": {"$regex": "ANUBIS", "$options": "i"}
+        }))
+        
+        # Buscar por identificador 24241240
+        por_id = list(empleados_collection.find({
+            "identificador": {"$in": ["24241240", 24241240]}
+        }))
+        
+        return {
+            "total_empleados": len(empleados),
+            "empleados": empleados[:10],  # Solo los primeros 10
+            "anubis_encontrado": len(anubis) > 0,
+            "anubis_datos": anubis,
+            "por_id_24241240": por_id,
+            "problema": "Empleado no encontrado en BD del backend" if len(anubis) == 0 else "Empleado encontrado"
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 # Endpoint para buscar específicamente a ANUBIS PUENTES
 @router.get("/debug-buscar-anubis")
 async def debug_buscar_anubis():
