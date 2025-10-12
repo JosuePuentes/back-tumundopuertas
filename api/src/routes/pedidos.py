@@ -50,9 +50,13 @@ async def debug_seguimiento_pedido(pedido_id: str):
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     
     seguimiento = pedido.get("seguimiento", [])
+    if seguimiento is None:
+        seguimiento = []
     
     procesos_info = []
     for i, sub in enumerate(seguimiento):
+        if sub is None:
+            continue
         proceso_info = {
             "indice": i,
             "orden": sub.get("orden"),
