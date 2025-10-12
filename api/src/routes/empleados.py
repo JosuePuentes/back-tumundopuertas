@@ -65,7 +65,8 @@ async def get_empleado(empleado_id: str):
         raise HTTPException(status_code=404, detail="Empleado no encontrado")
     return empleado
 
-@router.put("/{empleado_id}/", dependencies=[Depends(get_current_admin_user)])
+@router.put("/{empleado_id}/")
+@router.put("/{empleado_id}")  # Sin barra al final
 async def update_empleado(empleado_id: str, empleado: EmpleadoUpdate):
     # Validar que ningún valor del empleado sea 0 o "0"
     for key, value in empleado.dict(exclude_unset=True).items():
