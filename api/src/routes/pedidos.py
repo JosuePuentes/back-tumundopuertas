@@ -2896,15 +2896,16 @@ async def debug_item_en_pedido(pedido_id: str, item_id: str):
             "item_id": item_id,
             "item_encontrado": item_encontrado,
             "modulo_actual": modulo_actual,
-            "total_procesos": len(seguimiento),
+            "total_procesos": len(seguimiento) if seguimiento else 0,
             "debug_info": {
-                "seguimiento_length": len(seguimiento),
+                "seguimiento_length": len(seguimiento) if seguimiento else 0,
+                "seguimiento_is_none": seguimiento is None,
                 "primeros_procesos": [
                     {
                         "orden": p.get("orden") if p else None,
                         "nombre": p.get("nombre") if p else None,
-                        "asignaciones_count": len(p.get("asignaciones_articulos", [])) if p else 0
-                    } for p in seguimiento[:3]
+                        "asignaciones_count": len(p.get("asignaciones_articulos", [])) if p and p.get("asignaciones_articulos") else 0
+                    } for p in (seguimiento[:3] if seguimiento else [])
                 ]
             }
         }
