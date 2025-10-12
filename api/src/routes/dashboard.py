@@ -632,6 +632,147 @@ async def get_datos_reales_dashboard():
         print(f"ERROR DATOS REALES: Error al obtener datos reales: {e}")
         raise HTTPException(status_code=500, detail=f"Error al obtener datos reales: {str(e)}")
 
+@router.get("/asignaciones/todas-sin-filtro")
+async def get_todas_asignaciones_sin_filtro():
+    """Endpoint temporal para ver todas las asignaciones sin filtro de estado"""
+    try:
+        collections = get_collections()
+        
+        print(f"DEBUG TODAS: Obteniendo TODAS las asignaciones sin filtro de estado")
+        
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "asignaciones_articulos": {"$exists": True, "$ne": []}
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos": {"$exists": True, "$ne": []}
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "cliente_nombre": 1,
+                    "pedido_id": "$_id",
+                    "item_id": "$seguimiento.asignaciones_articulos.itemId",
+                    "empleado_id": "$seguimiento.asignaciones_articulos.empleadoId",
+                    "empleado_nombre": "$seguimiento.asignaciones_articulos.nombreempleado",
+                    "modulo": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$eq": ["$seguimiento.orden", 1]}, "then": "herreria"},
+                                {"case": {"$eq": ["$seguimiento.orden", 2]}, "then": "masillar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 3]}, "then": "preparar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 4]}, "then": "listo_facturar"}
+                            ],
+                            "default": "desconocido"
+                        }
+                    },
+                    "estado": "$seguimiento.asignaciones_articulos.estado",
+                    "estado_subestado": "$seguimiento.asignaciones_articulos.estado_subestado",
+                    "fecha_asignacion": "$seguimiento.asignaciones_articulos.fecha_inicio",
+                    "fecha_fin": "$seguimiento.asignaciones_articulos.fecha_fin",
+                    "descripcionitem": "$seguimiento.asignaciones_articulos.descripcionitem",
+                    "detalleitem": "$seguimiento.asignaciones_articulos.detalleitem",
+                    "costo_produccion": "$seguimiento.asignaciones_articulos.costoproduccion",
+                    "imagenes": "$seguimiento.asignaciones_articulos.imagenes",
+                    "orden": "$seguimiento.orden"
+                }
+            },
+            # Lookup para obtener las imágenes del item desde inventario
+            {
+                "$lookup": {
+                    "from": "inventario",
+                    "localField": "item_id",
+                    "foreignField": "_id",
+                    "as": "item_info"
+                }
+            },
+            {
+                "$addFields": {
+                    "imagenes_item": {
+                        "$cond": {
+                            "if": {"$gt": [{"$size": "$item_info"}, 0]},
+                            "then": {
+                                "$filter": {
+                                    "input": {
+                                        "$concatArrays": [
+                                            {"$ifNull": ["$item_info.imagen1", []]},
+                                            {"$ifNull": ["$item_info.imagen2", []]},
+                                            {"$ifNull": ["$item_info.imagen3", []]}
+                                        ]
+                                    },
+                                    "cond": {"$ne": ["$$this", ""]}
+                                }
+                            },
+                            "else": []
+                        }
+                    }
+                }
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "cliente_nombre": 1,
+                    "pedido_id": 1,
+                    "item_id": 1,
+                    "empleado_id": 1,
+                    "empleado_nombre": 1,
+                    "modulo": 1,
+                    "estado": 1,
+                    "estado_subestado": 1,
+                    "fecha_asignacion": 1,
+                    "fecha_fin": 1,
+                    "descripcionitem": 1,
+                    "detalleitem": 1,
+                    "costo_produccion": 1,
+                    "imagenes": 1,
+                    "imagenes_item": 1,
+                    "orden": 1
+                }
+            },
+            {
+                "$sort": {"orden": 1, "fecha_asignacion": -1}
+            },
+            {
+                "$limit": 10  # Solo las primeras 10 para prueba
+            }
+        ]
+        
+        asignaciones = list(collections["pedidos"].aggregate(pipeline))
+        
+        # Convertir ObjectId a string para JSON
+        for asignacion in asignaciones:
+            asignacion["pedido_id"] = str(asignacion["pedido_id"])
+            asignacion["item_id"] = str(asignacion["item_id"])
+            if asignacion.get("_id"):
+                asignacion["_id"] = str(asignacion["_id"])
+        
+        print(f"DEBUG TODAS: Encontradas {len(asignaciones)} asignaciones (todas)")
+        
+        return {
+            "asignaciones": asignaciones,
+            "total": len(asignaciones),
+            "fuente": "seguimiento_pedidos_todas",
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR TODAS: Error al obtener todas las asignaciones: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener todas las asignaciones: {str(e)}")
+
 @router.get("/asignaciones/test-migracion")
 async def test_migracion_dashboard():
     """Endpoint de prueba para verificar si hay datos para migrar"""
