@@ -1250,58 +1250,87 @@ async def debug_comisiones():
     except Exception as e:
         return {"error": str(e)}
 
-# Endpoint para sincronizar TODOS los empleados
+# Endpoint para sincronizar TODOS los empleados automáticamente
 @router.get("/sync-todos-empleados")
 async def sync_todos_empleados():
-    """Sincronizar todos los empleados del frontend al backend"""
+    """Sincronizar automáticamente todos los empleados desde las asignaciones activas"""
     try:
-        print(f"DEBUG SYNC: Iniciando sincronización de todos los empleados")
+        print(f"DEBUG SYNC: Iniciando sincronización automática de empleados")
         
-        # Lista de empleados que necesitan ser sincronizados
-        empleados_para_sync = [
-            {"identificador": "4764175", "nombreCompleto": "Empleado 4764175", "pin": "1234"},
-            {"identificador": "15436114", "nombreCompleto": "ANGEL GONZALEZ (HERRERO)", "pin": "1234"},
-            {"identificador": "7799999", "nombreCompleto": "JORGE BRICEÑO (HERRERO)", "pin": "1234"},
-            {"identificador": "18344340", "nombreCompleto": "JIMMY ALCIBIADES (HERRERO)", "pin": "1234"},
-            {"identificador": "24241240", "nombreCompleto": "ANUBIS PUENTES", "pin": "1234"}
-        ]
+        # Obtener todos los empleados únicos desde las asignaciones activas
+        empleados_encontrados = set()
+        
+        # Buscar en todos los pedidos
+        pedidos = list(pedidos_collection.find({}))
+        print(f"DEBUG SYNC: Revisando {len(pedidos)} pedidos para encontrar empleados")
+        
+        for pedido in pedidos:
+            seguimiento = pedido.get("seguimiento", [])
+            for sub in seguimiento:
+                asignaciones_articulos = sub.get("asignaciones_articulos", [])
+                for asignacion in asignaciones_articulos:
+                    empleado_id = asignacion.get("empleadoId")
+                    empleado_nombre = asignacion.get("nombreempleado", "")
+                    
+                    if empleado_id and empleado_id not in empleados_encontrados:
+                        empleados_encontrados.add(empleado_id)
+                        print(f"DEBUG SYNC: Empleado encontrado: {empleado_id} - {empleado_nombre}")
+        
+        print(f"DEBUG SYNC: Total empleados encontrados: {len(empleados_encontrados)}")
         
         empleados_sincronizados = []
         empleados_ya_existentes = []
         
-        for empleado_data in empleados_para_sync:
-            identificador = empleado_data["identificador"]
-            
-            # Verificar si ya existe
-            empleado_existente = empleados_collection.find_one({"identificador": identificador})
+        for empleado_id in empleados_encontrados:
+            # Verificar si ya existe en la base de datos
+            empleado_existente = empleados_collection.find_one({"identificador": empleado_id})
             
             if empleado_existente:
-                print(f"DEBUG SYNC: Empleado {identificador} ya existe")
-                empleados_ya_existentes.append(identificador)
+                print(f"DEBUG SYNC: Empleado {empleado_id} ya existe en BD")
+                empleados_ya_existentes.append(empleado_id)
             else:
+                # Buscar el nombre del empleado en las asignaciones
+                nombre_empleado = f"Empleado {empleado_id}"
+                for pedido in pedidos:
+                    seguimiento = pedido.get("seguimiento", [])
+                    for sub in seguimiento:
+                        asignaciones_articulos = sub.get("asignaciones_articulos", [])
+                        for asignacion in asignaciones_articulos:
+                            if asignacion.get("empleadoId") == empleado_id:
+                                nombre_empleado = asignacion.get("nombreempleado", f"Empleado {empleado_id}")
+                                break
+                        if nombre_empleado != f"Empleado {empleado_id}":
+                            break
+                    if nombre_empleado != f"Empleado {empleado_id}":
+                        break
+                
                 # Crear nuevo empleado
                 nuevo_empleado = {
-                    "identificador": identificador,
-                    "nombreCompleto": empleado_data["nombreCompleto"],
-                    "pin": empleado_data["pin"],
+                    "identificador": empleado_id,
+                    "nombreCompleto": nombre_empleado,
+                    "pin": "1234",  # PIN por defecto
                     "fecha_creacion": datetime.now(),
                     "activo": True
                 }
                 
                 result = empleados_collection.insert_one(nuevo_empleado)
-                print(f"DEBUG SYNC: Empleado {identificador} sincronizado con ID: {result.inserted_id}")
-                empleados_sincronizados.append(identificador)
+                print(f"DEBUG SYNC: Empleado {empleado_id} ({nombre_empleado}) sincronizado con ID: {result.inserted_id}")
+                empleados_sincronizados.append(empleado_id)
         
         return {
-            "mensaje": "Sincronización completada",
+            "mensaje": "Sincronización automática completada",
+            "empleados_encontrados": list(empleados_encontrados),
             "empleados_sincronizados": empleados_sincronizados,
             "empleados_ya_existentes": empleados_ya_existentes,
+            "total_encontrados": len(empleados_encontrados),
             "total_sincronizados": len(empleados_sincronizados),
             "total_ya_existentes": len(empleados_ya_existentes)
         }
         
     except Exception as e:
         print(f"ERROR SYNC: Error sincronizando empleados: {e}")
+        import traceback
+        print(f"ERROR SYNC: Traceback: {traceback.format_exc()}")
         return {"error": str(e)}
 
 # Endpoint simple para sincronizar ANUBIS PUENTES
