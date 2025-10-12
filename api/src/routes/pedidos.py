@@ -2858,6 +2858,60 @@ async def debug_estructura_empleados():
     except Exception as e:
         return {"error": str(e)}
 
+@router.get("/debug-item-en-pedido/{pedido_id}/{item_id}")
+async def debug_item_en_pedido(pedido_id: str, item_id: str):
+    """Debug para verificar si un item existe en un pedido"""
+    try:
+        # Buscar el pedido
+        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if not pedido:
+            return {"error": "Pedido no encontrado", "pedido_id": pedido_id}
+        
+        # Buscar el item en seguimiento
+        seguimiento = pedido.get("seguimiento", [])
+        if seguimiento is None:
+            seguimiento = []
+        
+        item_encontrado = False
+        modulo_actual = None
+        
+        for proceso in seguimiento:
+            if proceso is None:
+                continue
+            asignaciones = proceso.get("asignaciones_articulos", [])
+            if asignaciones is None:
+                asignaciones = []
+            for asignacion in asignaciones:
+                if asignacion is None:
+                    continue
+                if asignacion.get("itemId") == item_id:
+                    modulo_actual = proceso.get("orden")
+                    item_encontrado = True
+                    break
+            if item_encontrado:
+                break
+        
+        return {
+            "pedido_id": pedido_id,
+            "item_id": item_id,
+            "item_encontrado": item_encontrado,
+            "modulo_actual": modulo_actual,
+            "total_procesos": len(seguimiento),
+            "debug_info": {
+                "seguimiento_length": len(seguimiento),
+                "primeros_procesos": [
+                    {
+                        "orden": p.get("orden") if p else None,
+                        "nombre": p.get("nombre") if p else None,
+                        "asignaciones_count": len(p.get("asignaciones_articulos", [])) if p else 0
+                    } for p in seguimiento[:3]
+                ]
+            }
+        }
+        
+    except Exception as e:
+        return {"error": str(e), "pedido_id": pedido_id, "item_id": item_id}
+
 @router.get("/progreso-pedido/{pedido_id}")
 async def get_progreso_pedido(pedido_id: str):
     """Obtener el estado de progreso de un pedido con barra de progreso"""
