@@ -1266,9 +1266,21 @@ async def sync_todos_empleados():
         
         for pedido in pedidos:
             seguimiento = pedido.get("seguimiento", [])
+            if not seguimiento:
+                continue
+                
             for sub in seguimiento:
+                if not sub:
+                    continue
+                    
                 asignaciones_articulos = sub.get("asignaciones_articulos", [])
+                if not asignaciones_articulos:
+                    continue
+                    
                 for asignacion in asignaciones_articulos:
+                    if not asignacion:
+                        continue
+                        
                     empleado_id = asignacion.get("empleadoId")
                     empleado_nombre = asignacion.get("nombreempleado", "")
                     
@@ -1293,9 +1305,21 @@ async def sync_todos_empleados():
                 nombre_empleado = f"Empleado {empleado_id}"
                 for pedido in pedidos:
                     seguimiento = pedido.get("seguimiento", [])
+                    if not seguimiento:
+                        continue
+                        
                     for sub in seguimiento:
+                        if not sub:
+                            continue
+                            
                         asignaciones_articulos = sub.get("asignaciones_articulos", [])
+                        if not asignaciones_articulos:
+                            continue
+                            
                         for asignacion in asignaciones_articulos:
+                            if not asignacion:
+                                continue
+                                
                             if asignacion.get("empleadoId") == empleado_id:
                                 nombre_empleado = asignacion.get("nombreempleado", f"Empleado {empleado_id}")
                                 break
