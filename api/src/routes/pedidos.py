@@ -1547,57 +1547,12 @@ async def terminar_asignacion_articulo(
         "debug_info": debug_info
     }
     
-    # REGISTRAR COMISIÓN
-    comision_registrada = False
-    costo_produccion = 0
-    try:
-        print(f"DEBUG TERMINAR: Registrando comisión para empleado {empleado_id}")
-        
-        # Buscar el item para obtener el costo de producción
-        item = items_collection.find_one({"_id": ObjectId(item_id)})
-        if item:
-            costo_produccion = item.get("costoProduccion", 0)
-            print(f"DEBUG TERMINAR: Costo de producción encontrado: {costo_produccion}")
-        else:
-            print(f"DEBUG TERMINAR: Item no encontrado, usando costo 0")
-        
-        # Determinar el módulo actual
-        modulo_actual = "herreria"  # Por defecto
-        if orden_int == 1:
-            modulo_actual = "herreria"
-        elif orden_int == 2:
-            modulo_actual = "masillar"
-        elif orden_int == 3:
-            modulo_actual = "preparar"
-        
-        # Registrar comisión
-        comision_data = {
-            "empleado_id": empleado_id,
-            "empleado_nombre": empleado.get("nombreCompleto", f"Empleado {empleado_id}") if empleado else f"Empleado {empleado_id}",
-            "item_id": item_id,
-            "pedido_id": pedido_id,
-            "cliente_nombre": pedido.get("cliente_nombre", "SIN_NOMBRE"),
-            "modulo": modulo_actual,
-            "costo_produccion": costo_produccion,
-            "fecha": datetime.now(),
-            "estado": "completado",
-            "descripcion": asignacion_encontrada.get("descripcionitem", "Sin descripción") if asignacion_encontrada else "Sin descripción"
-        }
-        
-        resultado_comision = comisiones_collection.insert_one(comision_data)
-        comision_registrada = True
-        print(f"DEBUG TERMINAR: Comisión registrada exitosamente: {resultado_comision.inserted_id}")
-        print(f"DEBUG TERMINAR: Comisión: ${costo_produccion} para empleado {empleado_id} en módulo {modulo_actual}")
-        
-    except Exception as e:
-        print(f"ERROR TERMINAR: Error registrando comisión: {e}")
-        import traceback
-        print(f"ERROR TERMINAR: Traceback: {traceback.format_exc()}")
-    
-    # Agregar información de comisión a la respuesta
-    response_data["comision_registrada"] = comision_registrada
-    response_data["costo_produccion"] = costo_produccion
-    response_data["modulo_comision"] = modulo_actual if comision_registrada else None
+    # NOTA: El registro de comisiones se maneja en el dashboard
+    # La lógica existente ya maneja:
+    # - Herrería/Masillador: +costo_produccion
+    # - Preparador/Manillar: solo aparece en reporte
+    # - Vendedor: solo aparece en reporte
+    print(f"DEBUG TERMINAR: Comisión será registrada por el dashboard existente")
     
     return response_data
 
