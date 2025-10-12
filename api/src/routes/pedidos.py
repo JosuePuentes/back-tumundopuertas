@@ -1668,6 +1668,46 @@ async def terminar_asignacion_articulo(
         "debug_info": debug_info
     }
     
+    # REGISTRAR COMISIÓN EN EL PEDIDO PARA QUE APAREZCA EN EL REPORTE
+    try:
+        print(f"DEBUG TERMINAR: Registrando comisión en el pedido para el reporte")
+        
+        # Buscar el item para obtener el costo de producción
+        item = items_collection.find_one({"_id": ObjectId(item_id)})
+        costo_produccion = item.get("costoProduccion", 0) if item else 0
+        
+        # Determinar el módulo actual
+        modulo_actual = "herreria"
+        if orden_int == 1:
+            modulo_actual = "herreria"
+        elif orden_int == 2:
+            modulo_actual = "masillar"
+        elif orden_int == 3:
+            modulo_actual = "preparar"
+        
+        # Agregar comisión al pedido para que aparezca en el reporte
+        comision_pedido = {
+            "empleado_id": empleado_id,
+            "empleado_nombre": empleado.get("nombreCompleto", f"Empleado {empleado_id}") if empleado else f"Empleado {empleado_id}",
+            "item_id": item_id,
+            "modulo": modulo_actual,
+            "costo_produccion": costo_produccion,
+            "fecha": datetime.now(),
+            "estado": "completado",
+            "descripcion": asignacion_encontrada.get("descripcionitem", "Sin descripción") if asignacion_encontrada else "Sin descripción"
+        }
+        
+        # Agregar comisión al pedido
+        pedidos_collection.update_one(
+            {"_id": pedido_obj_id},
+            {"$push": {"comisiones": comision_pedido}}
+        )
+        
+        print(f"DEBUG TERMINAR: Comisión registrada en pedido: ${costo_produccion} para empleado {empleado_id}")
+        
+    except Exception as e:
+        print(f"ERROR TERMINAR: Error registrando comisión en pedido: {e}")
+    
     # NOTA: El registro de comisiones se maneja en el dashboard
     # La lógica existente ya maneja:
     # - Herrería/Masillador: +costo_produccion
