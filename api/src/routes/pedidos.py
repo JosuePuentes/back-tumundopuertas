@@ -2744,7 +2744,9 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
                 break
         
         if not item_encontrado:
-            raise HTTPException(status_code=404, detail="Item no encontrado en las asignaciones del pedido")
+            # Si el item no está en asignaciones, usar módulo 1 (Herrería) por defecto
+            modulo_actual = 1
+            print(f"DEBUG EMPLEADOS MODULO: Item no encontrado en asignaciones, usando módulo por defecto: {modulo_actual}")
         
         # Si no hay asignación activa, determinar el primer módulo disponible
         if not modulo_actual:
