@@ -57,17 +57,21 @@ async def debug_seguimiento_pedido(pedido_id: str):
     for i, sub in enumerate(seguimiento):
         if sub is None:
             continue
+        asignaciones_articulos = sub.get("asignaciones_articulos", [])
+        if asignaciones_articulos is None:
+            asignaciones_articulos = []
+            
         proceso_info = {
             "indice": i,
             "orden": sub.get("orden"),
             "estado": sub.get("estado"),
             "nombre": sub.get("nombre", "SIN_NOMBRE"),
-            "asignaciones_count": len(sub.get("asignaciones_articulos", [])),
+            "asignaciones_count": len(asignaciones_articulos),
             "asignaciones": []
         }
         
         # Detalles de asignaciones
-        for j, asignacion in enumerate(sub.get("asignaciones_articulos", [])):
+        for j, asignacion in enumerate(asignaciones_articulos):
             asignacion_info = {
                 "indice": j,
                 "itemId": asignacion.get("itemId"),
