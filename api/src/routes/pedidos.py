@@ -2767,7 +2767,7 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         empleados_filtrados = []
         
         if modulo_actual == 1:  # Herreria/Soldadura
-            # Mostrar herreros y ayudantes
+            # Mostrar TODOS los herreros y TODOS los ayudantes
             empleados = list(empleados_collection.find({
                 "$or": [
                     {"cargo": {"$in": ["HERRERO", "herrero"]}},
@@ -2776,7 +2776,7 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
                 ]
             }))
         elif modulo_actual == 2:  # Masillar/Pintar
-            # Mostrar masilladores/pintores y ayudantes
+            # Mostrar TODOS los masilladores/pintores y TODOS los ayudantes
             empleados = list(empleados_collection.find({
                 "$or": [
                     {"cargo": {"$in": ["MASILLADOR", "PINTOR", "masillador", "pintor"]}},
@@ -2785,7 +2785,7 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
                 ]
             }))
         elif modulo_actual == 3:  # Manillar/Preparar
-            # Mostrar preparadores y ayudantes
+            # Mostrar TODOS los preparadores y TODOS los ayudantes
             empleados = list(empleados_collection.find({
                 "$or": [
                     {"cargo": {"$in": ["PREPARADOR", "MANILLAR", "preparador", "manillar"]}},
