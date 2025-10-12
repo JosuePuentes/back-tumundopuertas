@@ -1193,6 +1193,38 @@ async def debug_verificar_empleados():
     except Exception as e:
         return {"error": str(e)}
 
+# Endpoint para ver comisiones registradas
+@router.get("/debug-comisiones")
+async def debug_comisiones():
+    """Endpoint para ver todas las comisiones registradas"""
+    try:
+        print(f"DEBUG COMISIONES: Obteniendo todas las comisiones")
+        
+        # Obtener todas las comisiones
+        comisiones = list(comisiones_collection.find({}))
+        
+        # Convertir ObjectId a string
+        for comision in comisiones:
+            comision["_id"] = str(comision["_id"])
+            if "pedido_id" in comision:
+                comision["pedido_id"] = str(comision["pedido_id"])
+            if "item_id" in comision:
+                comision["item_id"] = str(comision["item_id"])
+        
+        # Buscar comisiones de ANUBIS PUENTES
+        comisiones_anubis = list(comisiones_collection.find({
+            "empleado_id": "24241240"
+        }))
+        
+        return {
+            "total_comisiones": len(comisiones),
+            "comisiones": comisiones[:10],  # Solo las primeras 10
+            "comisiones_anubis": len(comisiones_anubis),
+            "comisiones_anubis_detalle": comisiones_anubis
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 # Endpoint simple para sincronizar ANUBIS PUENTES
 @router.get("/sync-anubis")
 async def sync_anubis_simple():
