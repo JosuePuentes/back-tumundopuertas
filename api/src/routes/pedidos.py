@@ -2770,24 +2770,27 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
             # Mostrar herreros y ayudantes
             empleados = list(empleados_collection.find({
                 "$or": [
-                    {"permisos": {"$in": ["herrero", "HERRERO"]}},
-                    {"permisos": {"$in": ["ayudante", "AYUDANTE"]}}
+                    {"cargo": {"$in": ["HERRERO", "herrero"]}},
+                    {"nombreCompleto": {"$regex": "HERRERO|herrero", "$options": "i"}},
+                    {"nombreCompleto": {"$regex": "AYUDANTE|ayudante", "$options": "i"}}
                 ]
             }))
         elif modulo_actual == 2:  # Masillar/Pintar
             # Mostrar masilladores/pintores y ayudantes
             empleados = list(empleados_collection.find({
                 "$or": [
-                    {"permisos": {"$in": ["masillador", "MASILLADOR", "pintor", "PINTOR"]}},
-                    {"permisos": {"$in": ["ayudante", "AYUDANTE"]}}
+                    {"cargo": {"$in": ["MASILLADOR", "PINTOR", "masillador", "pintor"]}},
+                    {"nombreCompleto": {"$regex": "MASILLADOR|PINTOR|masillador|pintor", "$options": "i"}},
+                    {"nombreCompleto": {"$regex": "AYUDANTE|ayudante", "$options": "i"}}
                 ]
             }))
         elif modulo_actual == 3:  # Manillar/Preparar
             # Mostrar preparadores y ayudantes
             empleados = list(empleados_collection.find({
                 "$or": [
-                    {"permisos": {"$in": ["preparador", "PREPARADOR", "manillar", "MANILLAR"]}},
-                    {"permisos": {"$in": ["ayudante", "AYUDANTE"]}}
+                    {"cargo": {"$in": ["PREPARADOR", "MANILLAR", "preparador", "manillar"]}},
+                    {"nombreCompleto": {"$regex": "PREPARADOR|MANILLAR|preparador|manillar", "$options": "i"}},
+                    {"nombreCompleto": {"$regex": "AYUDANTE|ayudante", "$options": "i"}}
                 ]
             }))
         elif modulo_actual == 4:  # Facturar
@@ -2802,8 +2805,8 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
             empleados_filtrados.append({
                 "id": str(empleado["_id"]),
                 "identificador": empleado.get("identificador"),
-                "nombre": empleado.get("nombre"),
-                "permisos": empleado.get("permisos", []),
+                "nombre": empleado.get("nombreCompleto"),
+                "cargo": empleado.get("cargo"),
                 "pin": empleado.get("pin")
             })
         
