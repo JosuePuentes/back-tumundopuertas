@@ -1265,20 +1265,23 @@ async def sync_todos_empleados():
         print(f"DEBUG SYNC: Revisando {len(pedidos)} pedidos para encontrar empleados")
         
         for pedido in pedidos:
-            seguimiento = pedido.get("seguimiento", [])
-            if not seguimiento:
+            if not pedido:
+                continue
+                
+            seguimiento = pedido.get("seguimiento")
+            if not seguimiento or not isinstance(seguimiento, list):
                 continue
                 
             for sub in seguimiento:
-                if not sub:
+                if not sub or not isinstance(sub, dict):
                     continue
                     
-                asignaciones_articulos = sub.get("asignaciones_articulos", [])
-                if not asignaciones_articulos:
+                asignaciones_articulos = sub.get("asignaciones_articulos")
+                if not asignaciones_articulos or not isinstance(asignaciones_articulos, list):
                     continue
                     
                 for asignacion in asignaciones_articulos:
-                    if not asignacion:
+                    if not asignacion or not isinstance(asignacion, dict):
                         continue
                         
                     empleado_id = asignacion.get("empleadoId")
