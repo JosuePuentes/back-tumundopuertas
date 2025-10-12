@@ -1128,6 +1128,7 @@ async def test_terminar():
 
 # Endpoint de debug para ver empleados
 @router.get("/debug-empleados")
+@router.post("/debug-empleados")  # Agregar también POST para evitar 405
 async def debug_empleados():
     """Endpoint para ver todos los empleados y sus identificadores"""
     try:
@@ -1651,23 +1652,6 @@ async def terminar_asignacion_articulo(
     }
     print(f"DEBUG TERMINAR: Info debug: {debug_info}")
     
-    return {
-        "message": "Asignación terminada correctamente",
-        "success": True,
-        "asignacion_actualizada": asignacion_encontrada,
-        "pedido_id": pedido_id,
-        "orden": orden_int,
-        "item_id": item_id,
-        "empleado_id": empleado_id,
-        "estado_anterior": "en_proceso",
-        "estado_nuevo": "terminado",
-        "fecha_fin": fecha_fin,
-        "articulo_movido": proceso_siguiente is not None,
-        "siguiente_proceso": siguiente_orden if proceso_siguiente else None,
-        "proceso_actual_vacio": len(proceso_actual.get("asignaciones_articulos", [])) == 0 if proceso_actual else False,
-        "debug_info": debug_info
-    }
-    
     # REGISTRAR COMISIÓN EN EL PEDIDO PARA QUE APAREZCA EN EL REPORTE
     try:
         print(f"DEBUG TERMINAR: Registrando comisión en el pedido para el reporte")
@@ -1715,7 +1699,22 @@ async def terminar_asignacion_articulo(
     # - Vendedor: solo aparece en reporte
     print(f"DEBUG TERMINAR: Comisión será registrada por el dashboard existente")
     
-    return response_data
+    return {
+        "message": "Asignación terminada correctamente",
+        "success": True,
+        "asignacion_actualizada": asignacion_encontrada,
+        "pedido_id": pedido_id,
+        "orden": orden_int,
+        "item_id": item_id,
+        "empleado_id": empleado_id,
+        "estado_anterior": "en_proceso",
+        "estado_nuevo": "terminado",
+        "fecha_fin": fecha_fin,
+        "articulo_movido": proceso_siguiente is not None,
+        "siguiente_proceso": siguiente_orden if proceso_siguiente else None,
+        "proceso_actual_vacio": len(proceso_actual.get("asignaciones_articulos", [])) == 0 if proceso_actual else False,
+        "debug_info": debug_info
+    }
 
 # Endpoint alternativo con barra al final (para compatibilidad)
 @router.put("/asignacion/terminar/")
