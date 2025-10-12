@@ -56,34 +56,68 @@ def registrar_comision(asignacion: dict, empleado_id: str):
 async def get_dashboard_asignaciones(
     empleado_id: Optional[str] = None
 ):
-    """Obtener asignaciones para el dashboard - filtradas por empleado si se especifica"""
+    """Obtener asignaciones reales para el dashboard desde pedidos.seguimiento"""
     try:
-        collections = get_collections()
+        from ..config.mongodb import pedidos_collection, items_collection
+        from bson import ObjectId
         
-        # Construir query base
-        query = {
-            "estado": {"$in": ["en_proceso", "pendiente"]}
-        }
+        print(f"DEBUG DASHBOARD: Obteniendo asignaciones reales desde pedidos")
+        print(f"DEBUG DASHBOARD: Filtro empleado: {empleado_id}")
         
-        # Si se especifica empleado_id, filtrar por ese empleado
+        # Obtener todos los pedidos
+        pedidos = list(pedidos_collection.find({}))
+        asignaciones = []
+        
+        print(f"DEBUG DASHBOARD: Procesando {len(pedidos)} pedidos")
+        
+        for pedido in pedidos:
+            pedido_id = str(pedido.get("_id"))
+            seguimiento = pedido.get("seguimiento", [])
+            
+            for sub in seguimiento:
+                asignaciones_articulos = sub.get("asignaciones_articulos", [])
+                
+                for asignacion in asignaciones_articulos:
+                    # Solo asignaciones activas
+                    if asignacion.get("estado") not in ["en_proceso", "pendiente"]:
+                        continue
+                    
+                    # Filtrar por empleado si se especifica
+                    if empleado_id and asignacion.get("empleadoId") != empleado_id:
+                        continue
+                    
+                    # Buscar información del item
+                    item_id = asignacion.get("itemId")
+                    item_info = items_collection.find_one({"_id": ObjectId(item_id)}) if item_id else {}
+                    
+                    # Crear asignación para el dashboard
+                    asignacion_dashboard = {
+                        "_id": f"{pedido_id}_{item_id}_{asignacion.get('empleadoId')}",
+                        "pedido_id": pedido_id,
+                        "item_id": item_id,
+                        "empleado_id": asignacion.get("empleadoId"),
+                        "empleado_nombre": asignacion.get("nombreempleado", ""),
+                        "modulo": "herreria" if sub.get("orden") == 1 else "masillar" if sub.get("orden") == 2 else "preparar" if sub.get("orden") == 3 else "desconocido",
+                        "estado": asignacion.get("estado"),
+                        "fecha_asignacion": asignacion.get("fecha_inicio"),
+                        "fecha_fin": asignacion.get("fecha_fin"),
+                        "descripcionitem": asignacion.get("descripcionitem", ""),
+                        "detalleitem": asignacion.get("detalleitem", ""),
+                        "costo_produccion": asignacion.get("costoproduccion", 0),
+                        "cliente_nombre": pedido.get("cliente_nombre", ""),
+                        "imagenes": item_info.get("imagenes", []) if item_info else [],
+                        "orden": sub.get("orden"),
+                        "nombre_subestado": sub.get("nombre_subestado", "")
+                    }
+                    
+                    asignaciones.append(asignacion_dashboard)
+        
+        # Ordenar por fecha de asignación (más recientes primero)
+        asignaciones.sort(key=lambda x: x.get("fecha_asignacion", ""), reverse=True)
+        
+        print(f"DEBUG DASHBOARD: Encontradas {len(asignaciones)} asignaciones activas")
         if empleado_id:
-            query["empleado_id"] = empleado_id
-            print(f"DEBUG DASHBOARD: Filtrando asignaciones para empleado {empleado_id}")
-        else:
-            print(f"DEBUG DASHBOARD: Obteniendo todas las asignaciones activas")
-        
-        # Obtener asignaciones
-        asignaciones = list(collections["asignaciones"].find(query).sort("fecha_asignacion", -1))
-        
-        # Convertir ObjectId a string para JSON
-        for asignacion in asignaciones:
-            asignacion["_id"] = str(asignacion["_id"])
-            if "pedido_id" in asignacion:
-                asignacion["pedido_id"] = str(asignacion["pedido_id"])
-            if "item_id" in asignacion:
-                asignacion["item_id"] = str(asignacion["item_id"])
-        
-        print(f"DEBUG DASHBOARD: Encontradas {len(asignaciones)} asignaciones")
+            print(f"DEBUG DASHBOARD: Filtradas para empleado {empleado_id}")
         
         return {
             "asignaciones": asignaciones,
@@ -94,6 +128,8 @@ async def get_dashboard_asignaciones(
         
     except Exception as e:
         print(f"ERROR DASHBOARD: Error al obtener asignaciones: {e}")
+        import traceback
+        print(f"ERROR DASHBOARD: Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error al obtener asignaciones")
 
 @router.put("/asignaciones/terminar")
