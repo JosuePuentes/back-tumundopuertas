@@ -1193,7 +1193,8 @@ async def debug_verificar_empleados():
     except Exception as e:
         return {"error": str(e)}
 
-# Endpoint para sincronizar ANUBIS PUENTES específicamente
+# Endpoint para sincronizar ANUBIS PUENTES específicamente (GET también)
+@router.get("/sincronizar-anubis")
 @router.post("/sincronizar-anubis")
 async def sincronizar_anubis():
     """Endpoint para sincronizar específicamente a ANUBIS PUENTES"""
