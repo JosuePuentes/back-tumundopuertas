@@ -1655,12 +1655,19 @@ async def terminar_asignacion_articulo(
     print(f"DEBUG TERMINAR: Info debug: {debug_info}")
     
     # REGISTRAR COMISIÓN EN EL PEDIDO PARA QUE APAREZCA EN EL REPORTE
+    print(f"DEBUG TERMINAR: === INICIANDO REGISTRO DE COMISIÓN ===")
     try:
         print(f"DEBUG TERMINAR: Registrando comisión en el pedido para el reporte")
+        print(f"DEBUG TERMINAR: pedido_obj_id: {pedido_obj_id}")
+        print(f"DEBUG TERMINAR: item_id: {item_id}")
+        print(f"DEBUG TERMINAR: empleado_id: {empleado_id}")
         
         # Buscar el item para obtener el costo de producción
+        print(f"DEBUG TERMINAR: Buscando item en inventario...")
         item = items_collection.find_one({"_id": ObjectId(item_id)})
+        print(f"DEBUG TERMINAR: Item encontrado: {item is not None}")
         costo_produccion = item.get("costoProduccion", 0) if item else 0
+        print(f"DEBUG TERMINAR: Costo de producción: {costo_produccion}")
         
         # Determinar el módulo actual
         modulo_actual = "herreria"
@@ -1670,6 +1677,7 @@ async def terminar_asignacion_articulo(
             modulo_actual = "masillar"
         elif orden_int == 3:
             modulo_actual = "preparar"
+        print(f"DEBUG TERMINAR: Módulo actual: {modulo_actual}")
         
         # Agregar comisión al pedido para que aparezca en el reporte
         comision_pedido = {
@@ -1682,17 +1690,24 @@ async def terminar_asignacion_articulo(
             "estado": "completado",
             "descripcion": asignacion_encontrada.get("descripcionitem", "Sin descripción") if asignacion_encontrada else "Sin descripción"
         }
+        print(f"DEBUG TERMINAR: Comisión a registrar: {comision_pedido}")
         
         # Agregar comisión al pedido
-        pedidos_collection.update_one(
+        print(f"DEBUG TERMINAR: Ejecutando update_one en pedidos_collection...")
+        result_comision = pedidos_collection.update_one(
             {"_id": pedido_obj_id},
             {"$push": {"comisiones": comision_pedido}}
         )
+        print(f"DEBUG TERMINAR: Resultado update_one: {result_comision.modified_count} documentos modificados")
         
         print(f"DEBUG TERMINAR: Comisión registrada en pedido: ${costo_produccion} para empleado {empleado_id}")
         
     except Exception as e:
         print(f"ERROR TERMINAR: Error registrando comisión en pedido: {e}")
+        import traceback
+        print(f"ERROR TERMINAR: Traceback: {traceback.format_exc()}")
+    
+    print(f"DEBUG TERMINAR: === FIN REGISTRO DE COMISIÓN ===")
     
     # NOTA: El registro de comisiones se maneja en el dashboard
     # La lógica existente ya maneja:
