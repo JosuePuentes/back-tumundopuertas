@@ -2728,28 +2728,23 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         if not pedido:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
         
-        # Encontrar el item específico
-        item_encontrado = None
-        for item in pedido.get("items", []):
-            if str(item.get("_id")) == item_id:
-                item_encontrado = item
-                break
-        
-        if not item_encontrado:
-            raise HTTPException(status_code=404, detail="Item no encontrado en el pedido")
-        
-        # Determinar el módulo actual del item
+        # Determinar el módulo actual del item buscando en las asignaciones
         seguimiento = pedido.get("seguimiento", [])
         modulo_actual = None
+        item_encontrado = False
         
         for proceso in seguimiento:
             asignaciones = proceso.get("asignaciones_articulos", [])
             for asignacion in asignaciones:
                 if asignacion.get("itemId") == item_id:
                     modulo_actual = proceso.get("orden")
+                    item_encontrado = True
                     break
-            if modulo_actual:
+            if item_encontrado:
                 break
+        
+        if not item_encontrado:
+            raise HTTPException(status_code=404, detail="Item no encontrado en las asignaciones del pedido")
         
         # Si no hay asignación activa, determinar el primer módulo disponible
         if not modulo_actual:
