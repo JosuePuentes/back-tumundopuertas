@@ -2751,6 +2751,8 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
             
             item_existe_en_pedido = False
             for item in items:
+                if item is None:
+                    continue
                 if str(item.get("_id")) == item_id:
                     item_existe_en_pedido = True
                     break
