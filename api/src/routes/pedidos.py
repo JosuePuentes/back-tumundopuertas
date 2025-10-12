@@ -15,9 +15,9 @@ comisiones_collection = db["comisiones"]
 def obtener_siguiente_modulo(orden_actual: int) -> str:
     """Determinar el siguiente módulo según el orden actual"""
     flujo = {
-        1: "masillar",      # Herrería → Masillar
-        2: "preparar",      # Masillar → Preparar  
-        3: "listo_facturar" # Preparar → Listo para Facturar
+        1: "masillar",      # Herrería → Masillar/Pintura
+        2: "manillar",      # Masillar/Pintura → Manillar
+        3: "listo_facturar" # Manillar → Listo para Facturar
     }
     return flujo.get(orden_actual, "completado")
 
@@ -1625,6 +1625,12 @@ async def terminar_asignacion_articulo(
                 "fecha_inicio": None,
                 "fecha_fin": None
             }
+            
+            print(f"DEBUG TERMINAR: Nueva asignación creada para siguiente proceso:")
+            print(f"  - itemId: {nueva_asignacion['itemId']}")
+            print(f"  - empleadoId: {nueva_asignacion['empleadoId']} (sin asignar)")
+            print(f"  - estado: {nueva_asignacion['estado']} (pendiente de asignar)")
+            print(f"  - siguiente módulo: {siguiente_modulo}")
             
             # Agregar al siguiente proceso
             proceso_siguiente["asignaciones_articulos"].append(nueva_asignacion)
