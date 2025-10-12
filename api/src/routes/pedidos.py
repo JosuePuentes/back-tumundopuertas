@@ -1193,6 +1193,49 @@ async def debug_verificar_empleados():
     except Exception as e:
         return {"error": str(e)}
 
+# Endpoint simple para sincronizar ANUBIS PUENTES
+@router.get("/sync-anubis")
+async def sync_anubis_simple():
+    """Endpoint simple para sincronizar ANUBIS PUENTES"""
+    try:
+        print(f"DEBUG SYNC: Sincronizando ANUBIS PUENTES")
+        
+        # Verificar si ya existe
+        empleado_existente = empleados_collection.find_one({
+            "identificador": "24241240"
+        })
+        
+        if empleado_existente:
+            return {
+                "mensaje": "ANUBIS PUENTES ya existe en la BD",
+                "empleado_id": str(empleado_existente["_id"]),
+                "existe": True,
+                "nombre": empleado_existente.get("nombreCompleto", "ANUBIS PUENTES")
+            }
+        
+        # Crear ANUBIS PUENTES
+        anubis_data = {
+            "identificador": "24241240",
+            "nombreCompleto": "ANUBIS PUENTES",
+            "pin": "1234",
+            "cargo": "HERRERO",
+            "activo": True,
+            "fecha_creacion": datetime.now()
+        }
+        
+        resultado = empleados_collection.insert_one(anubis_data)
+        
+        return {
+            "mensaje": "ANUBIS PUENTES sincronizado exitosamente",
+            "empleado_id": str(resultado.inserted_id),
+            "existe": False,
+            "nombre": "ANUBIS PUENTES"
+        }
+        
+    except Exception as e:
+        print(f"ERROR SYNC: {str(e)}")
+        return {"error": str(e)}
+
 # Endpoint para sincronizar ANUBIS PUENTES específicamente (GET también)
 @router.get("/sincronizar-anubis")
 @router.post("/sincronizar-anubis")
