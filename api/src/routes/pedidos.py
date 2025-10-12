@@ -2825,6 +2825,36 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         print(f"ERROR EMPLEADOS MODULO: {e}")
         raise HTTPException(status_code=500, detail=f"Error al obtener empleados: {str(e)}")
 
+@router.get("/debug-estructura-empleados")
+async def debug_estructura_empleados():
+    """Endpoint para verificar la estructura real de los empleados"""
+    try:
+        # Obtener algunos empleados para ver su estructura
+        empleados = list(empleados_collection.find({}).limit(5))
+        
+        # Convertir ObjectId a string y mostrar estructura
+        empleados_formateados = []
+        for empleado in empleados:
+            empleado_dict = {}
+            for key, value in empleado.items():
+                if key == "_id":
+                    empleado_dict[key] = str(value)
+                else:
+                    empleado_dict[key] = value
+            empleados_formateados.append(empleado_dict)
+        
+        # También obtener el total de empleados
+        total_empleados = empleados_collection.count_documents({})
+        
+        return {
+            "total_empleados": total_empleados,
+            "estructura_ejemplo": empleados_formateados,
+            "campos_encontrados": list(empleados[0].keys()) if empleados else []
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
 @router.get("/progreso-pedido/{pedido_id}")
 async def get_progreso_pedido(pedido_id: str):
     """Obtener el estado de progreso de un pedido con barra de progreso"""
