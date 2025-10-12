@@ -1191,6 +1191,52 @@ async def debug_verificar_empleados():
     except Exception as e:
         return {"error": str(e)}
 
+# Endpoint para sincronizar empleados desde el frontend
+@router.post("/sincronizar-empleado")
+async def sincronizar_empleado(
+    empleado_data: dict = Body(...)
+):
+    """Endpoint para sincronizar un empleado desde el frontend al backend"""
+    try:
+        print(f"DEBUG SINCRONIZAR: Recibiendo empleado: {empleado_data}")
+        
+        # Buscar si ya existe
+        empleado_existente = empleados_collection.find_one({
+            "identificador": empleado_data.get("identificador")
+        })
+        
+        if empleado_existente:
+            print(f"DEBUG SINCRONIZAR: Empleado ya existe: {empleado_data.get('identificador')}")
+            return {
+                "mensaje": "Empleado ya existe",
+                "empleado_id": str(empleado_existente["_id"]),
+                "existe": True
+            }
+        
+        # Crear nuevo empleado
+        nuevo_empleado = {
+            "identificador": empleado_data.get("identificador"),
+            "nombreCompleto": empleado_data.get("nombreCompleto"),
+            "pin": empleado_data.get("pin"),
+            "cargo": empleado_data.get("cargo", "Empleado"),
+            "activo": True,
+            "fecha_creacion": datetime.now()
+        }
+        
+        resultado = empleados_collection.insert_one(nuevo_empleado)
+        
+        print(f"DEBUG SINCRONIZAR: Empleado creado: {resultado.inserted_id}")
+        
+        return {
+            "mensaje": "Empleado sincronizado exitosamente",
+            "empleado_id": str(resultado.inserted_id),
+            "existe": False
+        }
+        
+    except Exception as e:
+        print(f"ERROR SINCRONIZAR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al sincronizar empleado: {str(e)}")
+
 # Endpoint para buscar específicamente a ANUBIS PUENTES
 @router.get("/debug-buscar-anubis")
 async def debug_buscar_anubis():
