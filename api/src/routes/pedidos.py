@@ -2723,27 +2723,44 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
     try:
         print(f"DEBUG EMPLEADOS MODULO: Buscando empleados para pedido {pedido_id}, item {item_id}")
         
-        # Obtener el pedido
+        # Obtener el pedido - si no existe, usar módulo por defecto
         pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
         if not pedido:
-            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+            print(f"DEBUG EMPLEADOS MODULO: Pedido {pedido_id} no encontrado, usando módulo por defecto: 1")
+            modulo_actual = 1
+            pedido = None
         
         # Determinar el módulo actual del item buscando en las asignaciones
-        seguimiento = pedido.get("seguimiento", [])
-        modulo_actual = None
-        item_encontrado = False
+        if pedido is None:
+            # Si no hay pedido, usar módulo por defecto
+            modulo_actual = 1
+            item_encontrado = False
+        else:
+            seguimiento = pedido.get("seguimiento", [])
+            if seguimiento is None:
+                seguimiento = []
+            modulo_actual = None
+            item_encontrado = False
         
-        for proceso in seguimiento:
-            asignaciones = proceso.get("asignaciones_articulos", [])
-            for asignacion in asignaciones:
-                if asignacion.get("itemId") == item_id:
-                    modulo_actual = proceso.get("orden")
-                    item_encontrado = True
+        # Solo buscar en seguimiento si hay pedido
+        if pedido is not None:
+            for proceso in seguimiento:
+                if proceso is None:
+                    continue
+                asignaciones = proceso.get("asignaciones_articulos", [])
+                if asignaciones is None:
+                    asignaciones = []
+                for asignacion in asignaciones:
+                    if asignacion is None:
+                        continue
+                    if asignacion.get("itemId") == item_id:
+                        modulo_actual = proceso.get("orden")
+                        item_encontrado = True
+                        break
+                if item_encontrado:
                     break
-            if item_encontrado:
-                break
         
-        if not item_encontrado:
+        if not item_encontrado and pedido is not None:
             # Verificar si el item existe en el pedido
             items = pedido.get("items", [])
             if items is None:
@@ -2757,22 +2774,28 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
                     item_existe_en_pedido = True
                     break
             
-            if not item_existe_en_pedido:
-                # Si el item no existe, devolver empleados del módulo 1 (Herrería) por defecto
+            if item_existe_en_pedido:
+                print(f"DEBUG EMPLEADOS MODULO: Item existe pero no está asignado, usando módulo por defecto: 1")
+                modulo_actual = 1
+            else:
                 print(f"DEBUG EMPLEADOS MODULO: Item {item_id} no existe en el pedido, usando módulo por defecto: 1")
                 modulo_actual = 1
-            
-            # Si el item existe pero no está en asignaciones, usar módulo 1 (Herrería) por defecto
-            modulo_actual = 1
-            print(f"DEBUG EMPLEADOS MODULO: Item no encontrado en asignaciones, usando módulo por defecto: {modulo_actual}")
         
         # Si no hay asignación activa, determinar el primer módulo disponible
-        if not modulo_actual:
+        if not modulo_actual and pedido is not None:
             # Buscar el primer módulo que no tenga el item completado
+            if seguimiento is None:
+                seguimiento = []
             for proceso in seguimiento:
+                if proceso is None:
+                    continue
                 asignaciones = proceso.get("asignaciones_articulos", [])
+                if asignaciones is None:
+                    asignaciones = []
                 item_en_modulo = False
                 for asignacion in asignaciones:
+                    if asignacion is None:
+                        continue
                     if asignacion.get("itemId") == item_id:
                         item_en_modulo = True
                         break
@@ -2781,56 +2804,77 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
                     modulo_actual = proceso.get("orden")
                     break
         
-        print(f"DEBUG EMPLEADOS MODULO: Módulo actual: {modulo_actual}")
+        # Asegurar que siempre hay un módulo válido
+        if not modulo_actual or modulo_actual < 1 or modulo_actual > 4:
+            modulo_actual = 1
         
-        # Determinar qué tipo de empleados mostrar según el módulo
+        print(f"DEBUG EMPLEADOS MODULO: Módulo final: {modulo_actual}")
+        
+        # Determinar qué tipo de empleados mostrar según el módulo - SOLO EMPLEADOS ACTIVOS
         empleados_filtrados = []
         
+        # Query base: solo empleados activos
+        query_base = {"activo": {"$ne": False}}  # Incluye activo: true y activo: null
+        
         if modulo_actual == 1:  # Herreria/Soldadura
-            # Mostrar TODOS los herreros y TODOS los ayudantes
-            empleados = list(empleados_collection.find({
-                "$or": [
-                    {"cargo": {"$in": ["HERRERO", "herrero"]}},
-                    {"nombreCompleto": {"$regex": "HERRERO|herrero", "$options": "i"}},
-                    {"nombreCompleto": {"$regex": "AYUDANTE|ayudante", "$options": "i"}}
+            query = {
+                "$and": [
+                    query_base,
+                    {
+                        "$or": [
+                            {"cargo": {"$in": ["HERRERO", "herrero"]}},
+                            {"nombreCompleto": {"$regex": "HERRERO|herrero", "$options": "i"}},
+                            {"nombreCompleto": {"$regex": "AYUDANTE|ayudante", "$options": "i"}}
+                        ]
+                    }
                 ]
-            }))
+            }
         elif modulo_actual == 2:  # Masillar/Pintar
-            # Mostrar TODOS los masilladores/pintores y TODOS los ayudantes
-            empleados = list(empleados_collection.find({
-                "$or": [
-                    {"cargo": {"$in": ["MASILLADOR", "PINTOR", "masillador", "pintor"]}},
-                    {"nombreCompleto": {"$regex": "MASILLADOR|PINTOR|masillador|pintor", "$options": "i"}},
-                    {"nombreCompleto": {"$regex": "AYUDANTE|ayudante", "$options": "i"}}
+            query = {
+                "$and": [
+                    query_base,
+                    {
+                        "$or": [
+                            {"cargo": {"$in": ["MASILLADOR", "PINTOR", "masillador", "pintor"]}},
+                            {"nombreCompleto": {"$regex": "MASILLADOR|PINTOR|masillador|pintor", "$options": "i"}},
+                            {"nombreCompleto": {"$regex": "AYUDANTE|ayudante", "$options": "i"}}
+                        ]
+                    }
                 ]
-            }))
+            }
         elif modulo_actual == 3:  # Manillar/Preparar
-            # Mostrar TODOS los preparadores y TODOS los ayudantes
-            empleados = list(empleados_collection.find({
-                "$or": [
-                    {"cargo": {"$in": ["PREPARADOR", "MANILLAR", "preparador", "manillar"]}},
-                    {"nombreCompleto": {"$regex": "PREPARADOR|MANILLAR|preparador|manillar", "$options": "i"}},
-                    {"nombreCompleto": {"$regex": "AYUDANTE|ayudante", "$options": "i"}}
+            query = {
+                "$and": [
+                    query_base,
+                    {
+                        "$or": [
+                            {"cargo": {"$in": ["PREPARADOR", "MANILLAR", "preparador", "manillar"]}},
+                            {"nombreCompleto": {"$regex": "PREPARADOR|MANILLAR|preparador|manillar", "$options": "i"}},
+                            {"nombreCompleto": {"$regex": "AYUDANTE|ayudante", "$options": "i"}}
+                        ]
+                    }
                 ]
-            }))
+            }
         elif modulo_actual == 4:  # Facturar
-            # Mostrar todos los empleados (para facturación)
-            empleados = list(empleados_collection.find({}))
+            query = query_base
         else:
-            # Módulo desconocido, mostrar todos
-            empleados = list(empleados_collection.find({}))
+            query = query_base
+
+        empleados = list(empleados_collection.find(query))
         
-        # Formatear empleados
+        # Formatear empleados - solo empleados con datos válidos
         for empleado in empleados:
-            empleados_filtrados.append({
-                "id": str(empleado["_id"]),
-                "identificador": empleado.get("identificador"),
-                "nombre": empleado.get("nombreCompleto"),
-                "cargo": empleado.get("cargo"),
-                "pin": empleado.get("pin")
-            })
+            # Validar que el empleado tenga datos mínimos
+            if empleado.get("nombreCompleto") and empleado.get("identificador"):
+                empleados_filtrados.append({
+                    "id": str(empleado["_id"]),
+                    "identificador": empleado.get("identificador"),
+                    "nombre": empleado.get("nombreCompleto"),
+                    "cargo": empleado.get("cargo"),
+                    "pin": empleado.get("pin")
+                })
         
-        print(f"DEBUG EMPLEADOS MODULO: Encontrados {len(empleados_filtrados)} empleados para módulo {modulo_actual}")
+        print(f"DEBUG EMPLEADOS MODULO: Encontrados {len(empleados_filtrados)} empleados activos para módulo {modulo_actual}")
         
         return {
             "empleados": empleados_filtrados,
@@ -2845,8 +2889,43 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         }
         
     except Exception as e:
-        print(f"ERROR EMPLEADOS MODULO: {e}")
-        raise HTTPException(status_code=500, detail=f"Error al obtener empleados: {str(e)}")
+        print(f"ERROR EMPLEADOS MODULO: {str(e)}")
+        # NUNCA lanzar error 500 - siempre devolver empleados por defecto
+        try:
+            empleados_por_defecto = list(empleados_collection.find({
+                "activo": {"$ne": False},
+                "nombreCompleto": {"$exists": True, "$ne": None},
+                "identificador": {"$exists": True, "$ne": None}
+            }).limit(10))
+            
+            empleados_filtrados = []
+            for empleado in empleados_por_defecto:
+                empleados_filtrados.append({
+                    "id": str(empleado["_id"]),
+                    "identificador": empleado.get("identificador"),
+                    "nombre": empleado.get("nombreCompleto"),
+                    "cargo": empleado.get("cargo"),
+                    "pin": empleado.get("pin")
+                })
+            
+            return {
+                "empleados": empleados_filtrados,
+                "modulo_actual": 1,
+                "modulo_nombre": "Herreria/Soldadura",
+                "total_empleados": len(empleados_filtrados),
+                "fallback": True,
+                "error_manejado": str(e)
+            }
+        except:
+            # Último recurso: devolver lista vacía
+            return {
+                "empleados": [],
+                "modulo_actual": 1,
+                "modulo_nombre": "Herreria/Soldadura",
+                "total_empleados": 0,
+                "fallback": True,
+                "error_manejado": "Error crítico manejado"
+            }
 
 @router.get("/debug-estructura-empleados")
 async def debug_estructura_empleados():
