@@ -1357,6 +1357,73 @@ async def sync_todos_empleados():
         print(f"ERROR SYNC: Traceback: {traceback.format_exc()}")
         return {"error": str(e)}
 
+# Endpoint para obtener el progreso de un artículo
+@router.get("/progreso-articulo/{pedido_id}/{item_id}")
+async def get_progreso_articulo(pedido_id: str, item_id: str):
+    """Obtener el progreso de un artículo específico para mostrar barra de progreso"""
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        seguimiento = pedido.get("seguimiento", [])
+        progreso = {
+            "herreria": {"estado": "pendiente", "completado": False},
+            "masillar": {"estado": "pendiente", "completado": False},
+            "preparar": {"estado": "pendiente", "completado": False},
+            "listo_facturar": {"estado": "pendiente", "completado": False}
+        }
+        
+        # Mapear órdenes a módulos
+        orden_modulo = {
+            1: "herreria",
+            2: "masillar", 
+            3: "preparar",
+            4: "listo_facturar"
+        }
+        
+        for sub in seguimiento:
+            orden = sub.get("orden")
+            modulo = orden_modulo.get(orden)
+            
+            if not modulo:
+                continue
+                
+            # Verificar si el artículo está en este módulo
+            asignaciones = sub.get("asignaciones_articulos", [])
+            articulo_en_modulo = any(
+                a.get("itemId") == item_id for a in asignaciones
+            )
+            
+            if articulo_en_modulo:
+                # El artículo está en este módulo
+                estado_modulo = sub.get("estado", "pendiente")
+                progreso[modulo] = {
+                    "estado": estado_modulo,
+                    "completado": estado_modulo == "completado",
+                    "en_proceso": estado_modulo == "en_proceso"
+                }
+            elif sub.get("estado") == "completado":
+                # El módulo ya fue completado (el artículo pasó por aquí)
+                progreso[modulo] = {
+                    "estado": "completado",
+                    "completado": True,
+                    "en_proceso": False
+                }
+        
+        return {
+            "pedido_id": pedido_id,
+            "item_id": item_id,
+            "progreso": progreso,
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR PROGRESO: Error obteniendo progreso: {e}")
+        raise HTTPException(status_code=500, detail="Error al obtener progreso")
+
 # Endpoint simple para sincronizar ANUBIS PUENTES
 @router.get("/sync-anubis")
 async def sync_anubis_simple():
@@ -1743,13 +1810,29 @@ async def terminar_asignacion_articulo(
             proceso_siguiente["asignaciones_articulos"].append(nueva_asignacion)
             proceso_siguiente["estado"] = "en_proceso"
             
-            # Remover la asignación del proceso actual
+            # Remover COMPLETAMENTE la asignación del proceso actual
             if proceso_actual and "asignaciones_articulos" in proceso_actual:
+                asignaciones_originales = len(proceso_actual["asignaciones_articulos"])
                 proceso_actual["asignaciones_articulos"] = [
                     a for a in proceso_actual["asignaciones_articulos"] 
                     if not (a.get("itemId") == item_id and a.get("empleadoId") == empleado_id)
                 ]
-                print(f"DEBUG TERMINAR: Asignación removida del proceso actual")
+                asignaciones_restantes = len(proceso_actual["asignaciones_articulos"])
+                print(f"DEBUG TERMINAR: Asignación removida del proceso actual: {asignaciones_originales} -> {asignaciones_restantes}")
+                
+                # Si no quedan asignaciones en el proceso actual, cambiar su estado
+                if asignaciones_restantes == 0:
+                    proceso_actual["estado"] = "completado"
+                    print(f"DEBUG TERMINAR: Proceso actual marcado como completado (sin asignaciones)")
+                else:
+                    # Verificar si todas las asignaciones restantes están terminadas
+                    todas_terminadas = all(
+                        a.get("estado") == "terminado" 
+                        for a in proceso_actual["asignaciones_articulos"]
+                    )
+                    if todas_terminadas:
+                        proceso_actual["estado"] = "completado"
+                        print(f"DEBUG TERMINAR: Proceso actual marcado como completado (todas terminadas)")
             
             print(f"DEBUG TERMINAR: Artículo movido exitosamente al siguiente proceso")
         else:
