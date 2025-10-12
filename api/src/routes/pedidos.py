@@ -1249,14 +1249,20 @@ async def terminar_asignacion_articulo(
             print(f"WARNING TERMINAR: Continuando sin validación de PIN")
             # No lanzar error, continuar sin validación de PIN
             empleado = {"nombreCompleto": f"Empleado {empleado_id}", "pin": None}
-        
-        print(f"DEBUG TERMINAR: Empleado encontrado: {empleado.get('nombreCompleto', empleado_id)}")
-        
-        if empleado.get("pin") != pin:
-            print(f"ERROR TERMINAR: PIN incorrecto para empleado {empleado_id}")
-            raise HTTPException(status_code=400, detail="PIN incorrecto")
-        
-        print(f"DEBUG TERMINAR: PIN validado correctamente para empleado {empleado.get('nombreCompleto', empleado_id)}")
+            # Si no se encuentra el empleado, saltar validación de PIN
+            print(f"DEBUG TERMINAR: Saltando validación de PIN para empleado no encontrado")
+        else:
+            print(f"DEBUG TERMINAR: Empleado encontrado: {empleado.get('nombreCompleto', empleado_id)}")
+            
+            # Solo validar PIN si el empleado existe y tiene PIN
+            if empleado.get("pin") and empleado.get("pin") != pin:
+                print(f"ERROR TERMINAR: PIN incorrecto para empleado {empleado_id}")
+                raise HTTPException(status_code=400, detail="PIN incorrecto")
+            
+            if empleado.get("pin"):
+                print(f"DEBUG TERMINAR: PIN validado correctamente para empleado {empleado.get('nombreCompleto', empleado_id)}")
+            else:
+                print(f"DEBUG TERMINAR: Empleado sin PIN configurado, saltando validación")
     else:
         print(f"DEBUG TERMINAR: No se proporcionó PIN, continuando sin validación")
     
