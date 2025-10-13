@@ -77,18 +77,18 @@ const AsignarArticulos: React.FC<AsignarArticulosProps> = ({
         const res = await fetch(`${apiUrl}/pedidos/id/${pedidoId}/`);
         if (!res.ok) return;
         const pedido = await res.json();
-        // Buscar subestado actual
-        const sub = Array.isArray(pedido.seguimiento)
-          ? pedido.seguimiento.find((s: any) => s.estado === "en_proceso" && String(s.orden) === numeroOrden)
-          : null;
-        if (sub && Array.isArray(sub.asignaciones_articulos)) {
-          // Mapear asignaciones previas por key
-          const prev: Record<string, AsignacionArticulo> = {};
-          sub.asignaciones_articulos.forEach((a: AsignacionArticulo) => {
-            prev[a.key] = a;
+        // Buscar asignaciones en TODOS los subestados que estén "en_proceso"
+        const prev: Record<string, AsignacionArticulo> = {};
+        if (Array.isArray(pedido.seguimiento)) {
+          pedido.seguimiento.forEach((s: any) => {
+            if (s.estado === "en_proceso" && Array.isArray(s.asignaciones_articulos)) {
+              s.asignaciones_articulos.forEach((a: AsignacionArticulo) => {
+                prev[a.key] = a;
+              });
+            }
           });
-          setAsignadosPrevios(prev);
         }
+        setAsignadosPrevios(prev);
       } catch {}
     };
     fetchPedido();

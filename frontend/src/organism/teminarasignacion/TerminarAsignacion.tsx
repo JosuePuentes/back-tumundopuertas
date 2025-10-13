@@ -36,12 +36,34 @@ const TerminarAsignacion: React.FC = () => {
     const fetchAsignaciones = async () => {
       setLoading(true);
       try {
-        // Consulta asignaciones en proceso para el usuario logueado
-        const res = await fetch(
-          `${apiUrl}/pedidos/comisiones/produccion/enproceso/?empleado_id=${identificador}`
-        );
-        const data = await res.json();
-        setAsignaciones(data);
+        // Consulta todos los pedidos y extrae asignaciones en proceso para el usuario logueado
+        const res = await fetch(`${apiUrl}/pedidos/`);
+        const pedidos = await res.json();
+        
+        // Extraer todas las asignaciones en proceso del empleado actual
+        const asignacionesEmpleado: any[] = [];
+        pedidos.forEach((pedido: any) => {
+          if (Array.isArray(pedido.seguimiento)) {
+            pedido.seguimiento.forEach((subestado: any) => {
+              if (subestado.estado === "en_proceso" && Array.isArray(subestado.asignaciones_articulos)) {
+                subestado.asignaciones_articulos.forEach((asignacion: any) => {
+                  if (asignacion.empleadoId === identificador) {
+                    asignacionesEmpleado.push({
+                      ...asignacion,
+                      pedido_id: pedido._id,
+                      cliente: pedido.cliente,
+                      imagenes: pedido.imagenes,
+                      estado_subestado: subestado.estado,
+                      orden: subestado.orden
+                    });
+                  }
+                });
+              }
+            });
+          }
+        });
+        
+        setAsignaciones(asignacionesEmpleado);
       } catch (err) {}
       setLoading(false);
     };
