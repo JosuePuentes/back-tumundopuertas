@@ -199,6 +199,7 @@ async def update_subestados(
 ):
     # Validaciones iniciales
     print(f"Pedido: {pedido_id}, Asignaciones: {asignaciones}, Estado General: {estado_general}, Tipo Fecha: {tipo_fecha}")
+    print(f"Numero orden recibido: {numero_orden}")
     pedido_id = ObjectId(pedido_id)
 
     if not pedido_id:
@@ -216,6 +217,10 @@ async def update_subestados(
     seguimiento = pedido.get("seguimiento", [])
     if not isinstance(seguimiento, list) or not seguimiento:
         raise HTTPException(status_code=400, detail="El pedido no tiene seguimiento válido")
+    
+    # Debug: mostrar todos los órdenes disponibles
+    print(f"Órdenes disponibles en seguimiento: {[str(sub.get('orden')) for sub in seguimiento]}")
+    print(f"Buscando orden: {numero_orden}")
 
     actualizado = False
     error_subestado = None
