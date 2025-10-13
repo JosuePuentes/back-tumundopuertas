@@ -1732,6 +1732,58 @@ async def terminar_asignacion_articulo(
         print(f"DEBUG TERMINAR: Asignación no encontrada")
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     
+    # Determinar el siguiente estado del item basado en el orden
+    siguiente_estado_item_map = {
+        1: 2,  # herreria -> masillar (orden1 -> orden2)
+        2: 3,  # masillar -> preparar (orden2 -> orden3)
+        3: 4,  # preparar -> facturar (orden3 -> orden4)
+        4: 5   # facturar -> terminado (orden4 -> orden5)
+    }
+
+    siguiente_estado_item = siguiente_estado_item_map.get(orden_int)
+
+    # Actualizar el estado del item específico
+    if siguiente_estado_item:
+        try:
+            # Actualizar el estado_item del item específico
+            result = pedidos_collection.update_one(
+                {"_id": pedido_obj_id, "items.id": item_id},
+                {
+                    "$set": {
+                        "seguimiento": seguimiento,
+                        "items.$.estado_item": siguiente_estado_item
+                    }
+                }
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
+    else:
+        # Solo actualizar seguimiento si no hay siguiente estado
+        try:
+            result = pedidos_collection.update_one(
+                {"_id": pedido_obj_id},
+                {"$set": {"seguimiento": seguimiento}}
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado al actualizar")
+
+    return {
+        "message": "Asignación de artículo actualizada correctamente",
+        "siguiente_estado_item": siguiente_estado_item,
+        "estado_anterior": orden_int,
+        "asignacion_actualizada": {
+            "pedido_id": pedido_id,
+            "item_id": item_id,
+            "empleado_id": empleado_id,
+            "estado": estado,
+            "fecha_fin": fecha_fin,
+            "siguiente_modulo": f"orden{siguiente_estado_item}" if siguiente_estado_item else None
+        }
+    }
+    
     # ACTUALIZAR ESTADO_SUBESTADO DEL ARTÍCULO PARA MOVER AL SIGUIENTE MÓDULO
     print(f"DEBUG TERMINAR: Actualizando estado_subestado del artículo")
     siguiente_modulo = obtener_siguiente_modulo(orden)
