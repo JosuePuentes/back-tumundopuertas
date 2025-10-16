@@ -37,7 +37,7 @@ const TerminarAsignacion: React.FC = () => {
       setLoading(true);
       try {
         // Consulta todos los pedidos y extrae asignaciones en proceso para el usuario logueado
-        const res = await fetch(`${apiUrl}/pedidos/`);
+        const res = await fetch(`${apiUrl}/pedidos/all/`);
         const pedidos = await res.json();
         
         // Extraer todas las asignaciones en proceso del empleado actual

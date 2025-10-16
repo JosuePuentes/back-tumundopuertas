@@ -1621,7 +1621,10 @@ async def terminar_asignacion_articulo(
     fecha_fin: str = Body(...),
     pin: Optional[str] = Body(None)  # PIN opcional
 ):
-    """Endpoint para terminar una asignación de artículo"""
+    """
+    Endpoint mejorado para terminar asignaciones con flujo flexible.
+    Mantiene el item visible en pedidosherreria y lo mueve al siguiente módulo.
+    """
     print(f"DEBUG TERMINAR: === DATOS RECIBIDOS ===")
     print(f"DEBUG TERMINAR: pedido_id={pedido_id}")
     print(f"DEBUG TERMINAR: orden={orden} (tipo: {type(orden)})")
@@ -2037,14 +2040,383 @@ async def terminar_asignacion_articulo(
         "debug_info": debug_info
     }
 
+# Endpoint para obtener items disponibles para asignación
+@router.get("/items-disponibles-asignacion/")
+async def get_items_disponibles_asignacion():
+    """
+    Devuelve items que están disponibles para ser asignados al siguiente módulo
+    """
+    try:
+        print("DEBUG ITEMS DISPONIBLES: Buscando items disponibles para asignación")
+        
+        # Buscar pedidos con items que necesitan asignación
+        pedidos = pedidos_collection.find({
+            "items": {
+                "$elemMatch": {
+                    "estado_item": {"$gte": 1, "$lt": 5}  # Items activos (1-4)
+                }
+            }
+        })
+        
+        items_disponibles = []
+        
+        for pedido in pedidos:
+            pedido_id = str(pedido["_id"])
+            seguimiento = pedido.get("seguimiento", [])
+            
+            for item in pedido.get("items", []):
+                estado_item = item.get("estado_item", 1)
+                item_id = item.get("id", item.get("_id", ""))
+                
+                # Verificar si el item necesita asignación en el módulo actual
+                if estado_item < 5:  # No está completamente terminado
+                    # Verificar si ya tiene asignación activa en el módulo actual
+                    tiene_asignacion_activa = False
+                    
+                    for proceso in seguimiento:
+                        if proceso.get("orden") == estado_item:
+                            asignaciones = proceso.get("asignaciones_articulos", [])
+                            for asignacion in asignaciones:
+                                if (asignacion.get("itemId") == item_id and 
+                                    asignacion.get("estado") == "en_proceso"):
+                                    tiene_asignacion_activa = True
+                                    break
+                    
+                    if not tiene_asignacion_activa:
+                        # Determinar qué empleados pueden trabajar en este módulo
+                        tipos_empleado_requeridos = []
+                        if estado_item == 1:  # Herrería
+                            tipos_empleado_requeridos = ["herreria", "masillar", "pintar", "ayudante"]
+                        elif estado_item == 2:  # Masillar/Pintar
+                            tipos_empleado_requeridos = ["masillar", "pintar", "ayudante"]
+                        elif estado_item == 3:  # Manillar
+                            tipos_empleado_requeridos = ["manillar", "ayudante"]
+                        elif estado_item == 4:  # Facturar
+                            tipos_empleado_requeridos = ["facturacion"]
+                        
+                        items_disponibles.append({
+                            "pedido_id": pedido_id,
+                            "item_id": item_id,
+                            "item_nombre": item.get("nombre", item.get("descripcion", "Sin nombre")),
+                            "estado_item": estado_item,
+                            "modulo_actual": f"orden{estado_item}",
+                            "cliente_nombre": pedido.get("cliente_nombre", "Sin cliente"),
+                            "numero_orden": pedido.get("numero_orden", "Sin número"),
+                            "costo_produccion": item.get("costoProduccion", 0),
+                            "imagenes": item.get("imagenes", []),
+                            "tipos_empleado_requeridos": tipos_empleado_requeridos
+                        })
+        
+        print(f"DEBUG ITEMS DISPONIBLES: Encontrados {len(items_disponibles)} items disponibles")
+        
+        return {
+            "items_disponibles": items_disponibles,
+            "total": len(items_disponibles)
+        }
+        
+    except Exception as e:
+        print(f"ERROR ITEMS DISPONIBLES: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# Endpoint para asignar item al siguiente módulo
+@router.post("/asignar-siguiente-modulo/")
+async def asignar_siguiente_modulo(
+    pedido_id: str = Body(...),
+    item_id: str = Body(...),
+    empleado_id: str = Body(...),
+    modulo_destino: int = Body(...)  # 2, 3, o 4
+):
+    """
+    Asigna un item al siguiente módulo de producción
+    """
+    try:
+        print(f"DEBUG ASIGNAR SIGUIENTE: Asignando item {item_id} al módulo {modulo_destino}")
+        
+        pedido_obj_id = ObjectId(pedido_id)
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Verificar que el item existe y está en el estado correcto
+        item_encontrado = None
+        for item in pedido.get("items", []):
+            if item.get("id", item.get("_id", "")) == item_id:
+                item_encontrado = item
+                break
+        
+        if not item_encontrado:
+            raise HTTPException(status_code=404, detail="Item no encontrado")
+        
+        estado_actual = item_encontrado.get("estado_item", 1)
+        
+        # Verificar que el módulo destino es el siguiente
+        if modulo_destino != estado_actual + 1:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"El módulo destino debe ser {estado_actual + 1}, no {modulo_destino}"
+            )
+        
+        # Buscar empleado
+        empleado = buscar_empleado_por_identificador(empleado_id)
+        if not empleado:
+            raise HTTPException(status_code=404, detail=f"Empleado {empleado_id} no encontrado")
+        
+        # Crear nueva asignación en el siguiente módulo
+        seguimiento = pedido.get("seguimiento", [])
+        
+        # Buscar o crear el proceso para el módulo destino
+        proceso_destino = None
+        for proceso in seguimiento:
+            if proceso.get("orden") == modulo_destino:
+                proceso_destino = proceso
+                break
+        
+        if not proceso_destino:
+            # Crear nuevo proceso si no existe
+            proceso_destino = {
+                "orden": modulo_destino,
+                "nombre": f"orden{modulo_destino}",
+                "asignaciones_articulos": []
+            }
+            seguimiento.append(proceso_destino)
+        
+        # Crear nueva asignación
+        nueva_asignacion = {
+            "itemId": item_id,
+            "empleadoId": empleado_id,
+            "nombreempleado": empleado.get("nombreCompleto", empleado_id),
+            "estado": "en_proceso",
+            "estado_subestado": "en_proceso",
+            "fecha_inicio": datetime.now().isoformat(),
+            "fecha_fin": None
+        }
+        
+        proceso_destino["asignaciones_articulos"].append(nueva_asignacion)
+        
+        # Actualizar el estado del item
+        result = pedidos_collection.update_one(
+            {"_id": pedido_obj_id},
+            {
+                "$set": {
+                    "items.$.estado_item": modulo_destino,
+                    "seguimiento": seguimiento
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Item no encontrado para actualizar")
+        
+        print(f"DEBUG ASIGNAR SIGUIENTE: Item asignado exitosamente al módulo {modulo_destino}")
+        
+        return {
+            "message": f"Item asignado al módulo {modulo_destino}",
+            "nuevo_estado_item": modulo_destino,
+            "modulo_actual": f"orden{modulo_destino}",
+            "empleado_asignado": empleado.get("nombreCompleto", empleado_id),
+            "asignacion_creada": nueva_asignacion
+        }
+        
+    except Exception as e:
+        print(f"ERROR ASIGNAR SIGUIENTE: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# Endpoint mejorado que mantiene el item visible y maneja el flujo flexible
+@router.put("/asignacion/terminar-mejorado")
+async def terminar_asignacion_articulo_mejorado(
+    pedido_id: str = Body(...),
+    orden: Union[int, str] = Body(...),
+    item_id: str = Body(...),
+    empleado_id: str = Body(...),
+    estado: str = Body(...),
+    fecha_fin: str = Body(...),
+    pin: Optional[str] = Body(None)
+):
+    """
+    Endpoint mejorado para terminar asignaciones con flujo flexible.
+    Mantiene el item visible en pedidosherreria y lo mueve al siguiente módulo.
+    """
+    print(f"DEBUG TERMINAR MEJORADO: === INICIANDO TERMINACIÓN ===")
+    print(f"DEBUG TERMINAR MEJORADO: pedido_id={pedido_id}, item_id={item_id}, empleado_id={empleado_id}")
+    print(f"DEBUG TERMINAR MEJORADO: orden={orden}, estado={estado}, pin={'***' if pin else None}")
+    
+    # Convertir orden a int
+    try:
+        orden_int = int(orden) if isinstance(orden, str) else orden
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"orden debe ser un número válido: {str(e)}")
+    
+    # VALIDAR PIN - ES OBLIGATORIO
+    if not pin:
+        raise HTTPException(status_code=400, detail="PIN es obligatorio para terminar asignación")
+    
+    # Buscar empleado y validar PIN
+    empleado = buscar_empleado_por_identificador(empleado_id)
+    if not empleado:
+        raise HTTPException(status_code=404, detail=f"Empleado {empleado_id} no encontrado")
+    
+    if not empleado.get("pin"):
+        raise HTTPException(status_code=400, detail="Empleado no tiene PIN configurado")
+    
+    if empleado.get("pin") != pin:
+        raise HTTPException(status_code=400, detail="PIN incorrecto")
+    
+    print(f"DEBUG TERMINAR MEJORADO: PIN validado para empleado {empleado.get('nombreCompleto', empleado_id)}")
+    
+    # Obtener pedido
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"pedido_id no es un ObjectId válido: {str(e)}")
+    
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    seguimiento = pedido.get("seguimiento", [])
+    
+    # Buscar y actualizar la asignación
+    asignacion_actualizada = actualizar_asignacion_terminada(seguimiento, orden_int, item_id, empleado_id, estado, fecha_fin)
+    if not asignacion_actualizada:
+        raise HTTPException(status_code=404, detail="Asignación no encontrada")
+    
+    # NO mover automáticamente al siguiente módulo
+    # El item quedará disponible para asignación manual
+    print(f"DEBUG TERMINAR MEJORADO: Asignación terminada. Item disponible para siguiente módulo.")
+    
+    # Actualizar pedido en base de datos
+    try:
+        result = pedidos_collection.update_one(
+            {"_id": pedido_obj_id},
+            {"$set": {"seguimiento": seguimiento}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado al actualizar")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
+    
+    # Determinar el siguiente módulo disponible
+    siguiente_modulo_disponible = orden_int + 1 if orden_int < 4 else None
+    
+    print(f"DEBUG TERMINAR MEJORADO: === TERMINACIÓN COMPLETADA ===")
+    
+    return {
+        "message": "Asignación terminada correctamente",
+        "success": True,
+        "asignacion_actualizada": asignacion_actualizada,
+        "siguiente_modulo_disponible": siguiente_modulo_disponible,
+        "empleado_nombre": empleado.get("nombreCompleto", empleado_id),
+        "pedido_id": pedido_id,
+        "item_id": item_id,
+        "item_disponible_para_asignacion": siguiente_modulo_disponible is not None
+    }
+
+# Endpoint para obtener el estado actual de un item específico
+@router.get("/item-estado/{pedido_id}/{item_id}")
+async def get_item_estado(
+    pedido_id: str,
+    item_id: str
+):
+    """
+    Devuelve el estado actual de un item específico y sus asignaciones
+    """
+    try:
+        print(f"DEBUG ITEM ESTADO: Obteniendo estado del item {item_id} en pedido {pedido_id}")
+        
+        pedido_obj_id = ObjectId(pedido_id)
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Encontrar el item
+        item = None
+        for i in pedido.get("items", []):
+            if i.get("id", i.get("_id", "")) == item_id:
+                item = i
+                break
+        
+        if not item:
+            raise HTTPException(status_code=404, detail="Item no encontrado")
+        
+        estado_item = item.get("estado_item", 1)
+        seguimiento = pedido.get("seguimiento", [])
+        
+        # Obtener todas las asignaciones del item
+        asignaciones_item = []
+        for proceso in seguimiento:
+            orden = proceso.get("orden")
+            asignaciones = proceso.get("asignaciones_articulos", [])
+            
+            for asignacion in asignaciones:
+                if asignacion.get("itemId") == item_id:
+                    asignaciones_item.append({
+                        "modulo": orden,
+                        "modulo_nombre": f"orden{orden}",
+                        "empleado_id": asignacion.get("empleadoId"),
+                        "empleado_nombre": asignacion.get("nombreempleado"),
+                        "estado": asignacion.get("estado"),
+                        "fecha_inicio": asignacion.get("fecha_inicio"),
+                        "fecha_fin": asignacion.get("fecha_fin")
+                    })
+        
+        # Determinar si está disponible para asignación
+        disponible_para_asignacion = False
+        siguiente_modulo = None
+        
+        if estado_item < 5:  # No está completamente terminado
+            # Verificar si tiene asignación activa en el módulo actual
+            tiene_asignacion_activa = False
+            for asignacion in asignaciones_item:
+                if asignacion["modulo"] == estado_item and asignacion["estado"] == "en_proceso":
+                    tiene_asignacion_activa = True
+                    break
+            
+            if not tiene_asignacion_activa:
+                disponible_para_asignacion = True
+                siguiente_modulo = estado_item
+        
+        # Determinar tipos de empleado requeridos para el módulo actual
+        tipos_empleado_requeridos = []
+        if estado_item == 1:  # Herrería
+            tipos_empleado_requeridos = ["herreria", "masillar", "pintar", "ayudante"]
+        elif estado_item == 2:  # Masillar/Pintar
+            tipos_empleado_requeridos = ["masillar", "pintar", "ayudante"]
+        elif estado_item == 3:  # Manillar
+            tipos_empleado_requeridos = ["manillar", "ayudante"]
+        elif estado_item == 4:  # Facturar
+            tipos_empleado_requeridos = ["facturacion"]
+        
+        return {
+            "pedido_id": pedido_id,
+            "item_id": item_id,
+            "item_nombre": item.get("nombre", item.get("descripcion", "Sin nombre")),
+            "estado_item": estado_item,
+            "modulo_actual": f"orden{estado_item}",
+            "disponible_para_asignacion": disponible_para_asignacion,
+            "siguiente_modulo": siguiente_modulo,
+            "tipos_empleado_requeridos": tipos_empleado_requeridos,
+            "asignaciones": asignaciones_item,
+            "total_asignaciones": len(asignaciones_item),
+            "cliente_nombre": pedido.get("cliente_nombre", "Sin cliente"),
+            "numero_orden": pedido.get("numero_orden", "Sin número")
+        }
+        
+    except Exception as e:
+        print(f"ERROR ITEM ESTADO: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
 # Endpoint alternativo con barra al final (para compatibilidad)
 @router.put("/asignacion/terminar/")
 async def terminar_asignacion_articulo_alt(
     request_data: dict = Body(...)
 ):
-    """Endpoint alternativo que redirige al principal"""
-    print(f"DEBUG TERMINAR ALT: Redirigiendo al endpoint principal")
-    return await terminar_asignacion_articulo(
+    """Endpoint alternativo que redirige al mejorado"""
+    print(f"DEBUG TERMINAR ALT: Redirigiendo al endpoint mejorado")
+    return await terminar_asignacion_articulo_mejorado(
         pedido_id=request_data.get("pedido_id"),
         orden=request_data.get("orden"),
         item_id=request_data.get("item_id"),
@@ -2968,26 +3340,26 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
 def determinar_modulo_actual_item(pedido: dict, item_id: str) -> int:
     """Determinar en qué módulo está actualmente el item"""
     try:
-        seguimiento = pedido.get("seguimiento", [])
+            seguimiento = pedido.get("seguimiento", [])
         
         # Validar que seguimiento sea una lista
         if not isinstance(seguimiento, list):
             return 1
         
         # Buscar el item en las asignaciones activas
-        for proceso in seguimiento:
+            for proceso in seguimiento:
             if not isinstance(proceso, dict):
-                continue
+                    continue
                 
-            asignaciones = proceso.get("asignaciones_articulos", [])
+                asignaciones = proceso.get("asignaciones_articulos", [])
             if not isinstance(asignaciones, list):
                 continue
                 
-            for asignacion in asignaciones:
+                for asignacion in asignaciones:
                 if not isinstance(asignacion, dict):
-                    continue
+                        continue
                     
-                if asignacion.get("itemId") == item_id:
+                    if asignacion.get("itemId") == item_id:
                     # Si el item está asignado y en proceso, está en este módulo
                     if asignacion.get("estado") == "en_proceso":
                         return proceso.get("orden", 1)
@@ -3012,25 +3384,25 @@ def determinar_primer_modulo_disponible(pedido: dict, item_id: str) -> int:
             return 1
         
         # Buscar el primer módulo donde el item no esté completado
-        for proceso in seguimiento:
+            for proceso in seguimiento:
             if not isinstance(proceso, dict):
-                continue
+                    continue
                 
             orden = proceso.get("orden", 1)
-            asignaciones = proceso.get("asignaciones_articulos", [])
+                asignaciones = proceso.get("asignaciones_articulos", [])
             
             if not isinstance(asignaciones, list):
                 continue
             
             # Verificar si el item ya está completado en este módulo
             item_completado = False
-            for asignacion in asignaciones:
+                for asignacion in asignaciones:
                 if not isinstance(asignacion, dict):
-                    continue
+                        continue
                 if asignacion.get("itemId") == item_id and asignacion.get("estado") == "terminado":
                     item_completado = True
-                    break
-            
+                        break
+                
             if not item_completado:
                 return orden
         
@@ -3040,7 +3412,7 @@ def determinar_primer_modulo_disponible(pedido: dict, item_id: str) -> int:
     except Exception as e:
         print(f"Error en determinar_primer_modulo_disponible: {e}")
         return 1
-
+        
 def filtrar_empleados_por_modulo(empleados: list, modulo_actual: int) -> list:
     """Filtrar empleados según el módulo actual usando permisos"""
     try:
@@ -3157,8 +3529,8 @@ async def terminar_asignacion_articulo_v2(
         raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
     
     print(f"DEBUG TERMINAR V2: === TERMINACIÓN COMPLETADA ===")
-    
-    return {
+            
+            return {
         "message": "Asignación terminada correctamente",
         "success": True,
         "asignacion_actualizada": asignacion_actualizada,
@@ -3196,7 +3568,7 @@ def actualizar_asignacion_terminada(seguimiento: list, orden: int, item_id: str,
                     asignacion["estado_subestado"] = "terminado"
                     asignacion["fecha_fin"] = fecha_fin
                     
-                    return {
+            return {
                         "itemId": item_id,
                         "empleadoId": empleado_id,
                         "estado": estado,
@@ -3479,7 +3851,7 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
                 for proceso in seguimiento:
                     try:
                         if not isinstance(proceso, dict):
-                            continue
+                        continue
                             
                         orden = proceso.get("orden", 0)
                         if not isinstance(orden, (int, str)):
@@ -3494,7 +3866,7 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
                         for asignacion in asignaciones:
                             try:
                                 if not isinstance(asignacion, dict):
-                                    continue
+                                continue
                                     
                                 asignacion_item_id = asignacion.get("itemId", "")
                                 if str(asignacion_item_id) == item_id:
@@ -3510,7 +3882,7 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
                                     
                                     if modulo_nombre in item_estados:
                                         item_estados[modulo_nombre] = estado_asignacion
-                                    break
+                                break
                             except Exception as e:
                                 print(f"Error procesando asignación: {e}")
                                 continue
@@ -3559,11 +3931,11 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
         # Calcular porcentajes
         for modulo in modulos:
             try:
-                if modulo["total"] > 0:
-                    modulo["porcentaje"] = round((modulo["completado"] / modulo["total"]) * 100, 1)
+            if modulo["total"] > 0:
+                modulo["porcentaje"] = round((modulo["completado"] / modulo["total"]) * 100, 1)
                     modulo["porcentaje_en_proceso"] = round((modulo["en_proceso"] / modulo["total"]) * 100, 1)
-                else:
-                    modulo["porcentaje"] = 0
+            else:
+                modulo["porcentaje"] = 0
                     modulo["porcentaje_en_proceso"] = 0
             except Exception as e:
                 print(f"Error calculando porcentajes: {e}")
