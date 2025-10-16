@@ -3177,13 +3177,32 @@ async def get_progreso_pedido(pedido_id: str):
     try:
         print(f"DEBUG PROGRESO V2: Obteniendo progreso para pedido {pedido_id}")
         
+        # Validar pedido_id
+        if not pedido_id or len(pedido_id) != 24:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
         # Obtener el pedido
-        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        try:
+            pedido_obj_id = ObjectId(pedido_id)
+            pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        except Exception as e:
+            print(f"Error convirtiendo ObjectId: {e}")
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
         if not pedido:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
         
+        # Obtener datos con validación
         seguimiento = pedido.get("seguimiento", [])
         items = pedido.get("items", [])
+        
+        # Validar que sean listas
+        if not isinstance(seguimiento, list):
+            seguimiento = []
+        if not isinstance(items, list):
+            items = []
+        
+        print(f"DEBUG PROGRESO V2: Items: {len(items)}, Seguimiento: {len(seguimiento)}")
         
         # Calcular progreso mejorado
         progreso_data = calcular_progreso_mejorado(items, seguimiento)
@@ -3198,19 +3217,52 @@ async def get_progreso_pedido(pedido_id: str):
             "detalle_items": progreso_data["detalle_items"]
         }
         
+    except HTTPException:
+        # Re-lanzar HTTPExceptions
+        raise
     except Exception as e:
         print(f"ERROR PROGRESO V2: {e}")
-        raise HTTPException(status_code=500, detail=f"Error al obtener progreso: {str(e)}")
+        # Retornar estructura básica en lugar de error 500
+        return {
+            "pedido_id": pedido_id,
+            "modulos": [
+                {"orden": 1, "nombre": "Herreria/Soldadura", "completado": 0, "total": 0, "en_proceso": 0, "porcentaje": 0, "porcentaje_en_proceso": 0},
+                {"orden": 2, "nombre": "Masillar/Pintar", "completado": 0, "total": 0, "en_proceso": 0, "porcentaje": 0, "porcentaje_en_proceso": 0},
+                {"orden": 3, "nombre": "Manillar/Preparar", "completado": 0, "total": 0, "en_proceso": 0, "porcentaje": 0, "porcentaje_en_proceso": 0},
+                {"orden": 4, "nombre": "Facturar", "completado": 0, "total": 0, "en_proceso": 0, "porcentaje": 0, "porcentaje_en_proceso": 0}
+            ],
+            "progreso_general": 0,
+            "total_items": 0,
+            "items_completados": 0,
+            "estado": "pendiente",
+            "detalle_items": []
+        }
 
 def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
     """Calcular progreso mejorado con más precisión y manejo de errores"""
     
     try:
-        # Validar inputs
-        if not items:
+        # Validar inputs con más robustez
+        if not isinstance(items, list):
             items = []
-        if not seguimiento:
+        if not isinstance(seguimiento, list):
             seguimiento = []
+        
+        # Filtrar items válidos
+        items_validos = []
+        for item in items:
+            if isinstance(item, dict) and item.get("_id"):
+                items_validos.append(item)
+        
+        items = items_validos
+        
+        # Filtrar seguimiento válido
+        seguimiento_valido = []
+        for proceso in seguimiento:
+            if isinstance(proceso, dict) and proceso.get("orden") is not None:
+                seguimiento_valido.append(proceso)
+        
+        seguimiento = seguimiento_valido
         
         # Inicializar módulos
         modulos = [
