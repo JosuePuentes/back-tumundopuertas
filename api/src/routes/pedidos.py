@@ -2061,51 +2061,95 @@ async def get_items_disponibles_asignacion():
         items_disponibles = []
         
         for pedido in pedidos:
-            pedido_id = str(pedido["_id"])
-            seguimiento = pedido.get("seguimiento", [])
-            
-            for item in pedido.get("items", []):
-                estado_item = item.get("estado_item", 1)
-                item_id = item.get("id", item.get("_id", ""))
+            try:
+                # Validar que el pedido tenga _id
+                if not pedido.get("_id"):
+                    print("DEBUG ITEMS DISPONIBLES: Pedido sin _id, saltando")
+                    continue
+                    
+                pedido_id = str(pedido["_id"])
+                seguimiento = pedido.get("seguimiento", [])
                 
-                # Verificar si el item necesita asignación en el módulo actual
-                if estado_item < 5:  # No está completamente terminado
-                    # Verificar si ya tiene asignación activa en el módulo actual
-                    tiene_asignacion_activa = False
-                    
-                    for proceso in seguimiento:
-                        if proceso.get("orden") == estado_item:
-                            asignaciones = proceso.get("asignaciones_articulos", [])
-                            for asignacion in asignaciones:
-                                if (asignacion.get("itemId") == item_id and 
-                                    asignacion.get("estado") == "en_proceso"):
-                                    tiene_asignacion_activa = True
-                                    break
-                    
-                    if not tiene_asignacion_activa:
-                        # Determinar qué empleados pueden trabajar en este módulo
-                        tipos_empleado_requeridos = []
-                        if estado_item == 1:  # Herrería
-                            tipos_empleado_requeridos = ["herreria", "masillar", "pintar", "ayudante"]
-                        elif estado_item == 2:  # Masillar/Pintar
-                            tipos_empleado_requeridos = ["masillar", "pintar", "ayudante"]
-                        elif estado_item == 3:  # Manillar
-                            tipos_empleado_requeridos = ["manillar", "ayudante"]
-                        elif estado_item == 4:  # Facturar
-                            tipos_empleado_requeridos = ["facturacion"]
+                # Validar que seguimiento sea una lista
+                if not isinstance(seguimiento, list):
+                    seguimiento = []
+                
+                items = pedido.get("items", [])
+                # Validar que items sea una lista
+                if not isinstance(items, list):
+                    print(f"DEBUG ITEMS DISPONIBLES: Items no es lista en pedido {pedido_id}")
+                    continue
+                
+                for item in items:
+                    try:
+                        # Validar que item sea un diccionario
+                        if not isinstance(item, dict):
+                            print(f"DEBUG ITEMS DISPONIBLES: Item no es diccionario en pedido {pedido_id}")
+                            continue
+                            
+                        estado_item = item.get("estado_item", 1)
+                        item_id = item.get("id", item.get("_id", ""))
                         
-                        items_disponibles.append({
-                            "pedido_id": pedido_id,
-                            "item_id": item_id,
-                            "item_nombre": item.get("nombre", item.get("descripcion", "Sin nombre")),
-                            "estado_item": estado_item,
-                            "modulo_actual": f"orden{estado_item}",
-                            "cliente_nombre": pedido.get("cliente_nombre", "Sin cliente"),
-                            "numero_orden": pedido.get("numero_orden", "Sin número"),
-                            "costo_produccion": item.get("costoProduccion", 0),
-                            "imagenes": item.get("imagenes", []),
-                            "tipos_empleado_requeridos": tipos_empleado_requeridos
-                        })
+                        # Validar que item_id no esté vacío
+                        if not item_id:
+                            print(f"DEBUG ITEMS DISPONIBLES: Item sin ID en pedido {pedido_id}")
+                            continue
+                        
+                        # Verificar si el item necesita asignación en el módulo actual
+                        if estado_item < 5:  # No está completamente terminado
+                            # Verificar si ya tiene asignación activa en el módulo actual
+                            tiene_asignacion_activa = False
+                            
+                            for proceso in seguimiento:
+                                try:
+                                    if not isinstance(proceso, dict):
+                                        continue
+                                    if proceso.get("orden") == estado_item:
+                                        asignaciones = proceso.get("asignaciones_articulos", [])
+                                        if not isinstance(asignaciones, list):
+                                            continue
+                                        for asignacion in asignaciones:
+                                            if not isinstance(asignacion, dict):
+                                                continue
+                                            if (asignacion.get("itemId") == item_id and 
+                                                asignacion.get("estado") == "en_proceso"):
+                                                tiene_asignacion_activa = True
+                                                break
+                                except Exception as e:
+                                    print(f"DEBUG ITEMS DISPONIBLES: Error procesando proceso: {e}")
+                                    continue
+                            
+                            if not tiene_asignacion_activa:
+                                # Determinar qué empleados pueden trabajar en este módulo
+                                tipos_empleado_requeridos = []
+                                if estado_item == 1:  # Herrería
+                                    tipos_empleado_requeridos = ["herreria", "masillar", "pintar", "ayudante"]
+                                elif estado_item == 2:  # Masillar/Pintar
+                                    tipos_empleado_requeridos = ["masillar", "pintar", "ayudante"]
+                                elif estado_item == 3:  # Manillar
+                                    tipos_empleado_requeridos = ["manillar", "ayudante"]
+                                elif estado_item == 4:  # Facturar
+                                    tipos_empleado_requeridos = ["facturacion"]
+                                
+                                items_disponibles.append({
+                                    "pedido_id": pedido_id,
+                                    "item_id": item_id,
+                                    "item_nombre": item.get("nombre", item.get("descripcion", "Sin nombre")),
+                                    "estado_item": estado_item,
+                                    "modulo_actual": f"orden{estado_item}",
+                                    "cliente_nombre": pedido.get("cliente_nombre", "Sin cliente"),
+                                    "numero_orden": pedido.get("numero_orden", "Sin número"),
+                                    "costo_produccion": item.get("costoProduccion", 0),
+                                    "imagenes": item.get("imagenes", []),
+                                    "tipos_empleado_requeridos": tipos_empleado_requeridos
+                                })
+                    except Exception as e:
+                        print(f"DEBUG ITEMS DISPONIBLES: Error procesando item: {e}")
+                        continue
+                        
+            except Exception as e:
+                print(f"DEBUG ITEMS DISPONIBLES: Error procesando pedido: {e}")
+                continue
         
         print(f"DEBUG ITEMS DISPONIBLES: Encontrados {len(items_disponibles)} items disponibles")
         
@@ -2116,6 +2160,8 @@ async def get_items_disponibles_asignacion():
         
     except Exception as e:
         print(f"ERROR ITEMS DISPONIBLES: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 # Endpoint para asignar item al siguiente módulo
