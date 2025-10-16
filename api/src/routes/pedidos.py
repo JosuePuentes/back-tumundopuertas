@@ -999,7 +999,7 @@ async def get_asignaciones_modulo_produccion(modulo: str):
                 "$match": {
                     "seguimiento": {
                         "$elemMatch": {
-                            "orden": orden_int,
+                            "orden": orden,
                             "asignaciones_articulos": {"$exists": True, "$ne": []}
                         }
                     }
@@ -1058,7 +1058,7 @@ async def get_asignaciones_modulo_produccion(modulo: str):
             "asignaciones": asignaciones,
             "total": len(asignaciones),
             "modulo": modulo,
-            "orden": orden_int,
+            "orden": orden,
             "success": True
         }
         
@@ -2771,6 +2771,114 @@ async def get_datos_impresion(pedido_id: str, current_user = Depends(get_current
         raise HTTPException(status_code=500, detail=f"Error al obtener datos de impresión: {str(e)}")
 
 # ========================================
+# ENDPOINT PARA DEBUGGING DE PEDIDOS
+# ========================================
+
+@router.get("/debug-pedido/{pedido_id}")
+async def debug_pedido(pedido_id: str):
+    """Endpoint para debuggear el estado de un pedido específico"""
+    try:
+        print(f"DEBUG PEDIDO: Verificando pedido {pedido_id}")
+        
+        # Validar ID
+        if not pedido_id or len(pedido_id) != 24:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
+        # Obtener el pedido
+        try:
+            pedido_obj_id = ObjectId(pedido_id)
+            pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        except Exception as e:
+            print(f"Error convirtiendo ObjectId: {e}")
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
+        if not pedido:
+            return {
+                "success": False,
+                "message": "Pedido no encontrado",
+                "pedido_id": pedido_id
+            }
+        
+        # Analizar el estado del pedido
+        seguimiento = pedido.get("seguimiento", [])
+        items = pedido.get("items", [])
+        
+        # Determinar en qué módulos están los items
+        estado_items = {}
+        for item in items:
+            if isinstance(item, dict) and item.get("_id"):
+                item_id = str(item.get("_id"))
+                estado_items[item_id] = {
+                    "descripcion": item.get("descripcion", "Sin descripción"),
+                    "modulo_actual": determinar_modulo_actual_item(pedido, item_id),
+                    "asignaciones": []
+                }
+        
+        # Analizar asignaciones por módulo
+        modulos_estado = {
+            1: {"nombre": "herreria", "items_en_proceso": 0, "items_terminados": 0, "items_pendientes": 0},
+            2: {"nombre": "masillar", "items_en_proceso": 0, "items_terminados": 0, "items_pendientes": 0},
+            3: {"nombre": "manillar", "items_en_proceso": 0, "items_terminados": 0, "items_pendientes": 0},
+            4: {"nombre": "listo_facturar", "items_en_proceso": 0, "items_terminados": 0, "items_pendientes": 0}
+        }
+        
+        for proceso in seguimiento:
+            if isinstance(proceso, dict):
+                orden = proceso.get("orden", 1)
+                asignaciones = proceso.get("asignaciones_articulos", [])
+                
+                if isinstance(asignaciones, list):
+                    for asignacion in asignaciones:
+                        if isinstance(asignacion, dict):
+                            item_id = asignacion.get("itemId")
+                            estado = asignacion.get("estado", "pendiente")
+                            
+                            if item_id in estado_items:
+                                estado_items[item_id]["asignaciones"].append({
+                                    "modulo": orden,
+                                    "estado": estado,
+                                    "empleado": asignacion.get("nombreempleado", "Sin empleado")
+                                })
+                                
+                                if estado == "en_proceso":
+                                    modulos_estado[orden]["items_en_proceso"] += 1
+                                elif estado == "terminado":
+                                    modulos_estado[orden]["items_terminados"] += 1
+                                else:
+                                    modulos_estado[orden]["items_pendientes"] += 1
+        
+        # Determinar si está listo para facturar
+        total_items = len(items)
+        items_completados = sum(1 for item_data in estado_items.values() 
+                              if item_data["modulo_actual"] > 3)
+        
+        listo_para_facturar = items_completados == total_items and total_items > 0
+        
+        return {
+            "success": True,
+            "pedido_id": pedido_id,
+            "cliente": pedido.get("cliente_nombre", "Sin cliente"),
+            "estado_general": pedido.get("estado_general", "desconocido"),
+            "total_items": total_items,
+            "items_completados": items_completados,
+            "listo_para_facturar": listo_para_facturar,
+            "modulos_estado": modulos_estado,
+            "estado_items": estado_items,
+            "seguimiento_count": len(seguimiento),
+            "items_count": len(items)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR DEBUG PEDIDO: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "pedido_id": pedido_id
+        }
+
+# ========================================
 # NUEVOS ENDPOINTS PARA FLUJO DE PRODUCCIÓN INTELIGENTE
 # ========================================
 
@@ -2780,33 +2888,61 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
     try:
         print(f"DEBUG EMPLEADOS MODULO: Buscando empleados para pedido {pedido_id}, item {item_id}")
         
-        # Obtener el pedido
-        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        # Validar IDs
+        if not pedido_id or len(pedido_id) != 24:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        if not item_id or len(item_id) != 24:
+            raise HTTPException(status_code=400, detail="ID de item inválido")
+        
+        # Obtener el pedido con manejo de errores
+        try:
+            pedido_obj_id = ObjectId(pedido_id)
+            pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        except Exception as e:
+            print(f"Error convirtiendo ObjectId: {e}")
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
         if not pedido:
             print(f"DEBUG EMPLEADOS MODULO: Pedido {pedido_id} no encontrado")
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
         
-        # Determinar el módulo actual del item
-        modulo_actual = determinar_modulo_actual_item(pedido, item_id)
-        print(f"DEBUG EMPLEADOS MODULO: Módulo actual del item: {modulo_actual}")
+        # Determinar el módulo actual del item con manejo de errores
+        try:
+            modulo_actual = determinar_modulo_actual_item(pedido, item_id)
+            print(f"DEBUG EMPLEADOS MODULO: Módulo actual del item: {modulo_actual}")
+        except Exception as e:
+            print(f"Error determinando módulo actual: {e}")
+            modulo_actual = 1  # Fallback al primer módulo
         
-        # Obtener todos los empleados activos
-        empleados = list(empleados_collection.find({"activo": {"$ne": False}}))
+        # Obtener todos los empleados activos con manejo de errores
+        try:
+            empleados = list(empleados_collection.find({"activo": {"$ne": False}}))
+        except Exception as e:
+            print(f"Error obteniendo empleados: {e}")
+            empleados = []
         
         # Filtrar empleados según el módulo actual usando permisos
-        empleados_filtrados = filtrar_empleados_por_modulo(empleados, modulo_actual)
+        try:
+            empleados_filtrados = filtrar_empleados_por_modulo(empleados, modulo_actual)
+        except Exception as e:
+            print(f"Error filtrando empleados: {e}")
+            empleados_filtrados = []
         
-        # Formatear respuesta
+        # Formatear respuesta con manejo de errores
         empleados_formateados = []
         for empleado in empleados_filtrados:
-            empleados_formateados.append({
-                "_id": str(empleado["_id"]),
-                "identificador": empleado.get("identificador"),
-                "nombreCompleto": empleado.get("nombreCompleto"),
-                "cargo": empleado.get("cargo"),
-                "permisos": empleado.get("permisos", []),
-                "pin": empleado.get("pin")
-            })
+            try:
+                empleados_formateados.append({
+                    "_id": str(empleado.get("_id", "")),
+                    "identificador": empleado.get("identificador"),
+                    "nombreCompleto": empleado.get("nombreCompleto"),
+                    "cargo": empleado.get("cargo"),
+                    "permisos": empleado.get("permisos", []),
+                    "pin": empleado.get("pin")
+                })
+            except Exception as e:
+                print(f"Error formateando empleado: {e}")
+                continue
         
         print(f"DEBUG EMPLEADOS MODULO: Encontrados {len(empleados_formateados)} empleados para módulo {modulo_actual}")
         
@@ -2821,84 +2957,128 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         raise
     except Exception as e:
         print(f"ERROR EMPLEADOS MODULO: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error al obtener empleados: {str(e)}")
+        # Retornar respuesta básica en lugar de error 500
+        return {
+            "success": True,
+            "modulo_actual": 1,
+            "empleados": [],
+            "total": 0
+        }
 
 def determinar_modulo_actual_item(pedido: dict, item_id: str) -> int:
     """Determinar en qué módulo está actualmente el item"""
-    seguimiento = pedido.get("seguimiento", [])
-    
-    # Buscar el item en las asignaciones activas
-    for proceso in seguimiento:
-        if not proceso:
-            continue
-            
-        asignaciones = proceso.get("asignaciones_articulos", [])
-        for asignacion in asignaciones:
-            if not asignacion:
+    try:
+        seguimiento = pedido.get("seguimiento", [])
+        
+        # Validar que seguimiento sea una lista
+        if not isinstance(seguimiento, list):
+            return 1
+        
+        # Buscar el item en las asignaciones activas
+        for proceso in seguimiento:
+            if not isinstance(proceso, dict):
                 continue
                 
-            if asignacion.get("itemId") == item_id:
-                # Si el item está asignado y en proceso, está en este módulo
-                if asignacion.get("estado") == "en_proceso":
-                    return proceso.get("orden", 1)
-                # Si está terminado, buscar el siguiente módulo disponible
-                elif asignacion.get("estado") == "terminado":
-                    return proceso.get("orden", 1) + 1
-    
-    # Si no está asignado, determinar el primer módulo disponible
-    return determinar_primer_modulo_disponible(pedido, item_id)
+            asignaciones = proceso.get("asignaciones_articulos", [])
+            if not isinstance(asignaciones, list):
+                continue
+                
+            for asignacion in asignaciones:
+                if not isinstance(asignacion, dict):
+                    continue
+                    
+                if asignacion.get("itemId") == item_id:
+                    # Si el item está asignado y en proceso, está en este módulo
+                    if asignacion.get("estado") == "en_proceso":
+                        return proceso.get("orden", 1)
+                    # Si está terminado, buscar el siguiente módulo disponible
+                    elif asignacion.get("estado") == "terminado":
+                        return proceso.get("orden", 1) + 1
+        
+        # Si no está asignado, determinar el primer módulo disponible
+        return determinar_primer_modulo_disponible(pedido, item_id)
+        
+    except Exception as e:
+        print(f"Error en determinar_modulo_actual_item: {e}")
+        return 1
 
 def determinar_primer_modulo_disponible(pedido: dict, item_id: str) -> int:
     """Determinar el primer módulo disponible para el item"""
-    seguimiento = pedido.get("seguimiento", [])
-    
-    # Buscar el primer módulo donde el item no esté completado
-    for proceso in seguimiento:
-        if not proceso:
-            continue
-            
-        orden = proceso.get("orden", 1)
-        asignaciones = proceso.get("asignaciones_articulos", [])
+    try:
+        seguimiento = pedido.get("seguimiento", [])
         
-        # Verificar si el item ya está completado en este módulo
-        item_completado = False
-        for asignacion in asignaciones:
-            if not asignacion:
+        # Validar que seguimiento sea una lista
+        if not isinstance(seguimiento, list):
+            return 1
+        
+        # Buscar el primer módulo donde el item no esté completado
+        for proceso in seguimiento:
+            if not isinstance(proceso, dict):
                 continue
-            if asignacion.get("itemId") == item_id and asignacion.get("estado") == "terminado":
-                item_completado = True
-                break
+                
+            orden = proceso.get("orden", 1)
+            asignaciones = proceso.get("asignaciones_articulos", [])
+            
+            if not isinstance(asignaciones, list):
+                continue
+            
+            # Verificar si el item ya está completado en este módulo
+            item_completado = False
+            for asignacion in asignaciones:
+                if not isinstance(asignacion, dict):
+                    continue
+                if asignacion.get("itemId") == item_id and asignacion.get("estado") == "terminado":
+                    item_completado = True
+                    break
+            
+            if not item_completado:
+                return orden
         
-        if not item_completado:
-            return orden
-    
-    # Si todos los módulos están completados, retornar el último
-    return 4
+        # Si todos los módulos están completados, retornar el último
+        return 4
+        
+    except Exception as e:
+        print(f"Error en determinar_primer_modulo_disponible: {e}")
+        return 1
 
 def filtrar_empleados_por_modulo(empleados: list, modulo_actual: int) -> list:
     """Filtrar empleados según el módulo actual usando permisos"""
-    empleados_filtrados = []
-    
-    # Mapeo de módulos a permisos requeridos
-    modulo_permisos = {
-        1: ["herreria", "ayudante"],  # Herreria
-        2: ["masillar", "pintar", "ayudante"],  # Masillar/Pintar
-        3: ["manillar", "ayudante"],  # Manillar
-        4: ["facturacion", "ayudante"]  # Facturar
-    }
-    
-    permisos_requeridos = modulo_permisos.get(modulo_actual, ["ayudante"])
-    
-    for empleado in empleados:
-        permisos_empleado = empleado.get("permisos", [])
+    try:
+        empleados_filtrados = []
         
-        # Verificar si el empleado tiene al menos uno de los permisos requeridos
-        tiene_permiso = any(permiso in permisos_empleado for permiso in permisos_requeridos)
+        # Validar que empleados sea una lista
+        if not isinstance(empleados, list):
+            return []
         
-        if tiene_permiso:
-            empleados_filtrados.append(empleado)
-    
-    return empleados_filtrados
+        # Mapeo de módulos a permisos requeridos
+        modulo_permisos = {
+            1: ["herreria", "ayudante"],  # Herreria
+            2: ["masillar", "pintar", "ayudante"],  # Masillar/Pintar
+            3: ["manillar", "ayudante"],  # Manillar
+            4: ["facturacion", "ayudante"]  # Facturar
+        }
+        
+        permisos_requeridos = modulo_permisos.get(modulo_actual, ["ayudante"])
+        
+        for empleado in empleados:
+            if not isinstance(empleado, dict):
+                continue
+                
+            permisos_empleado = empleado.get("permisos", [])
+            if not isinstance(permisos_empleado, list):
+                continue
+            
+            # Verificar si el empleado tiene al menos uno de los permisos requeridos
+            tiene_permiso = any(permiso in permisos_empleado for permiso in permisos_requeridos)
+            
+            if tiene_permiso:
+                empleados_filtrados.append(empleado)
+        
+        return empleados_filtrados
+        
+    except Exception as e:
+        print(f"Error en filtrar_empleados_por_modulo: {e}")
+        return []
 
 @router.put("/asignacion/terminar-v2")
 async def terminar_asignacion_articulo_v2(
