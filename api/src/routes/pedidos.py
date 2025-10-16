@@ -3399,9 +3399,9 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         
         print(f"DEBUG EMPLEADOS MODULO: Tipos requeridos: {tipos_empleado_requeridos}")
         
-        # Buscar empleados con esos tipos
+        # Buscar empleados con esos permisos
         empleados = empleados_collection.find({
-            "tipo": {"$in": tipos_empleado_requeridos},
+            "permisos": {"$in": tipos_empleado_requeridos},
             "activo": True
         })
         
@@ -3412,7 +3412,6 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
                 "identificador": emp.get("identificador"),
                 "nombreCompleto": emp.get("nombreCompleto"),
                 "cargo": emp.get("cargo"),
-                "tipo": emp.get("tipo", ""),
                 "permisos": emp.get("permisos", []),
                 "pin": emp.get("pin"),
                 "activo": emp.get("activo", True)
