@@ -3929,11 +3929,11 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
         # Calcular porcentajes
         for modulo in modulos:
             try:
-            if modulo["total"] > 0:
-                modulo["porcentaje"] = round((modulo["completado"] / modulo["total"]) * 100, 1)
+                if modulo["total"] > 0:
+                    modulo["porcentaje"] = round((modulo["completado"] / modulo["total"]) * 100, 1)
                     modulo["porcentaje_en_proceso"] = round((modulo["en_proceso"] / modulo["total"]) * 100, 1)
-            else:
-                modulo["porcentaje"] = 0
+                else:
+                    modulo["porcentaje"] = 0
                     modulo["porcentaje_en_proceso"] = 0
             except Exception as e:
                 print(f"Error calculando porcentajes: {e}")
