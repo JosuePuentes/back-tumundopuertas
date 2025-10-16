@@ -3384,6 +3384,7 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         
         estado_item = item.get("estado_item", 1)
         print(f"DEBUG EMPLEADOS MODULO: Estado del item: {estado_item}")
+        print(f"DEBUG EMPLEADOS MODULO: Item completo: {item}")
         
         # Obtener todos los empleados activos
         empleados = empleados_collection.find({

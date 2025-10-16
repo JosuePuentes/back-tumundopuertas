@@ -52,6 +52,114 @@ def registrar_comision(asignacion: dict, empleado_id: str):
         print(f"ERROR COMISION: Error al registrar comisión: {e}")
         return False
 
+@router.get("/debug-asignaciones")
+async def debug_dashboard_asignaciones():
+    """Endpoint de debug para verificar el estado del dashboard"""
+    try:
+        from ..config.mongodb import pedidos_collection, items_collection
+        from bson import ObjectId
+        
+        print("DEBUG DASHBOARD: Iniciando debug completo")
+        
+        # 1. Verificar si hay pedidos
+        total_pedidos = pedidos_collection.count_documents({})
+        print(f"DEBUG DASHBOARD: Total pedidos en BD: {total_pedidos}")
+        
+        # 2. Verificar pedidos con seguimiento
+        pedidos_con_seguimiento = pedidos_collection.count_documents({
+            "seguimiento": {"$exists": True, "$ne": []}
+        })
+        print(f"DEBUG DASHBOARD: Pedidos con seguimiento: {pedidos_con_seguimiento}")
+        
+        # 3. Verificar asignaciones activas
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "asignaciones_articulos": {
+                                "$elemMatch": {
+                                    "estado": {"$in": ["en_proceso", "pendiente"]}
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos": {
+                        "$elemMatch": {
+                            "estado": {"$in": ["en_proceso", "pendiente"]}
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos.estado": {"$in": ["en_proceso", "pendiente"]}
+                }
+            },
+            {
+                "$count": "total"
+            }
+        ]
+        
+        resultado_agregacion = list(pedidos_collection.aggregate(pipeline))
+        asignaciones_activas = resultado_agregacion[0]["total"] if resultado_agregacion else 0
+        print(f"DEBUG DASHBOARD: Asignaciones activas encontradas: {asignaciones_activas}")
+        
+        # 4. Verificar empleados activos
+        from ..config.mongodb import empleados_collection
+        empleados_activos = empleados_collection.count_documents({"activo": True})
+        print(f"DEBUG DASHBOARD: Empleados activos: {empleados_activos}")
+        
+        # 5. Obtener muestra de datos
+        muestra_pedidos = list(pedidos_collection.find({}).limit(3))
+        muestra_empleados = list(empleados_collection.find({"activo": True}).limit(3))
+        
+        return {
+            "debug_info": {
+                "total_pedidos": total_pedidos,
+                "pedidos_con_seguimiento": pedidos_con_seguimiento,
+                "asignaciones_activas": asignaciones_activas,
+                "empleados_activos": empleados_activos,
+                "muestra_pedidos": [
+                    {
+                        "_id": str(p.get("_id")),
+                        "numero_orden": p.get("numero_orden"),
+                        "estado_general": p.get("estado_general"),
+                        "tiene_seguimiento": bool(p.get("seguimiento")),
+                        "items_count": len(p.get("items", []))
+                    } for p in muestra_pedidos
+                ],
+                "muestra_empleados": [
+                    {
+                        "_id": str(e.get("_id")),
+                        "nombreCompleto": e.get("nombreCompleto"),
+                        "tipo": e.get("tipo"),
+                        "activo": e.get("activo")
+                    } for e in muestra_empleados
+                ]
+            },
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR DEBUG DASHBOARD: {str(e)}")
+        import traceback
+        print(f"ERROR DEBUG DASHBOARD: Traceback: {traceback.format_exc()}")
+        return {
+            "error": str(e),
+            "success": False
+        }
+
 @router.get("/asignaciones")
 async def get_dashboard_asignaciones(
     empleado_id: Optional[str] = None
