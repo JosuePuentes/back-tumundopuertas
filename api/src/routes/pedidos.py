@@ -3381,35 +3381,36 @@ def determinar_primer_modulo_disponible(pedido: dict, item_id: str) -> int:
             return 1
         
         # Buscar el primer módulo donde el item no esté completado
-            for proceso in seguimiento:
+        for proceso in seguimiento:
             if not isinstance(proceso, dict):
-                    continue
+                continue
                 
             orden = proceso.get("orden", 1)
-                asignaciones = proceso.get("asignaciones_articulos", [])
+            asignaciones = proceso.get("asignaciones_articulos", [])
             
             if not isinstance(asignaciones, list):
                 continue
             
             # Verificar si el item ya está completado en este módulo
             item_completado = False
-                for asignacion in asignaciones:
+            for asignacion in asignaciones:
                 if not isinstance(asignacion, dict):
-                        continue
+                    continue
                 if asignacion.get("itemId") == item_id and asignacion.get("estado") == "terminado":
                     item_completado = True
-                        break
-                
+                    break
+            
+            # Si no está completado, este es el módulo disponible
             if not item_completado:
                 return orden
         
-        # Si todos los módulos están completados, retornar el último
-        return 4
+        # Si todos los módulos están completados, retornar el siguiente módulo
+        return len(seguimiento) + 1 if seguimiento else 1
         
     except Exception as e:
         print(f"Error en determinar_primer_modulo_disponible: {e}")
         return 1
-        
+
 def filtrar_empleados_por_modulo(empleados: list, modulo_actual: int) -> list:
     """Filtrar empleados según el módulo actual usando permisos"""
     try:
