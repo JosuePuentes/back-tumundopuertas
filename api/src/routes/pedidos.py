@@ -1240,14 +1240,8 @@ async def debug_empleados():
 async def debug_verificar_empleados():
     """Endpoint para verificar todos los empleados en la BD del backend"""
     try:
-        # Obtener todos los empleados con permisos
-        empleados = list(empleados_collection.find({}, {
-            "_id": 1,
-            "identificador": 1,
-            "nombreCompleto": 1,
-            "permisos": 1,
-            "activo": 1
-        }))
+        # Obtener todos los empleados con todos los campos
+        empleados = list(empleados_collection.find({}))
         
         # Convertir ObjectId a string y procesar datos
         empleados_procesados = []
@@ -1258,6 +1252,8 @@ async def debug_verificar_empleados():
                 "identificador": empleado.get("identificador", "N/A"),
                 "nombreCompleto": empleado.get("nombreCompleto", "N/A"),
                 "permisos": empleado.get("permisos", []),
+                "cargo": empleado.get("cargo", "N/A"),
+                "tipo": empleado.get("tipo", "N/A"),
                 "activo": empleado.get("activo", True)
             })
         
@@ -1266,6 +1262,8 @@ async def debug_verificar_empleados():
         empleados_masillar = [e for e in empleados_procesados if "masillar" in e.get("permisos", [])]
         empleados_pintar = [e for e in empleados_procesados if "pintar" in e.get("permisos", [])]
         empleados_ayudante = [e for e in empleados_procesados if "ayudante" in e.get("permisos", [])]
+        empleados_manillar = [e for e in empleados_procesados if "manillar" in e.get("permisos", [])]
+        empleados_facturacion = [e for e in empleados_procesados if "facturacion" in e.get("permisos", [])]
         
         return {
             "total_empleados": len(empleados_procesados),
@@ -1274,7 +1272,9 @@ async def debug_verificar_empleados():
             "empleados_masillar": len(empleados_masillar),
             "empleados_pintar": len(empleados_pintar),
             "empleados_ayudante": len(empleados_ayudante),
-            "empleados_muestra": empleados_procesados[:5],  # Solo los primeros 5
+            "empleados_manillar": len(empleados_manillar),
+            "empleados_facturacion": len(empleados_facturacion),
+            "todos_los_empleados": empleados_procesados,  # Todos los empleados
             "problema": "No hay empleados con permisos de herreria, masillar, pintar o ayudante" if len(empleados_herreria) == 0 and len(empleados_masillar) == 0 and len(empleados_pintar) == 0 and len(empleados_ayudante) == 0 else "Empleados encontrados"
         }
     except Exception as e:
