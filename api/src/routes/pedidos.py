@@ -3849,7 +3849,7 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
                 for proceso in seguimiento:
                     try:
                         if not isinstance(proceso, dict):
-                        continue
+                            continue
                             
                         orden = proceso.get("orden", 0)
                         if not isinstance(orden, (int, str)):
