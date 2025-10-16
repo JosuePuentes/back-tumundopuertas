@@ -3375,7 +3375,7 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         # Encontrar el item específico
         item = None
         for i in pedido.get("items", []):
-            if i.get("id", i.get("_id", "")) == item_id:
+            if str(i.get("_id")) == item_id:
                 item = i
                 break
         
@@ -3385,37 +3385,53 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         estado_item = item.get("estado_item", 1)
         print(f"DEBUG EMPLEADOS MODULO: Estado del item: {estado_item}")
         
-        # Mapear estado del item a tipos de empleado requeridos
-        tipos_empleado_requeridos = []
-        
-        if estado_item == 1:  # Herrería
-            tipos_empleado_requeridos = ["herreria", "masillar", "pintar", "ayudante"]
-        elif estado_item == 2:  # Masillar/Pintar
-            tipos_empleado_requeridos = ["masillar", "pintar", "ayudante"]
-        elif estado_item == 3:  # Manillar
-            tipos_empleado_requeridos = ["manillar", "ayudante"]
-        elif estado_item == 4:  # Facturar
-            tipos_empleado_requeridos = ["facturacion"]
-        
-        print(f"DEBUG EMPLEADOS MODULO: Tipos requeridos: {tipos_empleado_requeridos}")
-        
-        # Buscar empleados con esos permisos
+        # Obtener todos los empleados activos
         empleados = empleados_collection.find({
-            "permisos": {"$in": tipos_empleado_requeridos},
             "activo": True
+        }, {
+            "_id": 1,
+            "identificador": 1,
+            "nombreCompleto": 1,
+            "cargo": 1,
+            "pin": 1
         })
         
         empleados_disponibles = []
+        
+        # Filtrar empleados basándose en el cargo y nombreCompleto
         for emp in empleados:
-            empleados_disponibles.append({
-                "_id": str(emp["_id"]),
-                "identificador": emp.get("identificador"),
-                "nombreCompleto": emp.get("nombreCompleto"),
-                "cargo": emp.get("cargo"),
-                "permisos": emp.get("permisos", []),
-                "pin": emp.get("pin"),
-                "activo": emp.get("activo", True)
-            })
+            cargo = emp.get("cargo", "").upper()
+            nombre = emp.get("nombreCompleto", "").upper()
+            
+            # Verificar si el empleado tiene los permisos requeridos
+            tiene_permiso = False
+            
+            if estado_item == 1:  # Herreria
+                if ("HERRERO" in cargo or "HERRERO" in nombre) or \
+                   ("MASILLADOR" in cargo or "MASILLADOR" in nombre or "PINTOR" in cargo or "PINTOR" in nombre) or \
+                   ("AYUDANTE" in cargo or "AYUDANTE" in nombre):
+                    tiene_permiso = True
+            elif estado_item == 2:  # Masillar/Pintar
+                if ("MASILLADOR" in cargo or "MASILLADOR" in nombre or "PINTOR" in cargo or "PINTOR" in nombre) or \
+                   ("AYUDANTE" in cargo or "AYUDANTE" in nombre):
+                    tiene_permiso = True
+            elif estado_item == 3:  # Manillar
+                if ("MANILLAR" in cargo or "MANILLAR" in nombre) or \
+                   ("AYUDANTE" in cargo or "AYUDANTE" in nombre):
+                    tiene_permiso = True
+            elif estado_item == 4:  # Facturación
+                if ("FACTURACION" in cargo or "FACTURACION" in nombre or "VENDEDOR" in cargo or "VENDEDOR" in nombre):
+                    tiene_permiso = True
+            
+            if tiene_permiso:
+                empleados_disponibles.append({
+                    "_id": str(emp["_id"]),
+                    "identificador": emp.get("identificador"),
+                    "nombreCompleto": emp.get("nombreCompleto"),
+                    "cargo": emp.get("cargo"),
+                    "pin": emp.get("pin"),
+                    "activo": True
+                })
         
         print(f"DEBUG EMPLEADOS MODULO: Encontrados {len(empleados_disponibles)} empleados para estado {estado_item}")
         
@@ -3423,7 +3439,6 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
             "success": True,
             "modulo_actual": estado_item,
             "empleados": empleados_disponibles,
-            "tipos_requeridos": tipos_empleado_requeridos,
             "total": len(empleados_disponibles)
         }
         
