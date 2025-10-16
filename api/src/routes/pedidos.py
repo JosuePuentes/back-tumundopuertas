@@ -3864,7 +3864,7 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
                         for asignacion in asignaciones:
                             try:
                                 if not isinstance(asignacion, dict):
-                                continue
+                                    continue
                                     
                                 asignacion_item_id = asignacion.get("itemId", "")
                                 if str(asignacion_item_id) == item_id:
