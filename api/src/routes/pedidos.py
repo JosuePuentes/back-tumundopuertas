@@ -3312,7 +3312,7 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         if not item_id or len(item_id) != 24:
             raise HTTPException(status_code=400, detail="ID de item inválido")
         
-        # Obtener el pedido con manejo de errores
+        # Obtener el pedido
         try:
             pedido_obj_id = ObjectId(pedido_id)
             pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
@@ -3321,61 +3321,68 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
             raise HTTPException(status_code=400, detail="ID de pedido inválido")
         
         if not pedido:
-            print(f"DEBUG EMPLEADOS MODULO: Pedido {pedido_id} no encontrado")
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
         
-        # Determinar el módulo actual del item con manejo de errores
-        try:
-            modulo_actual = determinar_modulo_actual_item(pedido, item_id)
-            print(f"DEBUG EMPLEADOS MODULO: Módulo actual del item: {modulo_actual}")
-        except Exception as e:
-            print(f"Error determinando módulo actual: {e}")
-            modulo_actual = 1  # Fallback al primer módulo
+        # Encontrar el item específico
+        item = None
+        for i in pedido.get("items", []):
+            if i.get("id", i.get("_id", "")) == item_id:
+                item = i
+                break
         
-        # Obtener todos los empleados activos con manejo de errores
-        try:
-            empleados = list(empleados_collection.find({"activo": {"$ne": False}}))
-        except Exception as e:
-            print(f"Error obteniendo empleados: {e}")
-            empleados = []
+        if not item:
+            raise HTTPException(status_code=404, detail="Item no encontrado")
         
-        # Filtrar empleados según el módulo actual usando permisos
-        try:
-            empleados_filtrados = filtrar_empleados_por_modulo(empleados, modulo_actual)
-        except Exception as e:
-            print(f"Error filtrando empleados: {e}")
-            empleados_filtrados = []
+        estado_item = item.get("estado_item", 1)
+        print(f"DEBUG EMPLEADOS MODULO: Estado del item: {estado_item}")
         
-        # Formatear respuesta con manejo de errores
-        empleados_formateados = []
-        for empleado in empleados_filtrados:
-            try:
-                empleados_formateados.append({
-                    "_id": str(empleado.get("_id", "")),
-                    "identificador": empleado.get("identificador"),
-                    "nombreCompleto": empleado.get("nombreCompleto"),
-                    "cargo": empleado.get("cargo"),
-                    "permisos": empleado.get("permisos", []),
-                    "pin": empleado.get("pin")
-                })
-            except Exception as e:
-                print(f"Error formateando empleado: {e}")
-                continue
+        # Mapear estado del item a tipos de empleado requeridos
+        tipos_empleado_requeridos = []
         
-        print(f"DEBUG EMPLEADOS MODULO: Encontrados {len(empleados_formateados)} empleados para módulo {modulo_actual}")
+        if estado_item == 1:  # Herrería
+            tipos_empleado_requeridos = ["herreria", "masillar", "pintar", "ayudante"]
+        elif estado_item == 2:  # Masillar/Pintar
+            tipos_empleado_requeridos = ["masillar", "pintar", "ayudante"]
+        elif estado_item == 3:  # Manillar
+            tipos_empleado_requeridos = ["manillar", "ayudante"]
+        elif estado_item == 4:  # Facturar
+            tipos_empleado_requeridos = ["facturacion"]
+        
+        print(f"DEBUG EMPLEADOS MODULO: Tipos requeridos: {tipos_empleado_requeridos}")
+        
+        # Buscar empleados con esos tipos
+        empleados = empleados_collection.find({
+            "tipo": {"$in": tipos_empleado_requeridos},
+            "activo": True
+        })
+        
+        empleados_disponibles = []
+        for emp in empleados:
+            empleados_disponibles.append({
+                "_id": str(emp["_id"]),
+                "identificador": emp.get("identificador"),
+                "nombreCompleto": emp.get("nombreCompleto"),
+                "cargo": emp.get("cargo"),
+                "tipo": emp.get("tipo", ""),
+                "permisos": emp.get("permisos", []),
+                "pin": emp.get("pin"),
+                "activo": emp.get("activo", True)
+            })
+        
+        print(f"DEBUG EMPLEADOS MODULO: Encontrados {len(empleados_disponibles)} empleados para estado {estado_item}")
         
         return {
             "success": True,
-            "modulo_actual": modulo_actual,
-            "empleados": empleados_formateados,
-            "total": len(empleados_formateados)
+            "modulo_actual": estado_item,
+            "empleados": empleados_disponibles,
+            "tipos_requeridos": tipos_empleado_requeridos,
+            "total": len(empleados_disponibles)
         }
         
     except HTTPException:
         raise
     except Exception as e:
         print(f"ERROR EMPLEADOS MODULO: {str(e)}")
-        # Retornar respuesta básica en lugar de error 500
         return {
             "success": True,
             "modulo_actual": 1,
