@@ -3203,127 +3203,191 @@ async def get_progreso_pedido(pedido_id: str):
         raise HTTPException(status_code=500, detail=f"Error al obtener progreso: {str(e)}")
 
 def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
-    """Calcular progreso mejorado con más precisión"""
+    """Calcular progreso mejorado con más precisión y manejo de errores"""
     
-    # Inicializar módulos
-    modulos = [
-        {"orden": 1, "nombre": "Herreria/Soldadura", "completado": 0, "total": 0, "en_proceso": 0},
-        {"orden": 2, "nombre": "Masillar/Pintar", "completado": 0, "total": 0, "en_proceso": 0},
-        {"orden": 3, "nombre": "Manillar/Preparar", "completado": 0, "total": 0, "en_proceso": 0},
-        {"orden": 4, "nombre": "Facturar", "completado": 0, "total": 0, "en_proceso": 0}
-    ]
-    
-    # Detalle por item
-    detalle_items = []
-    
-    for item in items:
-        item_id = str(item.get("_id"))
-        item_nombre = item.get("descripcionitem", f"Item {item_id}")
+    try:
+        # Validar inputs
+        if not items:
+            items = []
+        if not seguimiento:
+            seguimiento = []
         
-        # Estado del item en cada módulo
-        item_estados = {
-            "herreria": "pendiente",
-            "masillar": "pendiente", 
-            "manillar": "pendiente",
-            "facturar": "pendiente"
-        }
+        # Inicializar módulos
+        modulos = [
+            {"orden": 1, "nombre": "Herreria/Soldadura", "completado": 0, "total": 0, "en_proceso": 0},
+            {"orden": 2, "nombre": "Masillar/Pintar", "completado": 0, "total": 0, "en_proceso": 0},
+            {"orden": 3, "nombre": "Manillar/Preparar", "completado": 0, "total": 0, "en_proceso": 0},
+            {"orden": 4, "nombre": "Facturar", "completado": 0, "total": 0, "en_proceso": 0}
+        ]
         
-        # Buscar estado del item en cada módulo
-        for proceso in seguimiento:
-            if not proceso:
-                continue
-                
-            orden = proceso.get("orden", 0)
-            asignaciones = proceso.get("asignaciones_articulos", [])
-            
-            for asignacion in asignaciones:
-                if not asignacion:
+        # Detalle por item
+        detalle_items = []
+        
+        for item in items:
+            try:
+                # Validar que el item tenga la estructura esperada
+                if not isinstance(item, dict):
                     continue
                     
-                if asignacion.get("itemId") == item_id:
-                    estado_asignacion = asignacion.get("estado", "pendiente")
+                item_id = str(item.get("_id", ""))
+                if not item_id:
+                    continue
                     
-                    # Mapear orden a módulo
-                    modulo_nombre = {
-                        1: "herreria",
-                        2: "masillar",
-                        3: "manillar", 
-                        4: "facturar"
-                    }.get(orden, "desconocido")
-                    
-                    if modulo_nombre in item_estados:
-                        item_estados[modulo_nombre] = estado_asignacion
-                    break
-        
-        # Agregar detalle del item
-        detalle_items.append({
-            "item_id": item_id,
-            "nombre": item_nombre,
-            "estados": item_estados
-        })
-        
-        # Contar para cada módulo
-        for modulo in modulos:
-            modulo_nombre = modulo["nombre"].split("/")[0].lower()
-            if "herreria" in modulo_nombre:
-                modulo_key = "herreria"
-            elif "masillar" in modulo_nombre:
-                modulo_key = "masillar"
-            elif "manillar" in modulo_nombre:
-                modulo_key = "manillar"
-            elif "facturar" in modulo_nombre:
-                modulo_key = "facturar"
-            else:
+                item_nombre = item.get("descripcionitem", f"Item {item_id}")
+                
+                # Estado del item en cada módulo
+                item_estados = {
+                    "herreria": "pendiente",
+                    "masillar": "pendiente", 
+                    "manillar": "pendiente",
+                    "facturar": "pendiente"
+                }
+                
+                # Buscar estado del item en cada módulo
+                for proceso in seguimiento:
+                    try:
+                        if not isinstance(proceso, dict):
+                            continue
+                            
+                        orden = proceso.get("orden", 0)
+                        if not isinstance(orden, (int, str)):
+                            continue
+                            
+                        orden = int(orden)
+                        asignaciones = proceso.get("asignaciones_articulos", [])
+                        
+                        if not isinstance(asignaciones, list):
+                            continue
+                        
+                        for asignacion in asignaciones:
+                            try:
+                                if not isinstance(asignacion, dict):
+                                    continue
+                                    
+                                asignacion_item_id = asignacion.get("itemId", "")
+                                if str(asignacion_item_id) == item_id:
+                                    estado_asignacion = asignacion.get("estado", "pendiente")
+                                    
+                                    # Mapear orden a módulo
+                                    modulo_nombre = {
+                                        1: "herreria",
+                                        2: "masillar",
+                                        3: "manillar", 
+                                        4: "facturar"
+                                    }.get(orden, "desconocido")
+                                    
+                                    if modulo_nombre in item_estados:
+                                        item_estados[modulo_nombre] = estado_asignacion
+                                    break
+                            except Exception as e:
+                                print(f"Error procesando asignación: {e}")
+                                continue
+                    except Exception as e:
+                        print(f"Error procesando proceso: {e}")
+                        continue
+                
+                # Agregar detalle del item
+                detalle_items.append({
+                    "item_id": item_id,
+                    "nombre": item_nombre,
+                    "estados": item_estados
+                })
+                
+                # Contar para cada módulo
+                for modulo in modulos:
+                    try:
+                        modulo_nombre = modulo["nombre"].split("/")[0].lower()
+                        if "herreria" in modulo_nombre:
+                            modulo_key = "herreria"
+                        elif "masillar" in modulo_nombre:
+                            modulo_key = "masillar"
+                        elif "manillar" in modulo_nombre:
+                            modulo_key = "manillar"
+                        elif "facturar" in modulo_nombre:
+                            modulo_key = "facturar"
+                        else:
+                            continue
+                        
+                        estado_item = item_estados.get(modulo_key, "pendiente")
+                        
+                        if estado_item == "terminado":
+                            modulo["completado"] += 1
+                        elif estado_item == "en_proceso":
+                            modulo["en_proceso"] += 1
+                        
+                        modulo["total"] += 1
+                    except Exception as e:
+                        print(f"Error contando módulo: {e}")
+                        continue
+                        
+            except Exception as e:
+                print(f"Error procesando item: {e}")
                 continue
-            
-            estado_item = item_estados.get(modulo_key, "pendiente")
-            
-            if estado_item == "terminado":
-                modulo["completado"] += 1
-            elif estado_item == "en_proceso":
-                modulo["en_proceso"] += 1
-            
-            modulo["total"] += 1
-    
-    # Calcular porcentajes
-    for modulo in modulos:
-        if modulo["total"] > 0:
-            modulo["porcentaje"] = round((modulo["completado"] / modulo["total"]) * 100, 1)
-            modulo["porcentaje_en_proceso"] = round((modulo["en_proceso"] / modulo["total"]) * 100, 1)
+        
+        # Calcular porcentajes
+        for modulo in modulos:
+            try:
+                if modulo["total"] > 0:
+                    modulo["porcentaje"] = round((modulo["completado"] / modulo["total"]) * 100, 1)
+                    modulo["porcentaje_en_proceso"] = round((modulo["en_proceso"] / modulo["total"]) * 100, 1)
+                else:
+                    modulo["porcentaje"] = 0
+                    modulo["porcentaje_en_proceso"] = 0
+            except Exception as e:
+                print(f"Error calculando porcentajes: {e}")
+                modulo["porcentaje"] = 0
+                modulo["porcentaje_en_proceso"] = 0
+        
+        # Calcular progreso general más preciso
+        total_items = len(detalle_items)
+        
+        # Contar items completamente terminados (pasaron por todos los módulos)
+        items_terminados = 0
+        for item_detalle in detalle_items:
+            try:
+                estados = item_detalle["estados"]
+                if all(estado == "terminado" for estado in estados.values()):
+                    items_terminados += 1
+            except Exception as e:
+                print(f"Error contando item terminado: {e}")
+                continue
+        
+        # Calcular progreso basado en módulos completados
+        total_asignaciones = total_items * len(modulos)
+        asignaciones_completadas = sum(modulo["completado"] for modulo in modulos)
+        
+        progreso_general = round((asignaciones_completadas / total_asignaciones) * 100, 1) if total_asignaciones > 0 else 0
+        
+        # Determinar estado general
+        if items_terminados == total_items and total_items > 0:
+            estado_general = "completado"
+        elif asignaciones_completadas > 0:
+            estado_general = "en_proceso"
         else:
-            modulo["porcentaje"] = 0
-            modulo["porcentaje_en_proceso"] = 0
-    
-    # Calcular progreso general más preciso
-    total_items = len(items)
-    total_modulos = len(modulos)
-    
-    # Contar items completamente terminados (pasaron por todos los módulos)
-    items_terminados = 0
-    for item_detalle in detalle_items:
-        estados = item_detalle["estados"]
-        if all(estado == "terminado" for estado in estados.values()):
-            items_terminados += 1
-    
-    # Calcular progreso basado en módulos completados
-    total_asignaciones = total_items * total_modulos
-    asignaciones_completadas = sum(modulo["completado"] for modulo in modulos)
-    
-    progreso_general = round((asignaciones_completadas / total_asignaciones) * 100, 1) if total_asignaciones > 0 else 0
-    
-    # Determinar estado general
-    if items_terminados == total_items and total_items > 0:
-        estado_general = "completado"
-    elif asignaciones_completadas > 0:
-        estado_general = "en_proceso"
-    else:
-        estado_general = "pendiente"
-    
-    return {
-        "modulos": modulos,
-        "progreso_general": progreso_general,
-        "total_items": total_items,
-        "items_completados": items_terminados,
-        "estado": estado_general,
-        "detalle_items": detalle_items
-    }
+            estado_general = "pendiente"
+        
+        return {
+            "modulos": modulos,
+            "progreso_general": progreso_general,
+            "total_items": total_items,
+            "items_completados": items_terminados,
+            "estado": estado_general,
+            "detalle_items": detalle_items
+        }
+        
+    except Exception as e:
+        print(f"Error crítico en calcular_progreso_mejorado: {e}")
+        # Retornar estructura básica en caso de error
+        return {
+            "modulos": [
+                {"orden": 1, "nombre": "Herreria/Soldadura", "completado": 0, "total": 0, "en_proceso": 0, "porcentaje": 0, "porcentaje_en_proceso": 0},
+                {"orden": 2, "nombre": "Masillar/Pintar", "completado": 0, "total": 0, "en_proceso": 0, "porcentaje": 0, "porcentaje_en_proceso": 0},
+                {"orden": 3, "nombre": "Manillar/Preparar", "completado": 0, "total": 0, "en_proceso": 0, "porcentaje": 0, "porcentaje_en_proceso": 0},
+                {"orden": 4, "nombre": "Facturar", "completado": 0, "total": 0, "en_proceso": 0, "porcentaje": 0, "porcentaje_en_proceso": 0}
+            ],
+            "progreso_general": 0,
+            "total_items": 0,
+            "items_completados": 0,
+            "estado": "pendiente",
+            "detalle_items": []
+        }
