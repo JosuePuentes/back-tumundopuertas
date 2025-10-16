@@ -3527,8 +3527,8 @@ async def terminar_asignacion_articulo_v2(
         raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
     
     print(f"DEBUG TERMINAR V2: === TERMINACIÓN COMPLETADA ===")
-            
-            return {
+    
+    return {
         "message": "Asignación terminada correctamente",
         "success": True,
         "asignacion_actualizada": asignacion_actualizada,
