@@ -3340,34 +3340,31 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
 def determinar_modulo_actual_item(pedido: dict, item_id: str) -> int:
     """Determinar en qué módulo está actualmente el item"""
     try:
-            seguimiento = pedido.get("seguimiento", [])
+        seguimiento = pedido.get("seguimiento", [])
         
         # Validar que seguimiento sea una lista
         if not isinstance(seguimiento, list):
             return 1
         
         # Buscar el item en las asignaciones activas
-            for proceso in seguimiento:
+        for proceso in seguimiento:
             if not isinstance(proceso, dict):
-                    continue
+                continue
                 
-                asignaciones = proceso.get("asignaciones_articulos", [])
+            asignaciones = proceso.get("asignaciones_articulos", [])
             if not isinstance(asignaciones, list):
                 continue
                 
-                for asignacion in asignaciones:
+            for asignacion in asignaciones:
                 if not isinstance(asignacion, dict):
-                        continue
+                    continue
                     
-                    if asignacion.get("itemId") == item_id:
-                    # Si el item está asignado y en proceso, está en este módulo
-                    if asignacion.get("estado") == "en_proceso":
+                if asignacion.get("itemId") == item_id:
+                    estado = asignacion.get("estado", "pendiente")
+                    if estado == "en_proceso":
                         return proceso.get("orden", 1)
-                    # Si está terminado, buscar el siguiente módulo disponible
-                    elif asignacion.get("estado") == "terminado":
-                        return proceso.get("orden", 1) + 1
         
-        # Si no está asignado, determinar el primer módulo disponible
+        # Si no está en proceso, buscar el primer módulo disponible
         return determinar_primer_modulo_disponible(pedido, item_id)
         
     except Exception as e:
