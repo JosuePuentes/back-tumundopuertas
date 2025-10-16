@@ -56,7 +56,7 @@ def registrar_comision(asignacion: dict, empleado_id: str):
 async def get_dashboard_asignaciones(
     empleado_id: Optional[str] = None
 ):
-    """Obtener asignaciones reales para el dashboard desde pedidos.seguimiento"""
+    """Obtener asignaciones reales para el dashboard desde pedidos.seguimiento - OPTIMIZADO"""
     try:
         from ..config.mongodb import pedidos_collection, items_collection
         from bson import ObjectId
@@ -64,53 +64,110 @@ async def get_dashboard_asignaciones(
         print(f"DEBUG DASHBOARD: Obteniendo asignaciones reales desde pedidos")
         print(f"DEBUG DASHBOARD: Filtro empleado: {empleado_id}")
         
-        # Obtener todos los pedidos
-        pedidos = list(pedidos_collection.find({}))
-        asignaciones = []
-        
-        print(f"DEBUG DASHBOARD: Procesando {len(pedidos)} pedidos")
-        
-        for pedido in pedidos:
-            pedido_id = str(pedido.get("_id"))
-            seguimiento = pedido.get("seguimiento", [])
-            
-            for sub in seguimiento:
-                asignaciones_articulos = sub.get("asignaciones_articulos", [])
-                
-                for asignacion in asignaciones_articulos:
-                    # Solo asignaciones activas
-                    if asignacion.get("estado") not in ["en_proceso", "pendiente"]:
-                        continue
-                    
-                    # Filtrar por empleado si se especifica
-                    if empleado_id and asignacion.get("empleadoId") != empleado_id:
-                        continue
-                    
-                    # Buscar información del item
-                    item_id = asignacion.get("itemId")
-                    item_info = items_collection.find_one({"_id": ObjectId(item_id)}) if item_id else {}
-                    
-                    # Crear asignación para el dashboard
-                    asignacion_dashboard = {
-                        "_id": f"{pedido_id}_{item_id}_{asignacion.get('empleadoId')}",
-                        "pedido_id": pedido_id,
-                        "item_id": item_id,
-                        "empleado_id": asignacion.get("empleadoId"),
-                        "empleado_nombre": asignacion.get("nombreempleado", ""),
-                        "modulo": "herreria" if sub.get("orden") == 1 else "masillar" if sub.get("orden") == 2 else "preparar" if sub.get("orden") == 3 else "desconocido",
-                        "estado": asignacion.get("estado"),
-                        "fecha_asignacion": asignacion.get("fecha_inicio"),
-                        "fecha_fin": asignacion.get("fecha_fin"),
-                        "descripcionitem": asignacion.get("descripcionitem", ""),
-                        "detalleitem": asignacion.get("detalleitem", ""),
-                        "costo_produccion": asignacion.get("costoproduccion", 0),
-                        "cliente_nombre": pedido.get("cliente_nombre", ""),
-                        "imagenes": item_info.get("imagenes", []) if item_info else [],
-                        "orden": sub.get("orden"),
-                        "nombre_subestado": sub.get("nombre_subestado", "")
+        # Usar agregación para optimizar la consulta
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "asignaciones_articulos": {
+                                "$elemMatch": {
+                                    "estado": {"$in": ["en_proceso", "pendiente"]}
+                                }
+                            }
+                        }
                     }
-                    
-                    asignaciones.append(asignacion_dashboard)
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos": {
+                        "$elemMatch": {
+                            "estado": {"$in": ["en_proceso", "pendiente"]}
+                        }
+                    }
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos.estado": {"$in": ["en_proceso", "pendiente"]}
+                }
+            }
+        ]
+        
+        # Agregar filtro por empleado si se especifica
+        if empleado_id:
+            pipeline.append({
+                "$match": {
+                    "seguimiento.asignaciones_articulos.empleadoId": empleado_id
+                }
+            })
+        
+        # Proyectar solo los campos necesarios
+        pipeline.extend([
+            {
+                "$project": {
+                    "_id": 1,
+                    "numero_orden": 1,
+                    "cliente_nombre": 1,
+                    "seguimiento.orden": 1,
+                    "seguimiento.nombre_subestado": 1,
+                    "seguimiento.asignaciones_articulos": 1,
+                    "items": 1
+                }
+            },
+            {
+                "$limit": 200  # Limitar resultados para mejorar rendimiento
+            }
+        ])
+        
+        print(f"DEBUG DASHBOARD: Ejecutando pipeline de agregación")
+        pedidos = list(pedidos_collection.aggregate(pipeline))
+        
+        asignaciones = []
+        print(f"DEBUG DASHBOARD: Procesando {len(pedidos)} asignaciones")
+        
+        for pedido_data in pedidos:
+            pedido_id = str(pedido_data.get("_id"))
+            asignacion = pedido_data.get("seguimiento", {}).get("asignaciones_articulos", {})
+            orden = pedido_data.get("seguimiento", {}).get("orden", 1)
+            
+            # Buscar información del item
+            item_id = asignacion.get("itemId")
+            item_info = None
+            if item_id:
+                try:
+                    item_info = items_collection.find_one({"_id": ObjectId(item_id)})
+                except:
+                    pass
+            
+            # Crear asignación para el dashboard
+            asignacion_dashboard = {
+                "_id": f"{pedido_id}_{item_id}_{asignacion.get('empleadoId')}",
+                "pedido_id": pedido_id,
+                "item_id": item_id,
+                "empleado_id": asignacion.get("empleadoId"),
+                "empleado_nombre": asignacion.get("nombreempleado", ""),
+                "modulo": "herreria" if orden == 1 else "masillar" if orden == 2 else "preparar" if orden == 3 else "desconocido",
+                "estado": asignacion.get("estado"),
+                "fecha_asignacion": asignacion.get("fecha_inicio"),
+                "fecha_fin": asignacion.get("fecha_fin"),
+                "descripcionitem": asignacion.get("descripcionitem", ""),
+                "detalleitem": asignacion.get("detalleitem", ""),
+                "costo_produccion": asignacion.get("costoproduccion", 0),
+                "cliente_nombre": pedido_data.get("cliente_nombre", ""),
+                "imagenes": item_info.get("imagenes", []) if item_info else [],
+                "orden": orden,
+                "nombre_subestado": pedido_data.get("seguimiento", {}).get("nombre_subestado", "")
+            }
+            
+            asignaciones.append(asignacion_dashboard)
         
         # Ordenar por fecha de asignación (más recientes primero)
         asignaciones.sort(key=lambda x: x.get("fecha_asignacion", ""), reverse=True)
@@ -130,7 +187,48 @@ async def get_dashboard_asignaciones(
         print(f"ERROR DASHBOARD: Error al obtener asignaciones: {e}")
         import traceback
         print(f"ERROR DASHBOARD: Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail="Error al obtener asignaciones")
+        
+        # Fallback a método simple en caso de error
+        try:
+            pedidos = list(pedidos_collection.find({}).limit(50))
+            asignaciones = []
+            
+            for pedido in pedidos:
+                pedido_id = str(pedido.get("_id"))
+                seguimiento = pedido.get("seguimiento", [])
+                
+                for sub in seguimiento:
+                    asignaciones_articulos = sub.get("asignaciones_articulos", [])
+                    
+                    for asignacion in asignaciones_articulos:
+                        if asignacion.get("estado") not in ["en_proceso", "pendiente"]:
+                            continue
+                        
+                        if empleado_id and asignacion.get("empleadoId") != empleado_id:
+                            continue
+                        
+                        asignaciones.append({
+                            "_id": f"{pedido_id}_{asignacion.get('itemId')}_{asignacion.get('empleadoId')}",
+                            "pedido_id": pedido_id,
+                            "item_id": asignacion.get("itemId"),
+                            "empleado_id": asignacion.get("empleadoId"),
+                            "empleado_nombre": asignacion.get("nombreempleado", ""),
+                            "modulo": "herreria" if sub.get("orden") == 1 else "masillar" if sub.get("orden") == 2 else "preparar",
+                            "estado": asignacion.get("estado"),
+                            "fecha_asignacion": asignacion.get("fecha_inicio"),
+                            "cliente_nombre": pedido.get("cliente_nombre", ""),
+                            "orden": sub.get("orden")
+                        })
+            
+            return {
+                "asignaciones": asignaciones,
+                "total": len(asignaciones),
+                "empleado_filtrado": empleado_id,
+                "success": True
+            }
+        except Exception as fallback_error:
+            print(f"ERROR DASHBOARD FALLBACK: {fallback_error}")
+            raise HTTPException(status_code=500, detail="Error al obtener asignaciones")
 
 @router.put("/asignaciones/terminar")
 async def terminar_asignacion_dashboard(

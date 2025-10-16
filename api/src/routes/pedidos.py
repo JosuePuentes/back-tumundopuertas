@@ -261,10 +261,55 @@ async def update_subestados(
 
 @router.get("/herreria/")
 async def get_pedidos_herreria():
-    pedidos = list(pedidos_collection.find({"estado_general": "orden1"}))
-    for pedido in pedidos:
-        pedido["_id"] = str(pedido["_id"])
-    return pedidos
+    """Obtener pedidos para herrería con optimización"""
+    try:
+        print("DEBUG HERRERIA: Obteniendo pedidos para herrería")
+        
+        # Usar agregación para optimizar la consulta
+        pipeline = [
+            {
+                "$match": {
+                    "estado_general": "orden1"
+                }
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "numero_orden": 1,
+                    "cliente_nombre": 1,
+                    "fecha_creacion": 1,
+                    "estado_general": 1,
+                    "items": {
+                        "$filter": {
+                            "input": "$items",
+                            "cond": {"$lt": ["$$this.estado_item", 5]}  # Solo items no terminados
+                        }
+                    },
+                    "seguimiento": 1
+                }
+            },
+            {
+                "$limit": 100  # Limitar a 100 pedidos para mejorar rendimiento
+            }
+        ]
+        
+        pedidos = list(pedidos_collection.aggregate(pipeline))
+        
+        # Convertir ObjectId a string
+        for pedido in pedidos:
+            pedido["_id"] = str(pedido["_id"])
+        
+        print(f"DEBUG HERRERIA: Retornando {len(pedidos)} pedidos")
+        
+        return pedidos
+        
+    except Exception as e:
+        print(f"ERROR HERRERIA: {str(e)}")
+        # Fallback a consulta simple en caso de error
+        pedidos = list(pedidos_collection.find({"estado_general": "orden1"}).limit(50))
+        for pedido in pedidos:
+            pedido["_id"] = str(pedido["_id"])
+        return pedidos
 
 
 @router.put("/finalizar/")
