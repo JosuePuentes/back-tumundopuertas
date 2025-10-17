@@ -1280,6 +1280,35 @@ async def debug_verificar_empleados():
     except Exception as e:
         return {"error": str(e), "traceback": str(e.__traceback__)}
 
+@router.get("/debug-empleados-activos")
+async def debug_empleados_activos():
+    """Endpoint simple para verificar empleados activos"""
+    try:
+        empleados = list(empleados_collection.find({"activo": True}, {
+            "_id": 1,
+            "identificador": 1,
+            "nombreCompleto": 1,
+            "cargo": 1,
+            "pin": 1
+        }))
+        
+        empleados_procesados = []
+        for emp in empleados:
+            empleados_procesados.append({
+                "_id": str(emp["_id"]),
+                "identificador": emp.get("identificador"),
+                "nombreCompleto": emp.get("nombreCompleto"),
+                "cargo": emp.get("cargo"),
+                "pin": emp.get("pin")
+            })
+        
+        return {
+            "total_empleados_activos": len(empleados_procesados),
+            "empleados": empleados_procesados
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 # Endpoint para ver comisiones registradas
 @router.get("/debug-comisiones")
 async def debug_comisiones():
