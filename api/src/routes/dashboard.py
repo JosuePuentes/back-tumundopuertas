@@ -161,13 +161,10 @@ async def debug_dashboard_asignaciones():
         }
 
 @router.get("/asignaciones")
-async def get_dashboard_asignaciones(
-    empleado_id: Optional[str] = None
-):
+async def get_dashboard_asignaciones():
     """Obtener asignaciones para el dashboard - Versión simplificada"""
     try:
         from ..config.mongodb import pedidos_collection
-        from bson import ObjectId
         
         # Método más simple y eficiente
         asignaciones = []

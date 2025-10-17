@@ -309,6 +309,158 @@ async def get_all_pedidos():
         print(f"Error en get_all_pedidos: {e}")
         return []
 
+@router.get("/item-estado/{pedido_id}/{item_id}")
+async def get_item_estado(pedido_id: str, item_id: str):
+    """Obtener estado detallado de un item específico"""
+    try:
+        # Validar IDs
+        if not pedido_id or len(pedido_id) != 24:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        if not item_id or len(item_id) != 24:
+            raise HTTPException(status_code=400, detail="ID de item inválido")
+        
+        # Obtener el pedido
+        try:
+            pedido_obj_id = ObjectId(pedido_id)
+            pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Encontrar el item específico
+        item = None
+        for i in pedido.get("items", []):
+            if str(i.get("_id")) == item_id:
+                item = i
+                break
+        
+        if not item:
+            raise HTTPException(status_code=404, detail="Item no encontrado")
+        
+        estado_item = item.get("estado_item", 1)
+        
+        # Obtener asignaciones del item
+        asignaciones = []
+        seguimiento = pedido.get("seguimiento", [])
+        
+        for proceso in seguimiento:
+            if not isinstance(proceso, dict):
+                continue
+            
+            asignaciones_articulos = proceso.get("asignaciones_articulos", [])
+            if not isinstance(asignaciones_articulos, list):
+                continue
+            
+            for asignacion in asignaciones_articulos:
+                if not isinstance(asignacion, dict):
+                    continue
+                
+                if str(asignacion.get("itemId")) == item_id:
+                    asignaciones.append({
+                        "modulo": proceso.get("orden", 1),
+                        "estado": asignacion.get("estado"),
+                        "empleado_id": asignacion.get("empleadoId"),
+                        "empleado_nombre": asignacion.get("nombreempleado"),
+                        "fecha_inicio": asignacion.get("fecha_inicio"),
+                        "fecha_fin": asignacion.get("fecha_fin")
+                    })
+        
+        # Determinar si está disponible para asignación
+        disponible_para_asignacion = True
+        for asignacion in asignaciones:
+            if asignacion.get("estado") == "en_proceso":
+                disponible_para_asignacion = False
+                break
+        
+        return {
+            "success": True,
+            "pedido_id": pedido_id,
+            "item_id": item_id,
+            "estado_item": estado_item,
+            "asignaciones": asignaciones,
+            "disponible_para_asignacion": disponible_para_asignacion,
+            "progreso": (estado_item / 4) * 100  # Progreso basado en estado_item
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error en get_item_estado: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@router.get("/debug-pedido-especifico/{pedido_id}")
+async def debug_pedido_especifico(pedido_id: str):
+    """Debuggear un pedido específico para ver por qué no aparece"""
+    try:
+        # Validar ID
+        if not pedido_id or len(pedido_id) != 24:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
+        # Obtener el pedido
+        try:
+            pedido_obj_id = ObjectId(pedido_id)
+            pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Información básica del pedido
+        info_pedido = {
+            "_id": str(pedido["_id"]),
+            "numero_orden": pedido.get("numero_orden"),
+            "cliente_nombre": pedido.get("cliente_nombre"),
+            "estado_general": pedido.get("estado_general"),
+            "fecha_creacion": pedido.get("fecha_creacion"),
+            "total_items": len(pedido.get("items", [])),
+            "tiene_seguimiento": bool(pedido.get("seguimiento")),
+            "seguimiento_count": len(pedido.get("seguimiento", []))
+        }
+        
+        # Información de items
+        items_info = []
+        for item in pedido.get("items", []):
+            items_info.append({
+                "_id": str(item.get("_id")),
+                "descripcion": item.get("descripcion"),
+                "estado_item": item.get("estado_item"),
+                "costoproduccion": item.get("costoproduccion")
+            })
+        
+        # Información de seguimiento
+        seguimiento_info = []
+        for proceso in pedido.get("seguimiento", []):
+            if isinstance(proceso, dict):
+                seguimiento_info.append({
+                    "orden": proceso.get("orden"),
+                    "nombre_subestado": proceso.get("nombre_subestado"),
+                    "asignaciones_count": len(proceso.get("asignaciones_articulos", []))
+                })
+        
+        return {
+            "success": True,
+            "pedido_info": info_pedido,
+            "items": items_info,
+            "seguimiento": seguimiento_info,
+            "aparece_en_herreria": pedido.get("estado_general") == "orden1",
+            "tiene_items_activos": any(item.get("estado_item", 1) < 5 for item in pedido.get("items", []))
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error en debug_pedido_especifico: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 
 @router.put("/finalizar/")
 async def finalizar_pedido(
