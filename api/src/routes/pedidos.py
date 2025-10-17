@@ -270,11 +270,10 @@ async def get_pedidos_herreria():
     """Obtener pedidos para producción - Solo items que necesitan trabajo (estado_item 1-3)"""
     try:
         # Buscar pedidos que tengan items que necesitan trabajo
-        # Excluye: estado_item = 4 (terminado manillar) y estado_item = 5 (completado)
         pedidos = list(pedidos_collection.find({
             "items": {
                 "$elemMatch": {
-                    "estado_item": {"$gte": 1, "$lt": 4}  # Solo items activos (1-3)
+                    "estado_item": {"$in": [1, 2, 3]}  # Solo items activos (1-3)
                 }
             }
         }, {
@@ -287,15 +286,197 @@ async def get_pedidos_herreria():
             "seguimiento": 1
         }).limit(100))
         
-        # Convertir ObjectId a string
+        # Filtrar solo los items activos en cada pedido
         for pedido in pedidos:
             pedido["_id"] = str(pedido["_id"])
+            # Filtrar items que estén en estado 1, 2 o 3
+            pedido["items"] = [
+                item for item in pedido.get("items", [])
+                if item.get("estado_item", 1) in [1, 2, 3]
+            ]
         
         return pedidos
         
     except Exception as e:
         print(f"Error en get_pedidos_herreria: {e}")
         return []
+
+@router.put("/asignar-item/")
+async def asignar_item(
+    pedido_id: str = Body(...),
+    item_id: str = Body(...),
+    empleado_id: str = Body(...),
+    modulo: str = Body(...)  # "herreria", "masillar", "preparar"
+):
+    """
+    Asignar un item a un empleado en un módulo específico
+    Actualiza el estado_item según el módulo asignado
+    """
+    try:
+        # Buscar el pedido
+        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Mapeo de módulos a estados
+        estado_item_map = {
+            "herreria": 1,
+            "masillar": 2, 
+            "preparar": 3
+        }
+        
+        nuevo_estado_item = estado_item_map.get(modulo, 1)
+        
+        # Buscar el empleado para obtener su nombre
+        empleado = empleados_collection.find_one({"_id": ObjectId(empleado_id)})
+        nombre_empleado = empleado.get("nombreCompleto", "Empleado desconocido") if empleado else "Empleado desconocido"
+        
+        # Actualizar el item específico
+        result = pedidos_collection.update_one(
+            {
+                "_id": ObjectId(pedido_id),
+                "items.id": item_id
+            },
+            {
+                "$set": {
+                    "items.$.estado_item": nuevo_estado_item,
+                    "items.$.empleado_asignado": empleado_id,
+                    "items.$.nombre_empleado": nombre_empleado,
+                    "items.$.modulo_actual": modulo,
+                    "items.$.fecha_asignacion": datetime.now().isoformat()
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Item no encontrado en el pedido")
+        
+        return {
+            "message": "Item asignado correctamente", 
+            "estado_item": nuevo_estado_item,
+            "modulo": modulo,
+            "empleado": nombre_empleado
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error asignando item: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+@router.put("/terminar-asignacion/")
+async def terminar_asignacion(
+    pedido_id: str = Body(...),
+    item_id: str = Body(...),
+    pin: str = Body(...)
+):
+    """
+    Terminar una asignación y avanzar al siguiente estado
+    Incrementa el estado_item en 1
+    """
+    try:
+        # Buscar el pedido
+        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Buscar el item específico
+        item_encontrado = None
+        for item in pedido.get("items", []):
+            if item.get("id") == item_id:
+                item_encontrado = item
+                break
+        
+        if not item_encontrado:
+            raise HTTPException(status_code=404, detail="Item no encontrado")
+        
+        estado_actual = item_encontrado.get("estado_item", 1)
+        nuevo_estado = estado_actual + 1
+        
+        # Si llega a estado 4, el item desaparece de herreria
+        if nuevo_estado > 4:
+            nuevo_estado = 4  # Máximo estado
+        
+        # Actualizar el estado del item
+        result = pedidos_collection.update_one(
+            {
+                "_id": ObjectId(pedido_id),
+                "items.id": item_id
+            },
+            {
+                "$set": {
+                    "items.$.estado_item": nuevo_estado,
+                    "items.$.fecha_terminacion": datetime.now().isoformat(),
+                    "items.$.pin_usado": pin
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Item no encontrado para actualizar")
+        
+        return {
+            "message": "Asignación terminada correctamente",
+            "estado_anterior": estado_actual,
+            "estado_nuevo": nuevo_estado,
+            "visible_en_herreria": nuevo_estado <= 3
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error terminando asignación: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+@router.get("/item-estado/{pedido_id}/{item_id}")
+async def get_item_estado(pedido_id: str, item_id: str):
+    """
+    Obtener el estado específico de un item
+    """
+    try:
+        # Buscar el pedido
+        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Buscar el item específico
+        item_encontrado = None
+        for item in pedido.get("items", []):
+            if item.get("id") == item_id:
+                item_encontrado = item
+                break
+        
+        if not item_encontrado:
+            raise HTTPException(status_code=404, detail="Item no encontrado")
+        
+        estado_item = item_encontrado.get("estado_item", 1)
+        
+        # Mapeo de estados a descripciones
+        estado_descripcion = {
+            1: "Pendiente - Herrería",
+            2: "En proceso - Masillar/Pintar", 
+            3: "En proceso - Manillar",
+            4: "Terminado - Listo para facturar"
+        }
+        
+        return {
+            "pedido_id": pedido_id,
+            "item_id": item_id,
+            "estado_item": estado_item,
+            "descripcion_estado": estado_descripcion.get(estado_item, "Estado desconocido"),
+            "visible_en_herreria": estado_item <= 3,
+            "empleado_asignado": item_encontrado.get("empleado_asignado"),
+            "nombre_empleado": item_encontrado.get("nombre_empleado"),
+            "modulo_actual": item_encontrado.get("modulo_actual"),
+            "fecha_asignacion": item_encontrado.get("fecha_asignacion"),
+            "fecha_terminacion": item_encontrado.get("fecha_terminacion")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error obteniendo estado del item: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
 @router.get("/all/")
 async def get_all_pedidos():

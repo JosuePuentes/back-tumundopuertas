@@ -145,6 +145,7 @@ class PedidoItem(BaseModel):
     activo: bool = True
     detalleitem: Optional[str] = ""
     imagenes: Optional[List[str]] = []
+    estado_item: int = 1  # NUEVO: Estado inicial del item (1=pendiente, 2=orden1, 3=orden2, 4=orden3)
 
 class AsignacionArticulo(BaseModel):
     itemId: str
