@@ -3542,16 +3542,16 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         
         estado_item = item.get("estado_item", 1)
         
-                # Determinar módulos permitidos según el estado ACTUAL del item
-                modulos_permitidos = []
-                if estado_item == 1:  # Herrería
-                    modulos_permitidos = ["herreria", "masillar", "pintar", "ayudante"]
-                elif estado_item == 2:  # Masillar/Pintar
-                    modulos_permitidos = ["masillar", "pintar", "ayudante"]
-                elif estado_item == 3:  # Manillar
-                    modulos_permitidos = ["manillar", "ayudante"]
-                elif estado_item == 4:  # Facturación
-                    modulos_permitidos = ["facturacion", "ayudante"]
+        # Determinar módulos permitidos según el estado ACTUAL del item
+        modulos_permitidos = []
+        if estado_item == 1:  # Herrería
+            modulos_permitidos = ["herreria", "masillar", "pintar", "ayudante"]
+        elif estado_item == 2:  # Masillar/Pintar
+            modulos_permitidos = ["masillar", "pintar", "ayudante"]
+        elif estado_item == 3:  # Manillar
+            modulos_permitidos = ["manillar", "ayudante"]
+        elif estado_item == 4:  # Facturación
+            modulos_permitidos = ["facturacion", "ayudante"]
         
         # Obtener empleados con esos permisos
         empleados = list(empleados_collection.find(
