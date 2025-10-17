@@ -5,8 +5,14 @@ from datetime import datetime, timedelta, timezone
 from ..config.mongodb import pedidos_collection, db
 from ..models.authmodels import Pedido
 from ..auth.auth import get_current_user
+from pydantic import BaseModel
 
 router = APIRouter()
+
+# Modelo Pydantic para cancelar pedidos
+class CancelarPedidoRequest(BaseModel):
+    motivo_cancelacion: str
+
 metodos_pago_collection = db["metodos_pago"]
 empleados_collection = db["empleados"]
 items_collection = db["inventario"]  # La colección de items se llama "inventario"
@@ -2731,7 +2737,7 @@ async def debug_pedidos_16octubre():
 @router.put("/cancelar/{pedido_id}")
 async def cancelar_pedido(
     pedido_id: str,
-    motivo_cancelacion: str = Body(..., description="Motivo de la cancelación"),
+    request: CancelarPedidoRequest,
     user: dict = Depends(get_current_user)
 ):
     """
@@ -2792,7 +2798,7 @@ async def cancelar_pedido(
                 "$set": {
                     "estado_general": "cancelado",
                     "fecha_cancelacion": fecha_cancelacion,
-                    "motivo_cancelacion": motivo_cancelacion,
+                    "motivo_cancelacion": request.motivo_cancelacion,
                     "cancelado_por": usuario_cancelacion,
                     "fecha_actualizacion": fecha_cancelacion
                 }
@@ -2812,7 +2818,7 @@ async def cancelar_pedido(
             "numero_orden": pedido.get("numero_orden", ""),
             "cliente_nombre": pedido.get("cliente_nombre", ""),
             "fecha_cancelacion": fecha_cancelacion,
-            "motivo_cancelacion": motivo_cancelacion,
+            "motivo_cancelacion": request.motivo_cancelacion,
             "cancelado_por": usuario_cancelacion
         }
         
