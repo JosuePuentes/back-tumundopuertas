@@ -261,55 +261,53 @@ async def update_subestados(
 
 @router.get("/herreria/")
 async def get_pedidos_herreria():
-    """Obtener pedidos para herrería con optimización"""
+    """Obtener pedidos para herrería - Versión simplificada"""
     try:
-        print("DEBUG HERRERIA: Obteniendo pedidos para herrería")
-        
-        # Usar agregación para optimizar la consulta
-        pipeline = [
-            {
-                "$match": {
-                    "estado_general": "orden1"
-                }
-            },
-            {
-                "$project": {
-                    "_id": 1,
-                    "numero_orden": 1,
-                    "cliente_nombre": 1,
-                    "fecha_creacion": 1,
-                    "estado_general": 1,
-                    "items": {
-                        "$filter": {
-                            "input": "$items",
-                            "cond": {"$lt": ["$$this.estado_item", 5]}  # Solo items no terminados
-                        }
-                    },
-                    "seguimiento": 1
-                }
-            },
-            {
-                "$limit": 100  # Limitar a 100 pedidos para mejorar rendimiento
-            }
-        ]
-        
-        pedidos = list(pedidos_collection.aggregate(pipeline))
+        # Método más simple y eficiente
+        pedidos = list(pedidos_collection.find({
+            "estado_general": "orden1"
+        }, {
+            "_id": 1,
+            "numero_orden": 1,
+            "cliente_nombre": 1,
+            "fecha_creacion": 1,
+            "estado_general": 1,
+            "items": 1
+        }).limit(50))  # Limitar a 50 pedidos para mejor rendimiento
         
         # Convertir ObjectId a string
         for pedido in pedidos:
             pedido["_id"] = str(pedido["_id"])
         
-        print(f"DEBUG HERRERIA: Retornando {len(pedidos)} pedidos")
+        return pedidos
+        
+    except Exception as e:
+        print(f"Error en get_pedidos_herreria: {e}")
+        return []
+
+@router.get("/all/")
+async def get_all_pedidos():
+    """Obtener todos los pedidos para el monitor - Versión simplificada"""
+    try:
+        # Método más simple y eficiente
+        pedidos = list(pedidos_collection.find({}, {
+            "_id": 1,
+            "numero_orden": 1,
+            "cliente_nombre": 1,
+            "fecha_creacion": 1,
+            "estado_general": 1,
+            "items": 1
+        }).limit(100))  # Limitar a 100 pedidos para mejor rendimiento
+        
+        # Convertir ObjectId a string
+        for pedido in pedidos:
+            pedido["_id"] = str(pedido["_id"])
         
         return pedidos
         
     except Exception as e:
-        print(f"ERROR HERRERIA: {str(e)}")
-        # Fallback a consulta simple en caso de error
-        pedidos = list(pedidos_collection.find({"estado_general": "orden1"}).limit(50))
-        for pedido in pedidos:
-            pedido["_id"] = str(pedido["_id"])
-        return pedidos
+        print(f"Error en get_all_pedidos: {e}")
+        return []
 
 
 @router.put("/finalizar/")
@@ -3382,8 +3380,6 @@ async def debug_pedido(pedido_id: str):
 async def get_empleados_por_modulo(pedido_id: str, item_id: str):
     """Obtener empleados disponibles para asignar según el módulo actual del item"""
     try:
-        print(f"DEBUG EMPLEADOS MODULO: Buscando empleados para pedido {pedido_id}, item {item_id}")
-        
         # Validar IDs
         if not pedido_id or len(pedido_id) != 24:
             raise HTTPException(status_code=400, detail="ID de pedido inválido")
@@ -3395,7 +3391,6 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
             pedido_obj_id = ObjectId(pedido_id)
             pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
         except Exception as e:
-            print(f"Error convirtiendo ObjectId: {e}")
             raise HTTPException(status_code=400, detail="ID de pedido inválido")
         
         if not pedido:
@@ -3412,11 +3407,9 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
             raise HTTPException(status_code=404, detail="Item no encontrado")
         
         estado_item = item.get("estado_item", 1)
-        print(f"DEBUG EMPLEADOS MODULO: Estado del item: {estado_item}")
-        print(f"DEBUG EMPLEADOS MODULO: Item completo: {item}")
         
-        # Obtener todos los empleados activos
-        empleados = empleados_collection.find({
+        # Obtener todos los empleados activos con límite
+        empleados = list(empleados_collection.find({
             "activo": True
         }, {
             "_id": 1,
@@ -3424,7 +3417,7 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
             "nombreCompleto": 1,
             "cargo": 1,
             "pin": 1
-        })
+        }).limit(50))  # Limitar a 50 empleados para mejor rendimiento
         
         empleados_disponibles = []
         
@@ -3463,8 +3456,6 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
                     "activo": True
                 })
         
-        print(f"DEBUG EMPLEADOS MODULO: Encontrados {len(empleados_disponibles)} empleados para estado {estado_item}")
-        
         return {
             "success": True,
             "modulo_actual": estado_item,
@@ -3475,7 +3466,6 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"ERROR EMPLEADOS MODULO: {str(e)}")
         return {
             "success": True,
             "modulo_actual": 1,

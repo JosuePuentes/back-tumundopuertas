@@ -164,179 +164,71 @@ async def debug_dashboard_asignaciones():
 async def get_dashboard_asignaciones(
     empleado_id: Optional[str] = None
 ):
-    """Obtener asignaciones reales para el dashboard desde pedidos.seguimiento - OPTIMIZADO"""
+    """Obtener asignaciones para el dashboard - Versión simplificada"""
     try:
-        from ..config.mongodb import pedidos_collection, items_collection
+        from ..config.mongodb import pedidos_collection
         from bson import ObjectId
         
-        print(f"DEBUG DASHBOARD: Obteniendo asignaciones reales desde pedidos")
-        print(f"DEBUG DASHBOARD: Filtro empleado: {empleado_id}")
-        
-        # Usar agregación para optimizar la consulta
-        pipeline = [
-            {
-                "$match": {
-                    "seguimiento": {
-                        "$elemMatch": {
-                            "asignaciones_articulos": {
-                                "$elemMatch": {
-                                    "estado": {"$in": ["en_proceso", "pendiente"]}
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            {
-                "$unwind": "$seguimiento"
-            },
-            {
-                "$match": {
-                    "seguimiento.asignaciones_articulos": {
-                        "$elemMatch": {
-                            "estado": {"$in": ["en_proceso", "pendiente"]}
-                        }
-                    }
-                }
-            },
-            {
-                "$unwind": "$seguimiento.asignaciones_articulos"
-            },
-            {
-                "$match": {
-                    "seguimiento.asignaciones_articulos.estado": {"$in": ["en_proceso", "pendiente"]}
-                }
-            }
-        ]
-        
-        # Agregar filtro por empleado si se especifica
-        if empleado_id:
-            pipeline.append({
-                "$match": {
-                    "seguimiento.asignaciones_articulos.empleadoId": empleado_id
-                }
-            })
-        
-        # Proyectar solo los campos necesarios
-        pipeline.extend([
-            {
-                "$project": {
-                    "_id": 1,
-                    "numero_orden": 1,
-                    "cliente_nombre": 1,
-                    "seguimiento.orden": 1,
-                    "seguimiento.nombre_subestado": 1,
-                    "seguimiento.asignaciones_articulos": 1,
-                    "items": 1
-                }
-            },
-            {
-                "$limit": 200  # Limitar resultados para mejorar rendimiento
-            }
-        ])
-        
-        print(f"DEBUG DASHBOARD: Ejecutando pipeline de agregación")
-        pedidos = list(pedidos_collection.aggregate(pipeline))
-        
+        # Método más simple y eficiente
         asignaciones = []
-        print(f"DEBUG DASHBOARD: Procesando {len(pedidos)} asignaciones")
         
-        for pedido_data in pedidos:
-            pedido_id = str(pedido_data.get("_id"))
-            asignacion = pedido_data.get("seguimiento", {}).get("asignaciones_articulos", {})
-            orden = pedido_data.get("seguimiento", {}).get("orden", 1)
-            
-            # Buscar información del item
-            item_id = asignacion.get("itemId")
-            item_info = None
-            if item_id:
-                try:
-                    item_info = items_collection.find_one({"_id": ObjectId(item_id)})
-                except:
-                    pass
-            
-            # Crear asignación para el dashboard
-            asignacion_dashboard = {
-                "_id": f"{pedido_id}_{item_id}_{asignacion.get('empleadoId')}",
-                "pedido_id": pedido_id,
-                "item_id": item_id,
-                "empleado_id": asignacion.get("empleadoId"),
-                "empleado_nombre": asignacion.get("nombreempleado", ""),
-                "modulo": "herreria" if orden == 1 else "masillar" if orden == 2 else "preparar" if orden == 3 else "desconocido",
-                "estado": asignacion.get("estado"),
-                "fecha_asignacion": asignacion.get("fecha_inicio"),
-                "fecha_fin": asignacion.get("fecha_fin"),
-                "descripcionitem": asignacion.get("descripcionitem", ""),
-                "detalleitem": asignacion.get("detalleitem", ""),
-                "costo_produccion": asignacion.get("costoproduccion", 0),
-                "cliente_nombre": pedido_data.get("cliente_nombre", ""),
-                "imagenes": item_info.get("imagenes", []) if item_info else [],
-                "orden": orden,
-                "nombre_subestado": pedido_data.get("seguimiento", {}).get("nombre_subestado", "")
-            }
-            
-            asignaciones.append(asignacion_dashboard)
+        # Buscar pedidos con asignaciones activas
+        pedidos = list(pedidos_collection.find({
+            "estado_general": {"$in": ["orden1", "orden2", "orden3"]},
+            "seguimiento": {"$exists": True, "$ne": []}
+        }, {
+            "_id": 1,
+            "numero_pedido": 1,
+            "cliente": 1,
+            "fecha_creacion": 1,
+            "seguimiento": 1
+        }).limit(50))  # Limitar a 50 pedidos para mejor rendimiento
         
-        # Ordenar por fecha de asignación (más recientes primero)
-        asignaciones.sort(key=lambda x: x.get("fecha_asignacion", ""), reverse=True)
-        
-        print(f"DEBUG DASHBOARD: Encontradas {len(asignaciones)} asignaciones activas")
-        if empleado_id:
-            print(f"DEBUG DASHBOARD: Filtradas para empleado {empleado_id}")
+        for pedido in pedidos:
+            try:
+                for proceso in pedido.get("seguimiento", []):
+                    if not isinstance(proceso, dict):
+                        continue
+                    
+                    orden = proceso.get("orden", 1)
+                    modulo_nombre = "herreria" if orden == 1 else "masillar" if orden == 2 else "preparar"
+                    
+                    asignaciones_articulos = proceso.get("asignaciones_articulos", [])
+                    if not isinstance(asignaciones_articulos, list):
+                        continue
+                    
+                    for asignacion in asignaciones_articulos:
+                        if not isinstance(asignacion, dict):
+                            continue
+                        
+                        if asignacion.get("estado") in ["en_proceso", "pendiente"]:
+                            asignaciones.append({
+                                "_id": str(pedido["_id"]),
+                                "numero_pedido": pedido.get("numero_pedido"),
+                                "cliente": pedido.get("cliente"),
+                                "fecha_creacion": pedido.get("fecha_creacion"),
+                                "modulo": modulo_nombre,
+                                "orden": orden,
+                                "asignacion": asignacion
+                            })
+            except Exception as e:
+                print(f"Error procesando pedido {pedido.get('_id')}: {e}")
+                continue
         
         return {
+            "success": True,
             "asignaciones": asignaciones,
-            "total": len(asignaciones),
-            "empleado_filtrado": empleado_id,
-            "success": True
+            "total": len(asignaciones)
         }
         
     except Exception as e:
-        print(f"ERROR DASHBOARD: Error al obtener asignaciones: {e}")
-        import traceback
-        print(f"ERROR DASHBOARD: Traceback: {traceback.format_exc()}")
-        
-        # Fallback a método simple en caso de error
-        try:
-            pedidos = list(pedidos_collection.find({}).limit(50))
-            asignaciones = []
-            
-            for pedido in pedidos:
-                pedido_id = str(pedido.get("_id"))
-                seguimiento = pedido.get("seguimiento", [])
-                
-                for sub in seguimiento:
-                    asignaciones_articulos = sub.get("asignaciones_articulos", [])
-                    
-                    for asignacion in asignaciones_articulos:
-                        if asignacion.get("estado") not in ["en_proceso", "pendiente"]:
-                            continue
-                        
-                        if empleado_id and asignacion.get("empleadoId") != empleado_id:
-                            continue
-                        
-                        asignaciones.append({
-                            "_id": f"{pedido_id}_{asignacion.get('itemId')}_{asignacion.get('empleadoId')}",
-                            "pedido_id": pedido_id,
-                            "item_id": asignacion.get("itemId"),
-                            "empleado_id": asignacion.get("empleadoId"),
-                            "empleado_nombre": asignacion.get("nombreempleado", ""),
-                            "modulo": "herreria" if sub.get("orden") == 1 else "masillar" if sub.get("orden") == 2 else "preparar",
-                            "estado": asignacion.get("estado"),
-                            "fecha_asignacion": asignacion.get("fecha_inicio"),
-                            "cliente_nombre": pedido.get("cliente_nombre", ""),
-                            "orden": sub.get("orden")
-                        })
-            
-            return {
-                "asignaciones": asignaciones,
-                "total": len(asignaciones),
-                "empleado_filtrado": empleado_id,
-                "success": True
-            }
-        except Exception as fallback_error:
-            print(f"ERROR DASHBOARD FALLBACK: {fallback_error}")
-            raise HTTPException(status_code=500, detail="Error al obtener asignaciones")
+        print(f"Error en get_dashboard_asignaciones: {e}")
+        return {
+            "success": False,
+            "asignaciones": [],
+            "total": 0,
+            "error": str(e)
+        }
 
 @router.put("/asignaciones/terminar")
 async def terminar_asignacion_dashboard(
