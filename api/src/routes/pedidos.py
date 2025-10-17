@@ -2728,6 +2728,100 @@ async def debug_pedidos_16octubre():
         return {"error": str(e)}
 
 # Endpoint de debug simple para probar
+@router.put("/cancelar/{pedido_id}")
+async def cancelar_pedido(
+    pedido_id: str,
+    motivo_cancelacion: str = Body(..., description="Motivo de la cancelación"),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Cancelar un pedido que esté en estado 'pendiente'
+    Solo permite cancelar pedidos que no hayan iniciado producción
+    """
+    try:
+        # Validar ID del pedido
+        if not pedido_id or len(pedido_id) != 24:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
+        # Convertir a ObjectId
+        try:
+            pedido_obj_id = ObjectId(pedido_id)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
+        # Buscar el pedido
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Verificar que el pedido esté en estado 'pendiente'
+        estado_actual = pedido.get("estado_general", "")
+        if estado_actual != "pendiente":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"No se puede cancelar el pedido. Estado actual: {estado_actual}. Solo se pueden cancelar pedidos en estado 'pendiente'"
+            )
+        
+        # Verificar que no tenga asignaciones activas
+        seguimiento = pedido.get("seguimiento", [])
+        tiene_asignaciones_activas = False
+        
+        for proceso in seguimiento:
+            if isinstance(proceso, dict):
+                asignaciones = proceso.get("asignaciones_articulos", [])
+                for asignacion in asignaciones:
+                    if asignacion.get("estado") == "en_proceso":
+                        tiene_asignaciones_activas = True
+                        break
+                if tiene_asignaciones_activas:
+                    break
+        
+        if tiene_asignaciones_activas:
+            raise HTTPException(
+                status_code=400,
+                detail="No se puede cancelar el pedido porque tiene asignaciones activas en producción"
+            )
+        
+        # Actualizar el pedido con estado cancelado
+        fecha_cancelacion = datetime.now().isoformat()
+        usuario_cancelacion = user.get("username", "usuario_desconocido")
+        
+        result = pedidos_collection.update_one(
+            {"_id": pedido_obj_id},
+            {
+                "$set": {
+                    "estado_general": "cancelado",
+                    "fecha_cancelacion": fecha_cancelacion,
+                    "motivo_cancelacion": motivo_cancelacion,
+                    "cancelado_por": usuario_cancelacion,
+                    "fecha_actualizacion": fecha_cancelacion
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado para actualizar")
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=400, detail="No se pudo actualizar el pedido")
+        
+        return {
+            "success": True,
+            "message": "Pedido cancelado exitosamente",
+            "pedido_id": pedido_id,
+            "numero_orden": pedido.get("numero_orden", ""),
+            "cliente_nombre": pedido.get("cliente_nombre", ""),
+            "fecha_cancelacion": fecha_cancelacion,
+            "motivo_cancelacion": motivo_cancelacion,
+            "cancelado_por": usuario_cancelacion
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error cancelando pedido {pedido_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+
 @router.get("/estado-items-produccion/")
 async def get_estado_items_produccion():
     """
@@ -2836,6 +2930,72 @@ async def get_estado_items_produccion():
             "total_items": 0,
             "error": str(e)
         }
+
+
+@router.get("/cancelables/")
+async def get_pedidos_cancelables(user: dict = Depends(get_current_user)):
+    """
+    Obtener pedidos que pueden ser cancelados (estado 'pendiente' sin asignaciones activas)
+    """
+    try:
+        # Buscar pedidos en estado 'pendiente'
+        pedidos_pendientes = list(pedidos_collection.find({
+            "estado_general": "pendiente"
+        }, {
+            "_id": 1,
+            "numero_orden": 1,
+            "cliente_nombre": 1,
+            "fecha_creacion": 1,
+            "estado_general": 1,
+            "seguimiento": 1,
+            "items": 1
+        }))
+        
+        pedidos_cancelables = []
+        
+        for pedido in pedidos_pendientes:
+            try:
+                pedido_id = str(pedido["_id"])
+                seguimiento = pedido.get("seguimiento", [])
+                
+                # Verificar que no tenga asignaciones activas
+                tiene_asignaciones_activas = False
+                for proceso in seguimiento:
+                    if isinstance(proceso, dict):
+                        asignaciones = proceso.get("asignaciones_articulos", [])
+                        for asignacion in asignaciones:
+                            if asignacion.get("estado") == "en_proceso":
+                                tiene_asignaciones_activas = True
+                                break
+                        if tiene_asignaciones_activas:
+                            break
+                
+                # Solo incluir si no tiene asignaciones activas
+                if not tiene_asignaciones_activas:
+                    pedidos_cancelables.append({
+                        "pedido_id": pedido_id,
+                        "numero_orden": pedido.get("numero_orden", ""),
+                        "cliente_nombre": pedido.get("cliente_nombre", ""),
+                        "fecha_creacion": pedido.get("fecha_creacion", ""),
+                        "estado_general": pedido.get("estado_general", ""),
+                        "total_items": len(pedido.get("items", [])),
+                        "puede_cancelar": True
+                    })
+                    
+            except Exception as e:
+                print(f"Error procesando pedido {pedido.get('_id')}: {e}")
+                continue
+        
+        return {
+            "success": True,
+            "pedidos_cancelables": pedidos_cancelables,
+            "total": len(pedidos_cancelables),
+            "message": f"Se encontraron {len(pedidos_cancelables)} pedidos que pueden ser cancelados"
+        }
+        
+    except Exception as e:
+        print(f"Error obteniendo pedidos cancelables: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
 
 
 # Endpoint para totalizar un pago de un pedido
