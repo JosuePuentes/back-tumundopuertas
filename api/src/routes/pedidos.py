@@ -2933,7 +2933,7 @@ async def get_estado_items_produccion():
 
 
 @router.get("/cancelables/")
-async def get_pedidos_cancelables(user: dict = Depends(get_current_user)):
+async def get_pedidos_cancelables():
     """
     Obtener pedidos que pueden ser cancelados (estado 'pendiente' sin asignaciones activas)
     """
