@@ -261,18 +261,24 @@ async def update_subestados(
 
 @router.get("/herreria/")
 async def get_pedidos_herreria():
-    """Obtener pedidos para herrería - Versión simplificada"""
+    """Obtener pedidos para producción - Muestra items con estado_item 1-3 (activos)"""
     try:
-        # Método más simple y eficiente
+        # Buscar pedidos que tengan items activos (estado_item 1-3)
+        # Desaparecen cuando terminan MANILLAR (estado_item = 4)
         pedidos = list(pedidos_collection.find({
-            "estado_general": "orden1"
+            "items": {
+                "$elemMatch": {
+                    "estado_item": {"$gte": 1, "$lt": 4}  # Items activos (1-3)
+                }
+            }
         }, {
             "_id": 1,
             "numero_orden": 1,
             "cliente_nombre": 1,
             "fecha_creacion": 1,
             "estado_general": 1,
-            "items": 1
+            "items": 1,
+            "seguimiento": 1
         }).limit(50))  # Limitar a 50 pedidos para mejor rendimiento
         
         # Convertir ObjectId a string
@@ -2278,10 +2284,11 @@ async def get_items_disponibles_asignacion():
         print("DEBUG ITEMS DISPONIBLES: Buscando items disponibles para asignación")
         
         # Buscar pedidos con items que necesitan asignación
+        # Solo items con estado_item 1-3 (desaparecen cuando terminan MANILLAR)
         pedidos = pedidos_collection.find({
             "items": {
                 "$elemMatch": {
-                    "estado_item": {"$gte": 1, "$lt": 5}  # Items activos (1-4)
+                    "estado_item": {"$gte": 1, "$lt": 4}  # Items activos (1-3)
                 }
             }
         })
@@ -2392,7 +2399,7 @@ async def get_items_disponibles_asignacion():
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-# Endpoint para asignar item al siguiente módulo
+# Endpoint para asignar item al siguiente módulo MANUALMENTE
 @router.post("/asignar-siguiente-modulo/")
 async def asignar_siguiente_modulo(
     pedido_id: str = Body(...),
@@ -2654,6 +2661,73 @@ async def get_pedidos_por_estados(
 
 
 
+
+# Endpoint de debug para investigar pedidos del 16/10/2025
+@router.get("/debug-pedidos-16octubre")
+async def debug_pedidos_16octubre():
+    """Debug específico para pedidos del 16/10/2025"""
+    try:
+        from datetime import datetime, timezone
+        
+        # Buscar pedidos del 16/10/2025
+        fecha_inicio = datetime(2025, 10, 16, 0, 0, 0, tzinfo=timezone.utc)
+        fecha_fin = datetime(2025, 10, 17, 0, 0, 0, tzinfo=timezone.utc)
+        
+        # Buscar por fecha_creacion (tanto Date como string)
+        pedidos_16oct = list(pedidos_collection.find({
+            "$or": [
+                {"fecha_creacion": {"$gte": fecha_inicio, "$lt": fecha_fin}},
+                {"fecha_creacion": {"$gte": "2025-10-16T00:00:00.000Z", "$lt": "2025-10-17T00:00:00.000Z"}}
+            ]
+        }))
+        
+        resultado = {
+            "total_pedidos_16oct": len(pedidos_16oct),
+            "pedidos": []
+        }
+        
+        for pedido in pedidos_16oct:
+            pedido_info = {
+                "_id": str(pedido["_id"]),
+                "numero_orden": pedido.get("numero_orden"),
+                "cliente_nombre": pedido.get("cliente_nombre"),
+                "fecha_creacion": pedido.get("fecha_creacion"),
+                "estado_general": pedido.get("estado_general"),
+                "items": []
+            }
+            
+            # Analizar cada item
+            for item in pedido.get("items", []):
+                item_info = {
+                    "item_id": str(item.get("_id", item.get("id", ""))),
+                    "descripcion": item.get("descripcion", ""),
+                    "estado_item": item.get("estado_item", "NO DEFINIDO"),
+                    "tiene_asignacion": False,
+                    "asignaciones": []
+                }
+                
+                # Buscar asignaciones en seguimiento
+                seguimiento = pedido.get("seguimiento", [])
+                for proceso in seguimiento:
+                    asignaciones = proceso.get("asignaciones_articulos", [])
+                    for asignacion in asignaciones:
+                        if str(asignacion.get("itemId")) == str(item_info["item_id"]):
+                            item_info["tiene_asignacion"] = True
+                            item_info["asignaciones"].append({
+                                "estado": asignacion.get("estado"),
+                                "empleado": asignacion.get("nombreempleado"),
+                                "modulo": proceso.get("orden")
+                            })
+                
+                pedido_info["items"].append(item_info)
+            
+            resultado["pedidos"].append(pedido_info)
+        
+        return resultado
+        
+    except Exception as e:
+        print(f"Error en debug pedidos 16 octubre: {e}")
+        return {"error": str(e)}
 
 # Endpoint para totalizar un pago de un pedido
 @router.put("/{pedido_id}/totalizar-pago")
@@ -3468,16 +3542,16 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         
         estado_item = item.get("estado_item", 1)
         
-        # Determinar módulos permitidos según el estado
-        modulos_permitidos = []
-        if estado_item <= 1:
-            modulos_permitidos = ["herreria", "masillar", "pintar", "manillar", "mantenimiento", "ayudante"]
-        elif estado_item <= 2:
-            modulos_permitidos = ["masillar", "pintar", "manillar", "mantenimiento", "ayudante"]
-        elif estado_item <= 3:
-            modulos_permitidos = ["manillar", "mantenimiento", "facturacion", "ayudante"]
-        elif estado_item <= 4:
-            modulos_permitidos = ["facturacion", "ayudante"]
+                # Determinar módulos permitidos según el estado ACTUAL del item
+                modulos_permitidos = []
+                if estado_item == 1:  # Herrería
+                    modulos_permitidos = ["herreria", "masillar", "pintar", "ayudante"]
+                elif estado_item == 2:  # Masillar/Pintar
+                    modulos_permitidos = ["masillar", "pintar", "ayudante"]
+                elif estado_item == 3:  # Manillar
+                    modulos_permitidos = ["manillar", "ayudante"]
+                elif estado_item == 4:  # Facturación
+                    modulos_permitidos = ["facturacion", "ayudante"]
         
         # Obtener empleados con esos permisos
         empleados = list(empleados_collection.find(

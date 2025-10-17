@@ -199,38 +199,39 @@ async def get_dashboard_asignaciones():
                     if not isinstance(asignaciones_articulos, list):
                         continue
                     
-                    for asignacion in asignaciones_articulos:
-                        if not isinstance(asignacion, dict):
-                            continue
-                        
-                        if asignacion.get("estado") in ["en_proceso", "pendiente"]:
-                            # Buscar información del item
-                            item_info = {}
-                            for item in pedido.get("items", []):
-                                if str(item.get("_id")) == str(asignacion.get("itemId")):
-                                    item_info = {
-                                        "descripcion": item.get("descripcion", ""),
-                                        "detalle": item.get("detalle", ""),
-                                        "costoproduccion": item.get("costoproduccion", 0),
-                                        "imagenes": item.get("imagenes", [])
-                                    }
-                                    break
-                            
-                            asignaciones.append({
-                                "_id": str(pedido["_id"]),
-                                "pedido_id": str(pedido["_id"]),
-                                "item_id": str(asignacion.get("itemId", "")),
-                                "empleado_id": asignacion.get("empleadoId", ""),
-                                "nombreempleado": asignacion.get("nombreempleado", ""),
-                                "orden": orden,
-                                "modulo": modulo_nombre,
-                                "estado": asignacion.get("estado"),
-                                "fecha_inicio": asignacion.get("fecha_inicio"),
-                                "fecha_fin": asignacion.get("fecha_fin"),
-                                "numero_orden": pedido.get("numero_orden"),
-                                "cliente": {"cliente_nombre": pedido.get("cliente_nombre", "")},
-                                **item_info
-                            })
+                                for asignacion in asignaciones_articulos:
+                                    if not isinstance(asignacion, dict):
+                                        continue
+                                    
+                                    # Solo mostrar asignaciones ACTIVAS (en_proceso)
+                                    if asignacion.get("estado") == "en_proceso":
+                                        # Buscar información del item
+                                        item_info = {}
+                                        for item in pedido.get("items", []):
+                                            if str(item.get("_id")) == str(asignacion.get("itemId")):
+                                                item_info = {
+                                                    "descripcion": item.get("descripcion", ""),
+                                                    "detalle": item.get("detalle", ""),
+                                                    "costoproduccion": item.get("costoproduccion", 0),
+                                                    "imagenes": item.get("imagenes", [])
+                                                }
+                                                break
+                                        
+                                        asignaciones.append({
+                                            "_id": str(pedido["_id"]),
+                                            "pedido_id": str(pedido["_id"]),
+                                            "item_id": str(asignacion.get("itemId", "")),
+                                            "empleado_id": asignacion.get("empleadoId", ""),
+                                            "nombreempleado": asignacion.get("nombreempleado", ""),
+                                            "orden": orden,
+                                            "modulo": modulo_nombre,
+                                            "estado": asignacion.get("estado"),
+                                            "fecha_inicio": asignacion.get("fecha_inicio"),
+                                            "fecha_fin": asignacion.get("fecha_fin"),
+                                            "numero_orden": pedido.get("numero_orden"),
+                                            "cliente": {"cliente_nombre": pedido.get("cliente_nombre", "")},
+                                            **item_info
+                                        })
             except Exception as e:
                 print(f"Error procesando pedido {pedido.get('_id')}: {e}")
                 continue
