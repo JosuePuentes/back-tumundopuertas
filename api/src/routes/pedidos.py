@@ -4808,4 +4808,56 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
             "items_completados": 0,
             "estado": "pendiente",
             "detalle_items": []
+        }@router.put("/inicializar-estado-items/")
+async def inicializar_estado_items():
+    """
+    Inicializar estado_item = 1 en todos los items que no lo tengan
+    """
+    try:
+        print("INICIALIZANDO: Buscando items sin estado_item")
+        
+        # Buscar pedidos que tengan items sin estado_item
+        pedidos_sin_estado = list(pedidos_collection.find({
+            "items": {
+                "$elemMatch": {
+                    "estado_item": {"$exists": False}
+                }
+            }
+        }))
+        
+        total_actualizados = 0
+        
+        for pedido in pedidos_sin_estado:
+            pedido_id = pedido["_id"]
+            items_actualizados = 0
+            
+            # Actualizar cada item que no tenga estado_item
+            for i, item in enumerate(pedido.get("items", [])):
+                if "estado_item" not in item:
+                    result = pedidos_collection.update_one(
+                        {
+                            "_id": pedido_id,
+                            f"items.{i}": item
+                        },
+                        {
+                            "$set": {
+                                f"items.{i}.estado_item": 1
+                            }
+                        }
+                    )
+                    if result.modified_count > 0:
+                        items_actualizados += 1
+            
+            if items_actualizados > 0:
+                total_actualizados += items_actualizados
+                print(f"INICIALIZANDO: Pedido {pedido_id} - {items_actualizados} items actualizados")
+        
+        return {
+            "message": "Inicialización completada",
+            "pedidos_procesados": len(pedidos_sin_estado),
+            "items_actualizados": total_actualizados
         }
+        
+    except Exception as e:
+        print(f"Error inicializando estado_items: {e}")
+        return {"error": str(e)}
