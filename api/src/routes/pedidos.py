@@ -267,7 +267,7 @@ async def update_subestados(
 
 @router.get("/herreria/")
 async def get_pedidos_herreria():
-    """Obtener pedidos para producción - Solo items que necesitan trabajo (estado_item 1-3)"""
+    """Obtener ITEMS individuales para producción - Solo items que necesitan trabajo (estado_item 1-3)"""
     try:
         # Buscar pedidos que tengan items que necesitan trabajo
         pedidos = list(pedidos_collection.find({
@@ -286,20 +286,55 @@ async def get_pedidos_herreria():
             "seguimiento": 1
         }).limit(100))
         
-        # Filtrar solo los items activos en cada pedido
-        for pedido in pedidos:
-            pedido["_id"] = str(pedido["_id"])
-            # Filtrar items que estén en estado 1, 2 o 3
-            pedido["items"] = [
-                item for item in pedido.get("items", [])
-                if item.get("estado_item", 1) in [1, 2, 3]
-            ]
+        # Convertir a items individuales
+        items_individuales = []
         
-        return pedidos
+        for pedido in pedidos:
+            pedido_id = str(pedido["_id"])
+            
+            # Filtrar solo los items activos (estado_item 1-3)
+            for item in pedido.get("items", []):
+                estado_item = item.get("estado_item", 1)
+                
+                if estado_item in [1, 2, 3]:
+                    # Crear item individual con información del pedido
+                    item_individual = {
+                        "pedido_id": pedido_id,
+                        "item_id": str(item.get("_id", item.get("id", ""))),
+                        "numero_orden": pedido.get("numero_orden", ""),
+                        "cliente_nombre": pedido.get("cliente_nombre", ""),
+                        "fecha_creacion": pedido.get("fecha_creacion", ""),
+                        "estado_general_pedido": pedido.get("estado_general", ""),
+                        "descripcion": item.get("descripcion", ""),
+                        "nombre": item.get("nombre", ""),
+                        "categoria": item.get("categoria", ""),
+                        "precio": item.get("precio", 0),
+                        "costo": item.get("costo", 0),
+                        "costoProduccion": item.get("costoProduccion", 0),
+                        "cantidad": item.get("cantidad", 1),
+                        "detalleitem": item.get("detalleitem", ""),
+                        "imagenes": item.get("imagenes", []),
+                        "estado_item": estado_item,
+                        "empleado_asignado": item.get("empleado_asignado"),
+                        "nombre_empleado": item.get("nombre_empleado"),
+                        "modulo_actual": item.get("modulo_actual"),
+                        "fecha_asignacion": item.get("fecha_asignacion")
+                    }
+                    items_individuales.append(item_individual)
+        
+        return {
+            "items": items_individuales,
+            "total_items": len(items_individuales),
+            "message": "Items individuales para producción"
+        }
         
     except Exception as e:
         print(f"Error en get_pedidos_herreria: {e}")
-        return []
+        return {
+            "items": [],
+            "total_items": 0,
+            "error": str(e)
+        }
 
 @router.put("/asignar-item/")
 async def asignar_item(
