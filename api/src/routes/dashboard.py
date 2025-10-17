@@ -1078,39 +1078,3 @@ async def asignar_articulo_a_empleado(
         print(f"ERROR ASIGNAR: Error inesperado: {e}")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
-@router.get("/asignaciones/empleado/{empleado_id}")
-async def get_asignaciones_empleado_dashboard(
-    empleado_id: str,
-    current_user = Depends(get_current_user)
-):
-    """Obtener asignaciones de un empleado específico para el dashboard"""
-    try:
-        collections = get_collections()
-        
-        print(f"DEBUG DASHBOARD EMPLEADO: Obteniendo asignaciones para empleado {empleado_id}")
-        
-        asignaciones = list(collections["asignaciones"].find({
-            "empleado_id": empleado_id,
-            "estado": {"$in": ["en_proceso", "pendiente"]}
-        }).sort("fecha_asignacion", -1))
-        
-        # Convertir ObjectId a string para JSON
-        for asignacion in asignaciones:
-            asignacion["_id"] = str(asignacion["_id"])
-            if "pedido_id" in asignacion:
-                asignacion["pedido_id"] = str(asignacion["pedido_id"])
-            if "item_id" in asignacion:
-                asignacion["item_id"] = str(asignacion["item_id"])
-        
-        print(f"DEBUG DASHBOARD EMPLEADO: Encontradas {len(asignaciones)} asignaciones para empleado {empleado_id}")
-        
-        return {
-            "asignaciones": asignaciones,
-            "total": len(asignaciones),
-            "empleado_id": empleado_id,
-            "success": True
-        }
-        
-    except Exception as e:
-        print(f"ERROR DASHBOARD EMPLEADO: Error al obtener asignaciones: {e}")
-        raise HTTPException(status_code=500, detail="Error al obtener asignaciones del empleado")
