@@ -261,14 +261,14 @@ async def update_subestados(
 
 @router.get("/herreria/")
 async def get_pedidos_herreria():
-    """Obtener pedidos para producción - Muestra items con estado_item 1-3 (activos)"""
+    """Obtener pedidos para producción - Solo items que necesitan trabajo (estado_item 1-3)"""
     try:
-        # Buscar pedidos que tengan items activos (estado_item 1-3)
-        # Desaparecen cuando terminan MANILLAR (estado_item = 4)
+        # Buscar pedidos que tengan items que necesitan trabajo
+        # Excluye: estado_item = 4 (terminado manillar) y estado_item = 5 (completado)
         pedidos = list(pedidos_collection.find({
             "items": {
                 "$elemMatch": {
-                    "estado_item": {"$gte": 1, "$lt": 4}  # Items activos (1-3)
+                    "estado_item": {"$gte": 1, "$lt": 4}  # Solo items activos (1-3)
                 }
             }
         }, {
@@ -279,7 +279,7 @@ async def get_pedidos_herreria():
             "estado_general": 1,
             "items": 1,
             "seguimiento": 1
-        }).limit(50))  # Limitar a 50 pedidos para mejor rendimiento
+        }).limit(100))
         
         # Convertir ObjectId a string
         for pedido in pedidos:
@@ -2667,8 +2667,6 @@ async def get_pedidos_por_estados(
 async def debug_pedidos_16octubre():
     """Debug específico para pedidos del 16/10/2025"""
     try:
-        from datetime import datetime, timezone
-        
         # Buscar pedidos del 16/10/2025
         fecha_inicio = datetime(2025, 10, 16, 0, 0, 0, tzinfo=timezone.utc)
         fecha_fin = datetime(2025, 10, 17, 0, 0, 0, tzinfo=timezone.utc)
@@ -2728,6 +2726,117 @@ async def debug_pedidos_16octubre():
     except Exception as e:
         print(f"Error en debug pedidos 16 octubre: {e}")
         return {"error": str(e)}
+
+# Endpoint de debug simple para probar
+@router.get("/estado-items-produccion/")
+async def get_estado_items_produccion():
+    """
+    Endpoint para mostrar el estado actual de todos los items en producción
+    Separa claramente: disponibles para asignar vs ya asignados
+    """
+    try:
+        print("DEBUG ESTADO ITEMS: Analizando estado de items en producción")
+        
+        # Buscar pedidos con items en producción (estado_item 1-3)
+        pedidos = list(pedidos_collection.find({
+            "items": {
+                "$elemMatch": {
+                    "estado_item": {"$gte": 1, "$lt": 4}  # Solo items activos (1-3)
+                }
+            }
+        }, {
+            "_id": 1,
+            "numero_orden": 1,
+            "cliente_nombre": 1,
+            "fecha_creacion": 1,
+            "estado_general": 1,
+            "items": 1,
+            "seguimiento": 1
+        }).limit(200))
+        
+        items_disponibles = []
+        items_asignados = []
+        
+        for pedido in pedidos:
+            try:
+                pedido_id = str(pedido["_id"])
+                seguimiento = pedido.get("seguimiento", [])
+                items = pedido.get("items", [])
+                
+                for item in items:
+                    item_id = str(item.get("_id", item.get("id", "")))
+                    estado_item = item.get("estado_item", 1)
+                    
+                    # Solo procesar items activos (1-3)
+                    if estado_item >= 1 and estado_item < 4:
+                        # Buscar si tiene asignación activa
+                        tiene_asignacion_activa = False
+                        asignacion_actual = None
+                        
+                        for proceso in seguimiento:
+                            if isinstance(proceso, dict) and proceso.get("orden") == estado_item:
+                                asignaciones_articulos = proceso.get("asignaciones_articulos", [])
+                                for asignacion in asignaciones_articulos:
+                                    if str(asignacion.get("itemId")) == item_id and asignacion.get("estado") == "en_proceso":
+                                        tiene_asignacion_activa = True
+                                        asignacion_actual = {
+                                            "empleado": asignacion.get("nombreempleado", ""),
+                                            "fecha_inicio": asignacion.get("fecha_inicio"),
+                                            "modulo": "herreria" if estado_item == 1 else "masillar" if estado_item == 2 else "manillar"
+                                        }
+                                        break
+                                if tiene_asignacion_activa:
+                                    break
+                        
+                        item_info = {
+                            "pedido_id": pedido_id,
+                            "item_id": item_id,
+                            "item_nombre": item.get("descripcion", item.get("nombre", "Sin nombre")),
+                            "estado_item": estado_item,
+                            "modulo_actual": "herreria" if estado_item == 1 else "masillar" if estado_item == 2 else "manillar",
+                            "cliente_nombre": pedido.get("cliente_nombre", ""),
+                            "numero_orden": pedido.get("numero_orden", ""),
+                            "fecha_creacion": pedido.get("fecha_creacion"),
+                            "costo_produccion": item.get("costoProduccion", 0),
+                            "imagenes": item.get("imagenes", [])
+                        }
+                        
+                        if tiene_asignacion_activa:
+                            item_info["asignacion"] = asignacion_actual
+                            items_asignados.append(item_info)
+                        else:
+                            items_disponibles.append(item_info)
+                            
+            except Exception as e:
+                print(f"DEBUG ESTADO ITEMS: Error procesando pedido: {e}")
+                continue
+        
+        print(f"DEBUG ESTADO ITEMS: Disponibles: {len(items_disponibles)}, Asignados: {len(items_asignados)}")
+        
+        return {
+            "success": True,
+            "items_disponibles": items_disponibles,
+            "items_asignados": items_asignados,
+            "total_disponibles": len(items_disponibles),
+            "total_asignados": len(items_asignados),
+            "total_items": len(items_disponibles) + len(items_asignados),
+            "message": "Estado actual de items en producción"
+        }
+        
+    except Exception as e:
+        print(f"ERROR ESTADO ITEMS: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "items_disponibles": [],
+            "items_asignados": [],
+            "total_disponibles": 0,
+            "total_asignados": 0,
+            "total_items": 0,
+            "error": str(e)
+        }
+
 
 # Endpoint para totalizar un pago de un pedido
 @router.put("/{pedido_id}/totalizar-pago")
