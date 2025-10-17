@@ -2953,22 +2953,33 @@ async def get_pedidos_cancelables():
         
         pedidos_cancelables = []
         
-        for pedido in pedidos_pendientes:
-            try:
-                pedido_id = str(pedido["_id"])
-                seguimiento = pedido.get("seguimiento", [])
-                
-                # Verificar que no tenga asignaciones activas
-                tiene_asignaciones_activas = False
-                for proceso in seguimiento:
-                    if isinstance(proceso, dict):
-                        asignaciones = proceso.get("asignaciones_articulos", [])
-                        for asignacion in asignaciones:
-                            if asignacion.get("estado") == "en_proceso":
-                                tiene_asignaciones_activas = True
-                                break
-                        if tiene_asignaciones_activas:
-                            break
+                for pedido in pedidos_pendientes:
+                    try:
+                        pedido_id = str(pedido["_id"])
+                        seguimiento = pedido.get("seguimiento", [])
+                        
+                        # Asegurar que seguimiento sea una lista
+                        if seguimiento is None:
+                            seguimiento = []
+                        elif not isinstance(seguimiento, list):
+                            seguimiento = []
+                        
+                        # Verificar que no tenga asignaciones activas
+                        tiene_asignaciones_activas = False
+                        for proceso in seguimiento:
+                            if isinstance(proceso, dict):
+                                asignaciones = proceso.get("asignaciones_articulos", [])
+                                if asignaciones is None:
+                                    asignaciones = []
+                                elif not isinstance(asignaciones, list):
+                                    asignaciones = []
+                                    
+                                for asignacion in asignaciones:
+                                    if isinstance(asignacion, dict) and asignacion.get("estado") == "en_proceso":
+                                        tiene_asignaciones_activas = True
+                                        break
+                                if tiene_asignaciones_activas:
+                                    break
                 
                 # Solo incluir si no tiene asignaciones activas
                 if not tiene_asignaciones_activas:
