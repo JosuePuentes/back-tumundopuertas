@@ -3436,7 +3436,9 @@ async def debug_pedido(pedido_id: str):
 
 @router.get("/empleados-por-modulo/{pedido_id}/{item_id}")
 async def get_empleados_por_modulo(pedido_id: str, item_id: str):
-    """Obtener empleados disponibles para asignar según el módulo actual del item"""
+    """
+    Retorna empleados filtrados por módulo específico
+    """
     try:
         # Validar IDs
         if not pedido_id or len(pedido_id) != 24:
@@ -3466,50 +3468,90 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         
         estado_item = item.get("estado_item", 1)
         
-        # Obtener todos los empleados activos con límite
-        empleados = list(empleados_collection.find({
-            "activo": True
-        }, {
-            "_id": 1,
-            "identificador": 1,
-            "nombreCompleto": 1,
-            "cargo": 1,
-            "pin": 1
-        }).limit(50))  # Limitar a 50 empleados para mejor rendimiento
+        # Determinar módulos permitidos según el estado
+        modulos_permitidos = []
+        if estado_item <= 1:
+            modulos_permitidos = ["herreria", "masillar", "pintar", "manillar", "mantenimiento", "ayudante"]
+        elif estado_item <= 2:
+            modulos_permitidos = ["masillar", "pintar", "manillar", "mantenimiento", "ayudante"]
+        elif estado_item <= 3:
+            modulos_permitidos = ["manillar", "mantenimiento", "facturacion", "ayudante"]
+        elif estado_item <= 4:
+            modulos_permitidos = ["facturacion", "ayudante"]
         
-        empleados_disponibles = []
+        # Obtener empleados con esos permisos
+        empleados = list(empleados_collection.find(
+            {
+                "activo": True,
+                "$or": [
+                    {"permisos": {"$in": modulos_permitidos}},
+                    {"cargo": {"$regex": "|".join(modulos_permitidos), "$options": "i"}}
+                ]
+            },
+            {
+                "_id": 1,
+                "identificador": 1,
+                "nombreCompleto": 1,
+                "cargo": 1,
+                "permisos": 1,
+                "pin": 1
+            }
+        ).limit(50))
         
-        # Filtrar empleados basándose en el cargo y nombreCompleto
-        for emp in empleados:
-            cargo = emp.get("cargo", "").upper()
-            nombre = emp.get("nombreCompleto", "").upper()
+        # Si no hay empleados con permisos, usar filtrado por cargo/nombre
+        if not empleados:
+            empleados = list(empleados_collection.find({
+                "activo": True
+            }, {
+                "_id": 1,
+                "identificador": 1,
+                "nombreCompleto": 1,
+                "cargo": 1,
+                "pin": 1
+            }).limit(50))
             
-            # Verificar si el empleado tiene los permisos requeridos
-            tiene_permiso = False
-            
-            if estado_item == 1:  # Herreria
-                if ("HERRERO" in cargo or "HERRERO" in nombre) or \
-                   ("MASILLADOR" in cargo or "MASILLADOR" in nombre or "PINTOR" in cargo or "PINTOR" in nombre) or \
-                   ("AYUDANTE" in cargo or "AYUDANTE" in nombre):
-                    tiene_permiso = True
-            elif estado_item == 2:  # Masillar/Pintar
-                if ("MASILLADOR" in cargo or "MASILLADOR" in nombre or "PINTOR" in cargo or "PINTOR" in nombre) or \
-                   ("AYUDANTE" in cargo or "AYUDANTE" in nombre):
-                    tiene_permiso = True
-            elif estado_item == 3:  # Manillar
-                if ("MANILLAR" in cargo or "MANILLAR" in nombre) or \
-                   ("AYUDANTE" in cargo or "AYUDANTE" in nombre):
-                    tiene_permiso = True
-            elif estado_item == 4:  # Facturación
-                if ("FACTURACION" in cargo or "FACTURACION" in nombre or "VENDEDOR" in cargo or "VENDEDOR" in nombre):
-                    tiene_permiso = True
-            
-            if tiene_permiso:
+            empleados_disponibles = []
+            for emp in empleados:
+                cargo = emp.get("cargo", "").upper()
+                nombre = emp.get("nombreCompleto", "").upper()
+                
+                tiene_permiso = False
+                if estado_item == 1:  # Herreria
+                    if ("HERRERO" in cargo or "HERRERO" in nombre) or \
+                       ("MASILLADOR" in cargo or "MASILLADOR" in nombre or "PINTOR" in cargo or "PINTOR" in nombre) or \
+                       ("AYUDANTE" in cargo or "AYUDANTE" in nombre):
+                        tiene_permiso = True
+                elif estado_item == 2:  # Masillar/Pintar
+                    if ("MASILLADOR" in cargo or "MASILLADOR" in nombre or "PINTOR" in cargo or "PINTOR" in nombre) or \
+                       ("AYUDANTE" in cargo or "AYUDANTE" in nombre):
+                        tiene_permiso = True
+                elif estado_item == 3:  # Manillar
+                    if ("MANILLAR" in cargo or "MANILLAR" in nombre) or \
+                       ("AYUDANTE" in cargo or "AYUDANTE" in nombre):
+                        tiene_permiso = True
+                elif estado_item == 4:  # Facturación
+                    if ("FACTURACION" in cargo or "FACTURACION" in nombre or "VENDEDOR" in cargo or "VENDEDOR" in nombre):
+                        tiene_permiso = True
+                
+                if tiene_permiso:
+                    empleados_disponibles.append({
+                        "_id": str(emp["_id"]),
+                        "identificador": emp.get("identificador"),
+                        "nombreCompleto": emp.get("nombreCompleto"),
+                        "cargo": emp.get("cargo"),
+                        "pin": emp.get("pin"),
+                        "activo": True
+                    })
+        else:
+            # Procesar empleados encontrados con permisos
+            empleados_disponibles = []
+            for emp in empleados:
                 empleados_disponibles.append({
                     "_id": str(emp["_id"]),
                     "identificador": emp.get("identificador"),
                     "nombreCompleto": emp.get("nombreCompleto"),
                     "cargo": emp.get("cargo"),
+                    "permisos": emp.get("permisos", []),
                     "pin": emp.get("pin"),
                     "activo": True
                 })
@@ -3517,6 +3559,7 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
         return {
             "success": True,
             "modulo_actual": estado_item,
+            "modulos_permitidos": modulos_permitidos,
             "empleados": empleados_disponibles,
             "total": len(empleados_disponibles)
         }
@@ -3524,11 +3567,49 @@ async def get_empleados_por_modulo(pedido_id: str, item_id: str):
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Error en empleados por módulo: {e}")
+        return {
+            "success": False,
+            "empleados": [],
+            "total": 0,
+            "error": str(e)
+        }
+
+@router.get("/comisiones/produccion/enproceso/")
+async def obtener_comisiones_en_proceso(empleado_id: str = None):
+    """
+    Endpoint para obtener asignaciones en proceso
+    Si no se especifica empleado_id, retorna todas las asignaciones
+    """
+    try:
+        query = {"estado_subestado": "en_proceso"}
+        if empleado_id:
+            query["empleado_id"] = empleado_id
+            
+        asignaciones = list(pedidos_collection.find(query).limit(100))
+        
+        # Agregar información del cliente
+        for asignacion in asignaciones:
+            pedido = pedidos_collection.find_one(
+                {"_id": ObjectId(asignacion["pedido_id"])},
+                {"cliente_nombre": 1}
+            )
+            if pedido:
+                asignacion["cliente"] = {"cliente_nombre": pedido.get("cliente_nombre", "")}
+        
         return {
             "success": True,
-            "modulo_actual": 1,
-            "empleados": [],
-            "total": 0
+            "asignaciones": asignaciones,
+            "total": len(asignaciones)
+        }
+        
+    except Exception as e:
+        print(f"Error en comisiones en proceso: {e}")
+        return {
+            "success": False,
+            "asignaciones": [],
+            "total": 0,
+            "error": str(e)
         }
 
 def determinar_modulo_actual_item(pedido: dict, item_id: str) -> int:
