@@ -192,6 +192,11 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                     import traceback
                     print(f"DEBUG CREAR PEDIDO: Traceback: {traceback.format_exc()}")
     
+    # Asegurar que cada item tenga estado_item: 0 (pendiente)
+    for item in pedido.items:
+        if not hasattr(item, 'estado_item') or item.estado_item is None:
+            item.estado_item = 0  # Estado pendiente
+    
     return {"message": "Pedido creado correctamente", "id": pedido_id, "cliente_nombre": pedido.cliente_nombre}
 
 @router.put("/subestados/")
@@ -267,16 +272,10 @@ async def update_subestados(
 
 @router.get("/herreria/")
 async def get_pedidos_herreria():
-    """Obtener ITEMS individuales para producción - Solo items que necesitan trabajo (estado_item 1-3)"""
+    """Obtener ITEMS individuales para producción - Items pendientes (0) y en proceso (1-3)"""
     try:
-        # Buscar pedidos que tengan items que necesitan trabajo
-        pedidos = list(pedidos_collection.find({
-            "items": {
-                "$elemMatch": {
-                    "estado_item": {"$in": [1, 2, 3]}  # Solo items activos (1-3)
-                }
-            }
-        }, {
+        # Buscar todos los pedidos
+        pedidos = list(pedidos_collection.find({}, {
             "_id": 1,
             "numero_orden": 1,
             "cliente_nombre": 1,
@@ -292,13 +291,14 @@ async def get_pedidos_herreria():
         for pedido in pedidos:
             pedido_id = str(pedido["_id"])
             
-            # Filtrar solo los items activos (estado_item 1-3)
+            # Filtrar items pendientes (0) y en proceso (1-3)
             for item in pedido.get("items", []):
-                estado_item = item.get("estado_item", 1)
+                estado_item = item.get("estado_item", 0)  # Default 0
                 
-                if estado_item in [1, 2, 3]:
+                if estado_item in [0, 1, 2, 3]:  # Pendientes y en proceso
                     # Crear item individual con información del pedido
                     item_individual = {
+                        "id": item.get("id", str(item.get("_id", ""))),
                         "pedido_id": pedido_id,
                         "item_id": str(item.get("_id", item.get("id", ""))),
                         "numero_orden": pedido.get("numero_orden", ""),
@@ -4843,32 +4843,27 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
             "items_completados": 0,
             "estado": "pendiente",
             "detalle_items": []
-        }@router.put("/inicializar-estado-items/")
+        }
+
+@router.put("/inicializar-estado-items/")
 async def inicializar_estado_items():
     """
-    Inicializar estado_item = 1 en todos los items que no lo tengan
+    Inicializar estado_item = 0 en todos los items que no lo tengan
     """
     try:
         print("INICIALIZANDO: Buscando items sin estado_item")
         
-        # Buscar pedidos que tengan items sin estado_item
-        pedidos_sin_estado = list(pedidos_collection.find({
-            "items": {
-                "$elemMatch": {
-                    "estado_item": {"$exists": False}
-                }
-            }
-        }))
+        # Buscar todos los pedidos
+        pedidos = list(pedidos_collection.find({}))
+        items_actualizados = 0
         
-        total_actualizados = 0
-        
-        for pedido in pedidos_sin_estado:
+        for pedido in pedidos:
             pedido_id = pedido["_id"]
-            items_actualizados = 0
+            pedido_items_actualizados = 0
             
             # Actualizar cada item que no tenga estado_item
             for i, item in enumerate(pedido.get("items", [])):
-                if "estado_item" not in item:
+                if not item.get("estado_item"):
                     result = pedidos_collection.update_one(
                         {
                             "_id": pedido_id,
@@ -4876,21 +4871,21 @@ async def inicializar_estado_items():
                         },
                         {
                             "$set": {
-                                f"items.{i}.estado_item": 1
+                                f"items.{i}.estado_item": 0  # Estado pendiente
                             }
                         }
                     )
                     if result.modified_count > 0:
-                        items_actualizados += 1
+                        pedido_items_actualizados += 1
             
-            if items_actualizados > 0:
-                total_actualizados += items_actualizados
-                print(f"INICIALIZANDO: Pedido {pedido_id} - {items_actualizados} items actualizados")
+            if pedido_items_actualizados > 0:
+                items_actualizados += pedido_items_actualizados
+                print(f"INICIALIZANDO: Pedido {pedido_id} - {pedido_items_actualizados} items actualizados")
         
         return {
             "message": "Inicialización completada",
-            "pedidos_procesados": len(pedidos_sin_estado),
-            "items_actualizados": total_actualizados
+            "pedidos_procesados": len(pedidos),
+            "items_actualizados": items_actualizados
         }
         
     except Exception as e:
