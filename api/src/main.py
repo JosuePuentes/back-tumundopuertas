@@ -111,10 +111,7 @@ async def test_cors_put():
         "method": "PUT"
     }
 
-# Endpoint OPTIONS para preflight requests
-@app.options("/{path:path}")
-async def options_handler(path: str):
-    return {"message": "OK"}
+# Endpoint OPTIONS removido - FastAPI maneja automáticamente las solicitudes OPTIONS con CORS
 
 # Endpoint de prueba para métodos de pago
 @app.post("/test-metodos-pago")
