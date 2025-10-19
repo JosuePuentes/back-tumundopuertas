@@ -273,11 +273,8 @@ async def update_subestados(
 
 # Endpoint OPTIONS específico para herreria
 @router.options("/herreria/")
-async def options_herreria(
-    ordenar: str = Query("fecha_desc", description="Ordenamiento: fecha_desc, fecha_asc, estado, cliente"),
-    limite: int = Query(100, ge=1, le=1000, description="Límite de resultados (1-1000)")
-):
-    """Manejar solicitudes OPTIONS para /pedidos/herreria/ con parámetros de query"""
+async def options_herreria():
+    """Manejar solicitudes OPTIONS para /pedidos/herreria/ sin validación de parámetros"""
     return {"message": "OK"}
 
 @router.get("/herreria/")
