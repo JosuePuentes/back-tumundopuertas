@@ -1,5 +1,5 @@
 from typing import List, Optional, Union
-from fastapi import APIRouter, HTTPException, Body, Depends
+from fastapi import APIRouter, HTTPException, Body, Depends, Query
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 from ..config.mongodb import pedidos_collection, db
@@ -272,7 +272,10 @@ async def update_subestados(
     return {"message": "Subestado actualizado correctamente"}
 
 @router.get("/herreria/")
-async def get_pedidos_herreria():
+async def get_pedidos_herreria(
+    ordenar: str = Query("fecha_desc", description="Ordenamiento: fecha_desc, fecha_asc, estado, cliente"),
+    limite: int = Query(100, description="Límite de resultados")
+):
     """Obtener ITEMS individuales para producción - Items pendientes (0) y en proceso (1-3)"""
     try:
         # Buscar todos los pedidos
@@ -284,7 +287,7 @@ async def get_pedidos_herreria():
             "estado_general": 1,
             "items": 1,
             "seguimiento": 1
-        }).limit(100))
+        }).limit(limite))
         
         # Convertir a items individuales
         items_individuales = []
@@ -323,9 +326,24 @@ async def get_pedidos_herreria():
                     }
                     items_individuales.append(item_individual)
         
+        # Ordenar los items según el parámetro
+        if ordenar == "fecha_desc":
+            # Ordenar por fecha de creación descendente (más recientes primero)
+            items_individuales.sort(key=lambda x: x.get("fecha_creacion", ""), reverse=True)
+        elif ordenar == "fecha_asc":
+            # Ordenar por fecha de creación ascendente (más antiguos primero)
+            items_individuales.sort(key=lambda x: x.get("fecha_creacion", ""), reverse=False)
+        elif ordenar == "estado":
+            # Ordenar por estado_item
+            items_individuales.sort(key=lambda x: x.get("estado_item", 0))
+        elif ordenar == "cliente":
+            # Ordenar por nombre del cliente
+            items_individuales.sort(key=lambda x: x.get("cliente_nombre", ""))
+        
         return {
             "items": items_individuales,
             "total_items": len(items_individuales),
+            "ordenamiento": ordenar,
             "message": "Items individuales para producción"
         }
         
@@ -335,6 +353,36 @@ async def get_pedidos_herreria():
             "items": [],
             "total_items": 0,
             "error": str(e)
+        }
+
+@router.put("/inicializar-estado-items/")
+async def inicializar_estado_items():
+    """Inicializar estado_item en 0 para todos los items que no lo tengan"""
+    try:
+        pedidos = list(pedidos_collection.find({}))
+        items_actualizados = 0
+        
+        for pedido in pedidos:
+            for item in pedido.get("items", []):
+                if not item.get("estado_item"):
+                    # Actualizar el item específico
+                    result = pedidos_collection.update_one(
+                        {"_id": pedido["_id"], "items.id": item["id"]},
+                        {"$set": {"items.$.estado_item": 0}}  # Estado pendiente
+                    )
+                    if result.modified_count > 0:
+                        items_actualizados += 1
+        
+        return {
+            "message": f"Se inicializaron {items_actualizados} items con estado_item: 0",
+            "items_actualizados": items_actualizados
+        }
+        
+    except Exception as e:
+        print(f"Error en inicializar_estado_items: {e}")
+        return {
+            "error": str(e),
+            "items_actualizados": 0
         }
 
 @router.put("/asignar-item/")
