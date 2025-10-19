@@ -271,6 +271,12 @@ async def update_subestados(
         raise HTTPException(status_code=400, detail="Pedido no encontrado al actualizar")
     return {"message": "Subestado actualizado correctamente"}
 
+# Endpoint OPTIONS específico para herreria
+@router.options("/herreria/")
+async def options_herreria():
+    """Manejar solicitudes OPTIONS para /pedidos/herreria/"""
+    return {"message": "OK"}
+
 @router.get("/herreria/")
 async def get_pedidos_herreria(
     ordenar: str = Query("fecha_desc", description="Ordenamiento: fecha_desc, fecha_asc, estado, cliente"),
