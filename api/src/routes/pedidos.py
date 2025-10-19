@@ -274,11 +274,11 @@ async def update_subestados(
 @router.get("/herreria/")
 async def get_pedidos_herreria(
     ordenar: str = Query("fecha_desc", description="Ordenamiento: fecha_desc, fecha_asc, estado, cliente"),
-    limite: int = Query(100, description="Límite de resultados")
+    limite: int = Query(100, ge=1, le=1000, description="Límite de resultados (1-1000)")
 ):
     """Obtener ITEMS individuales para producción - Items pendientes (0) y en proceso (1-3)"""
     try:
-        # Buscar todos los pedidos
+        # Buscar todos los pedidos (sin límite en MongoDB)
         pedidos = list(pedidos_collection.find({}, {
             "_id": 1,
             "numero_orden": 1,
@@ -287,7 +287,7 @@ async def get_pedidos_herreria(
             "estado_general": 1,
             "items": 1,
             "seguimiento": 1
-        }).limit(limite))
+        }))
         
         # Convertir a items individuales
         items_individuales = []
@@ -340,9 +340,15 @@ async def get_pedidos_herreria(
             # Ordenar por nombre del cliente
             items_individuales.sort(key=lambda x: x.get("cliente_nombre", ""))
         
+        # Aplicar límite después del ordenamiento
+        total_items = len(items_individuales)
+        items_limitados = items_individuales[:limite]
+        
         return {
-            "items": items_individuales,
-            "total_items": len(items_individuales),
+            "items": items_limitados,
+            "total_items": total_items,
+            "items_mostrados": len(items_limitados),
+            "limite_aplicado": limite,
             "ordenamiento": ordenar,
             "message": "Items individuales para producción"
         }
