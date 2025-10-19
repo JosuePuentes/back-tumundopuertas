@@ -147,6 +147,12 @@ async def get_pedido(pedido_id: str):
 @router.post("/")
 async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
     pedido.creado_por = user.get("usuario")
+    
+    # Asegurar que cada item tenga estado_item: 0 (pendiente) ANTES de insertar
+    for item in pedido.items:
+        if not hasattr(item, 'estado_item') or item.estado_item is None:
+            item.estado_item = 0  # Estado pendiente
+    
     print("Creando pedido:", pedido)
     
     # Insertar el pedido
@@ -191,11 +197,6 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                     print(f"DEBUG CREAR PEDIDO: Error al actualizar saldo: {e}")
                     import traceback
                     print(f"DEBUG CREAR PEDIDO: Traceback: {traceback.format_exc()}")
-    
-    # Asegurar que cada item tenga estado_item: 0 (pendiente)
-    for item in pedido.items:
-        if not hasattr(item, 'estado_item') or item.estado_item is None:
-            item.estado_item = 0  # Estado pendiente
     
     return {"message": "Pedido creado correctamente", "id": pedido_id, "cliente_nombre": pedido.cliente_nombre}
 
