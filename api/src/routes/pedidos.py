@@ -409,6 +409,12 @@ async def asignar_item(
     Actualiza el estado_item según el módulo asignado
     """
     try:
+        print(f"DEBUG ASIGNAR ITEM: === DATOS RECIBIDOS ===")
+        print(f"DEBUG ASIGNAR ITEM: pedido_id={pedido_id} (tipo: {type(pedido_id)})")
+        print(f"DEBUG ASIGNAR ITEM: item_id={item_id} (tipo: {type(item_id)})")
+        print(f"DEBUG ASIGNAR ITEM: empleado_id={empleado_id} (tipo: {type(empleado_id)})")
+        print(f"DEBUG ASIGNAR ITEM: modulo={modulo} (tipo: {type(modulo)})")
+        print(f"DEBUG ASIGNAR ITEM: === FIN DATOS RECIBIDOS ===")
         # Buscar el pedido
         pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
         if not pedido:
