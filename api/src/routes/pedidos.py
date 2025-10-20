@@ -477,6 +477,9 @@ async def asignar_item(
         }
         
         # Buscar o crear el proceso en seguimiento
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
         seguimiento = pedido.get("seguimiento", [])
         proceso_existente = None
         
