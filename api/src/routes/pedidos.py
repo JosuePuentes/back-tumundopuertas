@@ -430,7 +430,7 @@ async def asignar_item(
         nuevo_estado_item = estado_item_map.get(modulo, 1)
         
         # Buscar el empleado para obtener su nombre
-        empleado = empleados_collection.find_one({"_id": ObjectId(empleado_id)})
+        empleado = buscar_empleado_por_identificador(empleado_id)
         nombre_empleado = empleado.get("nombreCompleto", "Empleado desconocido") if empleado else "Empleado desconocido"
         
         # Actualizar el item específico
