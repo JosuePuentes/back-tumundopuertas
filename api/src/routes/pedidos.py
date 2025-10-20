@@ -453,6 +453,95 @@ async def asignar_item(
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Item no encontrado en el pedido")
         
+        # CREAR ASIGNACIÓN EN SEGUIMIENTO PARA DASHBOARD
+        print(f"DEBUG ASIGNAR ITEM: Creando asignación en seguimiento...")
+        
+        # Mapeo de módulos a órdenes
+        modulo_orden_map = {
+            "herreria": 1,
+            "masillar": 2, 
+            "preparar": 3
+        }
+        
+        orden = modulo_orden_map.get(modulo, 1)
+        
+        # Crear la asignación
+        nueva_asignacion = {
+            "itemId": item_id,
+            "empleadoId": empleado_id,
+            "nombreempleado": nombre_empleado,
+            "estado": "en_proceso",
+            "fecha_inicio": datetime.now().isoformat(),
+            "fecha_fin": None,
+            "modulo": modulo
+        }
+        
+        # Buscar o crear el proceso en seguimiento
+        seguimiento = pedido.get("seguimiento", [])
+        proceso_existente = None
+        
+        for proceso in seguimiento:
+            if proceso.get("orden") == orden:
+                proceso_existente = proceso
+                break
+        
+        if proceso_existente:
+            # Actualizar proceso existente
+            print(f"DEBUG ASIGNAR ITEM: Actualizando proceso existente orden {orden}")
+            asignaciones_articulos = proceso_existente.get("asignaciones_articulos", [])
+            
+            # Verificar si ya existe asignación para este item
+            asignacion_existente = None
+            for i, asignacion in enumerate(asignaciones_articulos):
+                if asignacion.get("itemId") == item_id:
+                    asignacion_existente = i
+                    break
+            
+            if asignacion_existente is not None:
+                # Actualizar asignación existente
+                asignaciones_articulos[asignacion_existente] = nueva_asignacion
+                print(f"DEBUG ASIGNAR ITEM: Actualizando asignación existente para item {item_id}")
+            else:
+                # Agregar nueva asignación
+                asignaciones_articulos.append(nueva_asignacion)
+                print(f"DEBUG ASIGNAR ITEM: Agregando nueva asignación para item {item_id}")
+            
+            # Actualizar en la base de datos
+            pedidos_collection.update_one(
+                {
+                    "_id": ObjectId(pedido_id),
+                    "seguimiento.orden": orden
+                },
+                {
+                    "$set": {
+                        "seguimiento.$.asignaciones_articulos": asignaciones_articulos
+                    }
+                }
+            )
+        else:
+            # Crear nuevo proceso
+            print(f"DEBUG ASIGNAR ITEM: Creando nuevo proceso orden {orden}")
+            nuevo_proceso = {
+                "orden": orden,
+                "nombre_subestado": f"Módulo {modulo.title()}",
+                "estado": "en_proceso",
+                "asignaciones_articulos": [nueva_asignacion],
+                "fecha_inicio": datetime.now().isoformat(),
+                "fecha_fin": None
+            }
+            
+            # Agregar a seguimiento
+            pedidos_collection.update_one(
+                {"_id": ObjectId(pedido_id)},
+                {
+                    "$push": {
+                        "seguimiento": nuevo_proceso
+                    }
+                }
+            )
+        
+        print(f"DEBUG ASIGNAR ITEM: Asignación creada exitosamente en seguimiento")
+        
         return {
             "message": "Item asignado correctamente", 
             "estado_item": nuevo_estado_item,
