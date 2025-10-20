@@ -431,7 +431,11 @@ async def asignar_item(
         
         # Buscar el empleado para obtener su nombre
         empleado = buscar_empleado_por_identificador(empleado_id)
-        nombre_empleado = empleado.get("nombreCompleto", "Empleado desconocido") if empleado else "Empleado desconocido"
+        if empleado:
+            nombre_empleado = empleado.get("nombreCompleto", f"Empleado {empleado_id}")
+        else:
+            nombre_empleado = f"Empleado {empleado_id}"
+            print(f"DEBUG ASIGNAR ITEM: Empleado {empleado_id} no encontrado en BD")
         
         # Actualizar el item específico
         result = pedidos_collection.update_one(
@@ -477,9 +481,6 @@ async def asignar_item(
         }
         
         # Buscar o crear el proceso en seguimiento
-        if not pedido:
-            raise HTTPException(status_code=404, detail="Pedido no encontrado")
-        
         seguimiento = pedido.get("seguimiento", [])
         proceso_existente = None
         
