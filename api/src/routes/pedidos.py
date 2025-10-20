@@ -3047,11 +3047,15 @@ async def cancelar_pedido(
         
         # Verificar que no tenga asignaciones activas
         seguimiento = pedido.get("seguimiento", [])
+        if seguimiento is None:
+            seguimiento = []
         tiene_asignaciones_activas = False
         
         for proceso in seguimiento:
             if isinstance(proceso, dict):
                 asignaciones = proceso.get("asignaciones_articulos", [])
+                if asignaciones is None:
+                    asignaciones = []
                 for asignacion in asignaciones:
                     if asignacion.get("estado") == "en_proceso":
                         tiene_asignaciones_activas = True
