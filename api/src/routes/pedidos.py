@@ -492,7 +492,7 @@ async def asignar_item(
         if proceso_existente:
             # Actualizar proceso existente
             print(f"DEBUG ASIGNAR ITEM: Actualizando proceso existente orden {orden}")
-            asignaciones_articulos = proceso_existente.get("asignaciones_articulos", [])
+            asignaciones_articulos = proceso_existente.get("asignaciones_articulos") or []
             
             # Verificar si ya existe asignación para este item
             asignacion_existente = None
