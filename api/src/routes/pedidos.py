@@ -3073,6 +3073,7 @@ async def cancelar_pedido(
         fecha_cancelacion = datetime.now().isoformat()
         usuario_cancelacion = user.get("username", "usuario_desconocido")
         
+        # Actualizar el estado_general del pedido
         result = pedidos_collection.update_one(
             {"_id": pedido_obj_id},
             {
@@ -3085,6 +3086,26 @@ async def cancelar_pedido(
                 }
             }
         )
+        
+        # Actualizar el estado_item de todos los items a 4 (terminado/cancelado)
+        # Esto hará que desaparezcan de PedidosHerreria
+        items_actualizados = 0
+        for i, item in enumerate(pedido.get("items", [])):
+            item_result = pedidos_collection.update_one(
+                {
+                    "_id": pedido_obj_id,
+                    f"items.{i}.id": item.get("id")
+                },
+                {
+                    "$set": {
+                        f"items.{i}.estado_item": 4,  # Estado terminado/cancelado
+                        f"items.{i}.fecha_cancelacion": fecha_cancelacion,
+                        f"items.{i}.cancelado_por": usuario_cancelacion
+                    }
+                }
+            )
+            if item_result.modified_count > 0:
+                items_actualizados += 1
         
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Pedido no encontrado para actualizar")
@@ -3100,7 +3121,9 @@ async def cancelar_pedido(
             "cliente_nombre": pedido.get("cliente_nombre", ""),
             "fecha_cancelacion": fecha_cancelacion,
             "motivo_cancelacion": request.motivo_cancelacion,
-            "cancelado_por": usuario_cancelacion
+            "cancelado_por": usuario_cancelacion,
+            "items_actualizados": items_actualizados,
+            "items_desapareceran_herreria": items_actualizados
         }
         
     except HTTPException:
