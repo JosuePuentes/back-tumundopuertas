@@ -481,7 +481,7 @@ async def asignar_item(
         }
         
         # Buscar o crear el proceso en seguimiento
-        seguimiento = pedido.get("seguimiento", [])
+        seguimiento = pedido.get("seguimiento") or []
         proceso_existente = None
         
         for proceso in seguimiento:
