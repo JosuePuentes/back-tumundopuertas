@@ -402,6 +402,7 @@ async def asignar_item(
     pedido_id: str = Body(...),
     item_id: str = Body(...),
     empleado_id: str = Body(...),
+    empleado_nombre: str = Body(...),
     modulo: str = Body(...)  # "herreria", "masillar", "preparar"
 ):
     """
@@ -413,6 +414,7 @@ async def asignar_item(
         print(f"DEBUG ASIGNAR ITEM: pedido_id={pedido_id} (tipo: {type(pedido_id)})")
         print(f"DEBUG ASIGNAR ITEM: item_id={item_id} (tipo: {type(item_id)})")
         print(f"DEBUG ASIGNAR ITEM: empleado_id={empleado_id} (tipo: {type(empleado_id)})")
+        print(f"DEBUG ASIGNAR ITEM: empleado_nombre={empleado_nombre} (tipo: {type(empleado_nombre)})")
         print(f"DEBUG ASIGNAR ITEM: modulo={modulo} (tipo: {type(modulo)})")
         print(f"DEBUG ASIGNAR ITEM: === FIN DATOS RECIBIDOS ===")
         # Buscar el pedido
@@ -432,10 +434,10 @@ async def asignar_item(
         # Buscar el empleado para obtener su nombre
         empleado = buscar_empleado_por_identificador(empleado_id)
         if empleado:
-            nombre_empleado = empleado.get("nombreCompleto", f"Empleado {empleado_id}")
+            nombre_empleado = empleado.get("nombreCompleto", empleado_nombre)
         else:
-            nombre_empleado = f"Empleado {empleado_id}"
-            print(f"DEBUG ASIGNAR ITEM: Empleado {empleado_id} no encontrado en BD")
+            nombre_empleado = empleado_nombre  # Usar el nombre enviado desde el frontend
+            print(f"DEBUG ASIGNAR ITEM: Empleado {empleado_id} no encontrado en BD, usando nombre del frontend: {empleado_nombre}")
         
         # Actualizar el item específico
         result = pedidos_collection.update_one(
@@ -546,11 +548,39 @@ async def asignar_item(
         
         print(f"DEBUG ASIGNAR ITEM: Asignación creada exitosamente en seguimiento")
         
+        # Obtener información completa del item asignado
+        item_asignado = None
+        for item in pedido.get("items", []):
+            if item.get("id") == item_id:
+                item_asignado = item
+                break
+        
         return {
             "message": "Item asignado correctamente", 
             "estado_item": nuevo_estado_item,
             "modulo": modulo,
-            "empleado": nombre_empleado
+            "empleado": nombre_empleado,
+            "item_info": {
+                "id": item_asignado.get("id") if item_asignado else item_id,
+                "descripcion": item_asignado.get("descripcion", "") if item_asignado else "",
+                "nombre": item_asignado.get("nombre", "") if item_asignado else "",
+                "categoria": item_asignado.get("categoria", "") if item_asignado else "",
+                "precio": item_asignado.get("precio", 0) if item_asignado else 0,
+                "costo": item_asignado.get("costo", 0) if item_asignado else 0,
+                "costoProduccion": item_asignado.get("costoProduccion", 0) if item_asignado else 0,
+                "cantidad": item_asignado.get("cantidad", 1) if item_asignado else 1,
+                "detalleitem": item_asignado.get("detalleitem", "") if item_asignado else "",
+                "imagenes": item_asignado.get("imagenes", []) if item_asignado else [],
+                "empleado_asignado": empleado_id,
+                "nombre_empleado": nombre_empleado,
+                "modulo_actual": modulo,
+                "fecha_asignacion": datetime.now().isoformat()
+            },
+            "pedido_info": {
+                "pedido_id": pedido_id,
+                "numero_orden": pedido.get("numero_orden", ""),
+                "cliente_nombre": pedido.get("cliente_nombre", "")
+            }
         }
         
     except HTTPException:
