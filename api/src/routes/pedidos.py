@@ -2,7 +2,7 @@ from typing import List, Optional, Union
 from fastapi import APIRouter, HTTPException, Body, Depends, Query
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
-from ..config.mongodb import pedidos_collection, db
+from ..config.mongodb import pedidos_collection, db, items_collection
 from ..models.authmodels import Pedido
 from ..auth.auth import get_current_user
 from pydantic import BaseModel
@@ -2530,6 +2530,52 @@ async def terminar_asignacion_articulo(
     }
 
     siguiente_estado_item = siguiente_estado_item_map.get(orden_int)
+
+    # Si estamos en orden 3 (Preparar/Manillar), actualizar inventario
+    if orden_int == 3:
+        try:
+            # Obtener información del item del pedido
+            item_pedido = None
+            for item in pedido.get("items", []):
+                if item.get("id") == item_id:
+                    item_pedido = item
+                    break
+            
+            if item_pedido and "codigo" in item_pedido:
+                codigo_item = item_pedido.get("codigo")
+                cantidad = item_pedido.get("cantidad", 1)
+                cliente_nombre = pedido.get("cliente_nombre", "")
+                
+                # Buscar el item en el inventario
+                item_inventario = items_collection.find_one({"codigo": codigo_item})
+                
+                if item_inventario:
+                    # Si es TU MUNDO PUERTAS, sumar al inventario normal
+                    if cliente_nombre == "J-507172554 - TU MUNDO PUERTAS":
+                        items_collection.update_one(
+                            {"codigo": codigo_item},
+                            {"$inc": {"cantidad": cantidad}}
+                        )
+                    else:
+                        # Para otros clientes, sumar a apartados
+                        item_apartado = items_collection.find_one({"codigo": codigo_item, "apartado": True})
+                        
+                        if item_apartado:
+                            # Si existe apartado, sumar la cantidad
+                            items_collection.update_one(
+                                {"codigo": codigo_item, "apartado": True},
+                                {"$inc": {"cantidad": cantidad}}
+                            )
+                        else:
+                            # Si no existe apartado, crear uno nuevo con cantidad
+                            item_apartado_data = item_inventario.copy()
+                            item_apartado_data["apartado"] = True
+                            item_apartado_data["cantidad"] = cantidad
+                            if "_id" in item_apartado_data:
+                                del item_apartado_data["_id"]
+                            items_collection.insert_one(item_apartado_data)
+        except Exception as e:
+            print(f"Error actualizando inventario: {str(e)}")
 
     # Actualizar el estado del item específico
     if siguiente_estado_item:
