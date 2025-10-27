@@ -2395,11 +2395,82 @@ async def terminar_asignacion_articulo(
             
         print(f"DEBUG TERMINAR: Asignación terminada exitosamente")
         
+        # REGISTRAR COMISIÓN EN EL PEDIDO
+        print(f"DEBUG TERMINAR: === INICIANDO REGISTRO DE COMISIÓN ===")
+        
+        comision_data = None
+        try:
+            # Buscar el item para obtener el costo de producción
+            item = None
+            for item_pedido in pedido.get("items", []):
+                if item_pedido.get("id") == item_id:
+                    item = item_pedido
+                    break
+            
+            costo_produccion = item.get("costoProduccion", 0) if item else 0
+            print(f"DEBUG TERMINAR: Costo de producción: {costo_produccion}")
+            
+            # Determinar el módulo actual
+            modulo_actual = "herreria"
+            if orden_int == 1:
+                modulo_actual = "herreria"
+            elif orden_int == 2:
+                modulo_actual = "masillar"
+            elif orden_int == 3:
+                modulo_actual = "preparar"
+            print(f"DEBUG TERMINAR: Módulo actual: {modulo_actual}")
+            
+            # Obtener fecha_inicio de la asignación
+            fecha_inicio = asignacion_encontrada.get("fecha_inicio", "") if asignacion_encontrada else ""
+            
+            # Crear registro de comisión
+            comision_pedido = {
+                "empleado_id": empleado_id,
+                "empleado_nombre": empleado.get("nombreCompleto", f"Empleado {empleado_id}") if empleado else f"Empleado {empleado_id}",
+                "item_id": item_id,
+                "modulo": modulo_actual,
+                "costo_produccion": costo_produccion,
+                "costoProduccion": costo_produccion,  # Mapeo alternativo
+                "fecha": datetime.now(),
+                "fecha_inicio": fecha_inicio,
+                "fecha_fin": fecha_fin,
+                "estado": "terminado",
+                "descripcion": item.get("descripcion", item.get("nombre", "Sin descripción")) if item else "Sin descripción",
+                "pedido_id": pedido_id
+            }
+            
+            print(f"DEBUG TERMINAR: Comisión a registrar: {comision_pedido}")
+            
+            # Agregar comisión al pedido si no existe
+            if "comisiones" not in pedido:
+                pedido["comisiones"] = []
+            
+            pedido["comisiones"].append(comision_pedido)
+            
+            # Actualizar el pedido con la comisión
+            result_comision = pedidos_collection.update_one(
+                {"_id": pedido_obj_id},
+                {"$push": {"comisiones": comision_pedido}}
+            )
+            
+            print(f"DEBUG TERMINAR: Resultado update_one comisión: {result_comision.modified_count} documentos modificados")
+            
+            comision_data = comision_pedido
+            print(f"DEBUG TERMINAR: Comisión registrada en pedido exitosamente")
+            
+        except Exception as e:
+            print(f"ERROR TERMINAR: Error registrando comisión: {e}")
+            import traceback
+            print(f"ERROR TERMINAR: Traceback: {traceback.format_exc()}")
+        
+        print(f"DEBUG TERMINAR: === FIN REGISTRO DE COMISIÓN ===")
+        
         return {
             "success": True,
-            "message": "Asignación terminada exitosamente",
+            "message": "Asignación terminada y agregada a comisiones",
             "estado": estado,
-            "fecha_fin": fecha_fin
+            "fecha_fin": fecha_fin,
+            "comision": comision_data
         }
         
     except Exception as e:
