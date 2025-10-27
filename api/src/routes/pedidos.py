@@ -2582,7 +2582,6 @@ async def terminar_asignacion_articulo(
             "estado_item_nuevo": nuevo_estado_item,
             "comision": comision_data
         }
-        
     except Exception as e:
         print(f"ERROR TERMINAR: Error actualizando pedido: {e}")
         raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
