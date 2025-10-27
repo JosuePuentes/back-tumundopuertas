@@ -422,7 +422,7 @@ async def asignar_item(
         if not pedido:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
         
-        # Mapeo de módulos a estados
+        # Mapeo de módulos a estados (SOLO para items sin estado_item definido)
         # 0 = Pendiente
         # 1 = Herrería
         # 2 = Masillar/Pintar
@@ -434,7 +434,22 @@ async def asignar_item(
             "preparar": 3
         }
         
-        nuevo_estado_item = estado_item_map.get(modulo, 1)
+        # OBTENER estado_item ACTUAL del item (NO forzar)
+        item = None
+        for item_pedido in pedido.get("items", []):
+            if item_pedido.get("id") == item_id:
+                item = item_pedido
+                break
+        
+        estado_item_actual = item.get("estado_item", 0) if item else 0
+        
+        # Si el item ya tiene estado_item, mantenerlo. Solo establecerlo si es 0 (pendiente)
+        if estado_item_actual == 0:
+            nuevo_estado_item = estado_item_map.get(modulo, 1)
+            print(f"DEBUG ASIGNAR ITEM: Item sin estado, estableciendo según módulo: {nuevo_estado_item}")
+        else:
+            nuevo_estado_item = estado_item_actual  # MANTENER estado actual
+            print(f"DEBUG ASIGNAR ITEM: Manteniendo estado_item actual: {nuevo_estado_item}")
         
         # Buscar el empleado para obtener su nombre
         empleado = buscar_empleado_por_identificador(empleado_id)
