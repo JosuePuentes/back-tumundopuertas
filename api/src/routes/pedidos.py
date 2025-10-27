@@ -2383,17 +2383,29 @@ async def terminar_asignacion_articulo(
     
     print(f"DEBUG TERMINAR: Guardando cambios en el pedido...")
     
-    # SOLO actualizar seguimiento (NO mover el item automáticamente)
+    # LIMPIAR campos de asignación del item y actualizar seguimiento
     try:
+        # Limpiar empleado_asignado, nombre_empleado, modulo_actual del item
         result = pedidos_collection.update_one(
-            {"_id": pedido_obj_id},
-            {"$set": {"seguimiento": seguimiento}}
+            {
+                "_id": pedido_obj_id,
+                "items.id": item_id
+            },
+            {
+                "$set": {
+                    "seguimiento": seguimiento,
+                    "items.$.empleado_asignado": None,
+                    "items.$.nombre_empleado": None,
+                    "items.$.modulo_actual": None,
+                    "items.$.fecha_asignacion": None
+                }
+            }
         )
         
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Pedido no encontrado al actualizar")
             
-        print(f"DEBUG TERMINAR: Asignación terminada exitosamente")
+        print(f"DEBUG TERMINAR: Asignación terminada y campos del item limpiados exitosamente")
         
         # REGISTRAR COMISIÓN EN EL PEDIDO
         print(f"DEBUG TERMINAR: === INICIANDO REGISTRO DE COMISIÓN ===")
