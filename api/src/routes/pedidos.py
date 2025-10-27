@@ -5333,3 +5333,96 @@ async def inicializar_estado_items():
     except Exception as e:
         print(f"Error inicializando estado_items: {e}")
         return {"error": str(e)}
+
+@router.post("/actualizar-inventario-retroactivo")
+async def actualizar_inventario_retroactivo(pedido_id: str = Body(...)):
+    """
+    Endpoint para actualizar retroactivamente el inventario de un pedido
+    que ya pasó por orden 3 (Manillar/Preparar) antes de implementar la lógica
+    """
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"pedido_id no es un ObjectId válido: {str(e)}")
+    
+    pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    seguimiento = pedido.get("seguimiento", [])
+    cliente_nombre = pedido.get("cliente_nombre", "")
+    items_actualizados = 0
+    items_procesados = []
+    
+    # Buscar si existe el orden 3 completado
+    for sub in seguimiento:
+        if int(sub.get("orden", -1)) == 3:
+            print(f"ACTUALIZANDO INVENTARIO: Pedido {pedido_id} - Orden 3 encontrado")
+            
+            # Buscar los items que tienen estado_item >= 4 (ya pasaron por orden 3)
+            for item in pedido.get("items", []):
+                estado_item = item.get("estado_item", 0)
+                if estado_item >= 4:  # Ya pasó por orden 3
+                    print(f"ACTUALIZANDO INVENTARIO: Item {item.get('id')} con estado_item {estado_item}")
+                    
+                    # Obtener información del item
+                    if "codigo" in item:
+                        codigo_item = item.get("codigo")
+                        cantidad = item.get("cantidad", 1)
+                        
+                        # Buscar el item en el inventario
+                        item_inventario = items_collection.find_one({"codigo": codigo_item})
+                        
+                        if item_inventario:
+                            # Si es TU MUNDO PUERTAS, sumar al inventario normal
+                            if cliente_nombre == "J-507172554 - TU MUNDO PUERTAS":
+                                items_collection.update_one(
+                                    {"codigo": codigo_item},
+                                    {"$inc": {"cantidad": cantidad}}
+                                )
+                                items_actualizados += 1
+                                items_procesados.append({
+                                    "codigo": codigo_item,
+                                    "cantidad": cantidad,
+                                    "tipo": "inventario_normal"
+                                })
+                            else:
+                                # Para otros clientes, sumar a apartados
+                                item_apartado = items_collection.find_one({"codigo": codigo_item, "apartado": True})
+                                
+                                if item_apartado:
+                                    # Si existe apartado, sumar la cantidad
+                                    items_collection.update_one(
+                                        {"codigo": codigo_item, "apartado": True},
+                                        {"$inc": {"cantidad": cantidad}}
+                                    )
+                                    items_actualizados += 1
+                                    items_procesados.append({
+                                        "codigo": codigo_item,
+                                        "cantidad": cantidad,
+                                        "tipo": "apartado_actualizado"
+                                    })
+                                else:
+                                    # Si no existe apartado, crear uno nuevo con cantidad
+                                    item_apartado_data = item_inventario.copy()
+                                    item_apartado_data["apartado"] = True
+                                    item_apartado_data["cantidad"] = cantidad
+                                    if "_id" in item_apartado_data:
+                                        del item_apartado_data["_id"]
+                                    items_collection.insert_one(item_apartado_data)
+                                    items_actualizados += 1
+                                    items_procesados.append({
+                                        "codigo": codigo_item,
+                                        "cantidad": cantidad,
+                                        "tipo": "apartado_creado"
+                                    })
+            
+            break  # Ya procesamos el orden 3
+    
+    return {
+        "message": "Inventario actualizado retroactivamente",
+        "pedido_id": pedido_id,
+        "items_actualizados": items_actualizados,
+        "cliente": cliente_nombre,
+        "items_procesados": items_procesados
+    }
