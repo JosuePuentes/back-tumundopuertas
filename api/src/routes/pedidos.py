@@ -4255,6 +4255,35 @@ async def get_datos_impresion(pedido_id: str, current_user = Depends(get_current
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener datos de impresión: {str(e)}")
 
+@router.get("/{pedido_id}/pagos")
+async def get_pagos_pedido(pedido_id: str):
+    """Obtener todos los pagos de un pedido específico"""
+    try:
+        # Buscar el pedido por ID
+        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Obtener historial de pagos y total abonado
+        historial_pagos = pedido.get("historial_pagos", [])
+        total_abonado = pedido.get("total_abonado", 0)
+        
+        # Calcular total del pedido
+        total_pedido = sum(item.get("precio", 0) * item.get("cantidad", 0) for item in pedido.get("items", []))
+        saldo_pendiente = total_pedido - total_abonado
+        
+        return {
+            "pedido_id": pedido_id,
+            "historial_pagos": historial_pagos,
+            "total_abonado": total_abonado,
+            "total_pedido": total_pedido,
+            "saldo_pendiente": saldo_pendiente,
+            "estado_pago": pedido.get("pago", "")
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener pagos: {str(e)}")
+
 # ========================================
 # ENDPOINT PARA DEBUGGING DE PEDIDOS
 # ========================================
