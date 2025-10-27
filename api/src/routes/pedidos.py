@@ -2507,6 +2507,7 @@ async def terminar_asignacion_articulo(
         print(f"DEBUG TERMINAR: === FIN REGISTRO DE COMISIÓN ===")
         
         # ACTUALIZAR INVENTARIO: Si estamos en orden 3 (Preparar/Manillar)
+        print(f"DEBUG TERMINAR: Verificando orden para actualizar inventario: orden_int={orden_int}")
         if orden_int == 3:
             print(f"ACTUALIZAR INVENTARIO: Iniciando actualización para orden 3")
             print(f"ACTUALIZAR INVENTARIO: item_id={item_id}, cliente={pedido.get('cliente_nombre', '')}")
