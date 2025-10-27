@@ -5035,10 +5035,10 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
         if not isinstance(seguimiento, list):
             seguimiento = []
         
-        # Filtrar items válidos
+        # Filtrar items válidos (aceptar items con "id" o "_id")
         items_validos = []
         for item in items:
-            if isinstance(item, dict) and item.get("_id"):
+            if isinstance(item, dict) and (item.get("id") or item.get("_id")):
                 items_validos.append(item)
         
         items = items_validos
@@ -5068,7 +5068,8 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
                 if not isinstance(item, dict):
                     continue
                     
-                item_id = str(item.get("_id", ""))
+                # Obtener item_id de "_id" o "id"
+                item_id = str(item.get("_id", item.get("id", "")))
                 if not item_id:
                     continue
                     
@@ -5180,27 +5181,36 @@ def calcular_progreso_mejorado(items: list, seguimiento: list) -> dict:
         # Calcular progreso general más preciso
         total_items = len(detalle_items)
         
-        # Contar items completamente terminados (pasaron por todos los módulos)
+        # Contar items completamente terminados basado en estado_item
         items_terminados = 0
-        for item_detalle in detalle_items:
+        for item in items:
             try:
-                estados = item_detalle["estados"]
-                if all(estado == "terminado" for estado in estados.values()):
+                estado_item = item.get("estado_item", 0)
+                # Item terminado si estado_item = 4
+                if estado_item >= 4:
                     items_terminados += 1
             except Exception as e:
                 print(f"Error contando item terminado: {e}")
                 continue
         
-        # Calcular progreso basado en módulos completados
-        total_asignaciones = total_items * len(modulos)
-        asignaciones_completadas = sum(modulo["completado"] for modulo in modulos)
+        # Calcular progreso basado en estado_item de los items
+        # Progreso = promedio de estado_item / 4 * 100
+        suma_estado_items = 0
+        for item in items:
+            try:
+                estado_item = item.get("estado_item", 0)
+                suma_estado_items += min(estado_item, 4)  # Máximo 4
+            except Exception as e:
+                print(f"Error sumando estado_item: {e}")
+                continue
         
-        progreso_general = round((asignaciones_completadas / total_asignaciones) * 100, 1) if total_asignaciones > 0 else 0
+        # Progreso general = porcentaje promedio de estado_item
+        progreso_general = round((suma_estado_items / (total_items * 4)) * 100, 1) if total_items > 0 else 0
         
         # Determinar estado general
         if items_terminados == total_items and total_items > 0:
             estado_general = "completado"
-        elif asignaciones_completadas > 0:
+        elif progreso_general > 0:
             estado_general = "en_proceso"
         else:
             estado_general = "pendiente"
