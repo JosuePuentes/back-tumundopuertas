@@ -2302,11 +2302,9 @@ async def terminar_asignacion_articulo(
     print(f"DEBUG TERMINAR: === FIN DATOS RECIBIDOS ===")
     
     # Convertir orden a int si viene como string
-    print(f"DEBUG TERMINAR: === CONVIRTIENDO ORDEN ===")
-    print(f"DEBUG TERMINAR: orden recibido={orden}, tipo={type(orden)}")
     try:
         orden_int = int(orden) if isinstance(orden, str) else orden
-        print(f"DEBUG TERMINAR: orden_int={orden_int}, tipo={type(orden_int)}")
+        print(f"DEBUG TERMINAR: Orden convertido a int: {orden_int}")
     except (ValueError, TypeError) as e:
         print(f"ERROR TERMINAR: Error convirtiendo orden a int: {e}")
         raise HTTPException(status_code=400, detail=f"orden debe ser un número válido: {str(e)}")
@@ -2508,71 +2506,78 @@ async def terminar_asignacion_articulo(
         
         print(f"DEBUG TERMINAR: === FIN REGISTRO DE COMISIÓN ===")
         
-        # ACTUALIZAR INVENTARIO: Si estamos en orden 3 (Preparar/Manillar)
-        print(f"DEBUG TERMINAR: === VERIFICANDO ACTUALIZACIÓN INVENTARIO ===")
-        print(f"DEBUG TERMINAR: orden_int={orden_int}, tipo={type(orden_int)}")
-        print(f"DEBUG TERMINAR: ¿orden_int == 3? {orden_int == 3}")
+        # Determinar el siguiente estado del item basado en el orden
+        siguiente_estado_item_map = {
+            1: 2,  # herreria -> masillar (orden1 -> orden2)
+            2: 3,  # masillar -> preparar (orden2 -> orden3)
+            3: 4,  # preparar -> facturar (orden3 -> orden4)
+            4: 5   # facturar -> terminado (orden4 -> orden5)
+        }
+
+        siguiente_estado_item = siguiente_estado_item_map.get(orden_int)
+
+        # IMPORTANTE: Actualizar inventario ANTES del return
+        # Si estamos en orden 3 (Preparar/Manillar), actualizar inventario
         if orden_int == 3:
-            print(f"ACTUALIZAR INVENTARIO: Iniciando actualización para orden 3")
-            print(f"ACTUALIZAR INVENTARIO: item_id={item_id}, cliente={pedido.get('cliente_nombre', '')}")
             try:
                 # Obtener información del item del pedido
                 item_pedido = None
-                for item_ped in pedido.get("items", []):
-                    if item_ped.get("id") == item_id:
-                        item_pedido = item_ped
+                for item in pedido.get("items", []):
+                    if item.get("id") == item_id:
+                        item_pedido = item
                         break
                 
-                print(f"ACTUALIZAR INVENTARIO: item_pedido encontrado={item_pedido is not None}")
                 if item_pedido and "codigo" in item_pedido:
-                    print(f"ACTUALIZAR INVENTARIO: codigo={item_pedido.get('codigo')}")
                     codigo_item = item_pedido.get("codigo")
                     cantidad = item_pedido.get("cantidad", 1)
                     cliente_nombre = pedido.get("cliente_nombre", "")
                     
+                    print(f"DEBUG TERMINAR: Actualizando inventario para orden 3 - codigo: {codigo_item}, cantidad: {cantidad}, cliente: {cliente_nombre}")
+                    
                     # Buscar el item en el inventario
                     item_inventario = items_collection.find_one({"codigo": codigo_item})
-                    print(f"ACTUALIZAR INVENTARIO: item_inventario encontrado={item_inventario is not None}, cantidad={cantidad}")
                     
                     if item_inventario:
                         # Si es TU MUNDO PUERTAS, sumar al inventario normal
-                        if cliente_nombre == "J-507172554 - TU MUNDO PUERTAS":
-                            print(f"ACTUALIZAR INVENTARIO: Cliente TU MUNDO PUERTAS - Sumando al inventario normal")
-                            result = items_collection.update_one(
+                        # Usar comparación flexible para manejar "TU MUNDO PUERTA" vs "TU MUNDO PUERTAS"
+                        if "J-507172554" in cliente_nombre and "TU MUNDO" in cliente_nombre:
+                            print(f"DEBUG TERMINAR: Cliente es TU MUNDO PUERTAS - sumando al inventario normal")
+                            result_actualizacion = items_collection.update_one(
                                 {"codigo": codigo_item},
                                 {"$inc": {"cantidad": cantidad}}
                             )
-                            print(f"ACTUALIZAR INVENTARIO: Resultado update normal={result.modified_count}")
+                            print(f"DEBUG TERMINAR: Inventario normal actualizado: {result_actualizacion.modified_count} documentos modificados")
                         else:
-                            print(f"ACTUALIZAR INVENTARIO: Cliente {cliente_nombre} - Sumando a apartados")
                             # Para otros clientes, sumar a apartados
+                            print(f"DEBUG TERMINAR: Cliente NO es TU MUNDO PUERTAS - sumando a apartados")
                             item_apartado = items_collection.find_one({"codigo": codigo_item, "apartado": True})
-                            print(f"ACTUALIZAR INVENTARIO: item_apartado existente={item_apartado is not None}")
                             
                             if item_apartado:
                                 # Si existe apartado, sumar la cantidad
-                                result = items_collection.update_one(
+                                print(f"DEBUG TERMINAR: Item apartado existe - sumando cantidad")
+                                result_actualizacion = items_collection.update_one(
                                     {"codigo": codigo_item, "apartado": True},
                                     {"$inc": {"cantidad": cantidad}}
                                 )
-                                print(f"ACTUALIZAR INVENTARIO: Resultado update apartado={result.modified_count}")
+                                print(f"DEBUG TERMINAR: Apartado actualizado: {result_actualizacion.modified_count} documentos modificados")
                             else:
                                 # Si no existe apartado, crear uno nuevo con cantidad
-                                print(f"ACTUALIZAR INVENTARIO: Creando nuevo apartado")
+                                print(f"DEBUG TERMINAR: Item apartado NO existe - creando nuevo apartado")
                                 item_apartado_data = item_inventario.copy()
                                 item_apartado_data["apartado"] = True
                                 item_apartado_data["cantidad"] = cantidad
                                 if "_id" in item_apartado_data:
                                     del item_apartado_data["_id"]
                                 items_collection.insert_one(item_apartado_data)
-                                print(f"ACTUALIZAR INVENTARIO: Nuevo apartado insertado")
+                                print(f"DEBUG TERMINAR: Nuevo apartado insertado")
                     else:
-                        print(f"ACTUALIZAR INVENTARIO: ERROR - Item con codigo {codigo_item} no encontrado en inventario")
+                        print(f"DEBUG TERMINAR: Item no encontrado en inventario con codigo: {codigo_item}")
             except Exception as e:
-                print(f"Error actualizando inventario: {str(e)}")
+                print(f"ERROR TERMINAR: Error actualizando inventario: {str(e)}")
                 import traceback
-                print(f"ACTUALIZAR INVENTARIO: Traceback: {traceback.format_exc()}")
+                print(f"ERROR TERMINAR: Traceback inventario: {traceback.format_exc()}")
         
+        # Retornar respuesta exitosa CON el inventario actualizado
         return {
             "success": True,
             "message": "Asignación terminada y agregada a comisiones",
@@ -2580,14 +2585,36 @@ async def terminar_asignacion_articulo(
             "fecha_fin": fecha_fin,
             "estado_item_anterior": estado_item_actual,
             "estado_item_nuevo": nuevo_estado_item,
-            "comision": comision_data
+            "comision": comision_data,
+            "inventario_actualizado": orden_int == 3
         }
+        
     except Exception as e:
         print(f"ERROR TERMINAR: Error actualizando pedido: {e}")
         raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
 
-
 # Endpoint para obtener items disponibles para asignación
+@router.get("/items-disponibles-asignacion/")
+async def get_items_disponibles_asignacion():
+    """
+    Devuelve items que están disponibles para ser asignados al siguiente módulo
+    """
+    try:
+        print("DEBUG ITEMS DISPONIBLES: Buscando items disponibles para asignación")
+        
+        # Buscar pedidos con items que necesitan asignación
+        # Solo items con estado_item 1-3 (desaparecen cuando terminan MANILLAR)
+        pedidos = pedidos_collection.find({
+            "items": {
+                "$elemMatch": {
+                    "estado_item": {"$gte": 1, "$lt": 4}  # Items activos (1-3)
+                }
+            }
+        })
+        
+        items_disponibles = []
+        
+        # Endpoint para obtener items disponibles para asignación
 @router.get("/items-disponibles-asignacion/")
 async def get_items_disponibles_asignacion():
     """
@@ -5048,96 +5075,3 @@ async def inicializar_estado_items():
     except Exception as e:
         print(f"Error inicializando estado_items: {e}")
         return {"error": str(e)}
-
-@router.post("/actualizar-inventario-retroactivo")
-async def actualizar_inventario_retroactivo(pedido_id: str = Body(...)):
-    """
-    Endpoint para actualizar retroactivamente el inventario de un pedido
-    que ya pasó por orden 3 (Manillar/Preparar) antes de implementar la lógica
-    """
-    try:
-        pedido_obj_id = ObjectId(pedido_id)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"pedido_id no es un ObjectId válido: {str(e)}")
-    
-    pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
-    if not pedido:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    
-    seguimiento = pedido.get("seguimiento", [])
-    cliente_nombre = pedido.get("cliente_nombre", "")
-    items_actualizados = 0
-    items_procesados = []
-    
-    # Buscar si existe el orden 3 completado
-    for sub in seguimiento:
-        if int(sub.get("orden", -1)) == 3:
-            print(f"ACTUALIZANDO INVENTARIO: Pedido {pedido_id} - Orden 3 encontrado")
-            
-            # Buscar los items que tienen estado_item >= 4 (ya pasaron por orden 3)
-            for item in pedido.get("items", []):
-                estado_item = item.get("estado_item", 0)
-                if estado_item >= 4:  # Ya pasó por orden 3
-                    print(f"ACTUALIZANDO INVENTARIO: Item {item.get('id')} con estado_item {estado_item}")
-                    
-                    # Obtener información del item
-                    if "codigo" in item:
-                        codigo_item = item.get("codigo")
-                        cantidad = item.get("cantidad", 1)
-                        
-                        # Buscar el item en el inventario
-                        item_inventario = items_collection.find_one({"codigo": codigo_item})
-                        
-                        if item_inventario:
-                            # Si es TU MUNDO PUERTAS, sumar al inventario normal
-                            if cliente_nombre == "J-507172554 - TU MUNDO PUERTAS":
-                                items_collection.update_one(
-                                    {"codigo": codigo_item},
-                                    {"$inc": {"cantidad": cantidad}}
-                                )
-                                items_actualizados += 1
-                                items_procesados.append({
-                                    "codigo": codigo_item,
-                                    "cantidad": cantidad,
-                                    "tipo": "inventario_normal"
-                                })
-                            else:
-                                # Para otros clientes, sumar a apartados
-                                item_apartado = items_collection.find_one({"codigo": codigo_item, "apartado": True})
-                                
-                                if item_apartado:
-                                    # Si existe apartado, sumar la cantidad
-                                    items_collection.update_one(
-                                        {"codigo": codigo_item, "apartado": True},
-                                        {"$inc": {"cantidad": cantidad}}
-                                    )
-                                    items_actualizados += 1
-                                    items_procesados.append({
-                                        "codigo": codigo_item,
-                                        "cantidad": cantidad,
-                                        "tipo": "apartado_actualizado"
-                                    })
-                                else:
-                                    # Si no existe apartado, crear uno nuevo con cantidad
-                                    item_apartado_data = item_inventario.copy()
-                                    item_apartado_data["apartado"] = True
-                                    item_apartado_data["cantidad"] = cantidad
-                                    if "_id" in item_apartado_data:
-                                        del item_apartado_data["_id"]
-                                    items_collection.insert_one(item_apartado_data)
-                                    items_actualizados += 1
-                                    items_procesados.append({
-                                        "codigo": codigo_item,
-                                        "cantidad": cantidad,
-                                        "tipo": "apartado_creado"
-                                    })
-            
-            break  # Ya procesamos el orden 3
-    
-    return {
-        "message": "Inventario actualizado retroactivamente",
-        "pedido_id": pedido_id,
-        "items_actualizados": items_actualizados,
-        "cliente": cliente_nombre,
-        "items_procesados": items_procesados
-    }
