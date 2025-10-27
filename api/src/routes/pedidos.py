@@ -2506,6 +2506,78 @@ async def terminar_asignacion_articulo(
         
         print(f"DEBUG TERMINAR: === FIN REGISTRO DE COMISIÓN ===")
         
+        # Determinar el siguiente estado del item basado en el orden
+        siguiente_estado_item_map = {
+            1: 2,  # herreria -> masillar (orden1 -> orden2)
+            2: 3,  # masillar -> preparar (orden2 -> orden3)
+            3: 4,  # preparar -> facturar (orden3 -> orden4)
+            4: 5   # facturar -> terminado (orden4 -> orden5)
+        }
+
+        siguiente_estado_item = siguiente_estado_item_map.get(orden_int)
+
+        # IMPORTANTE: Actualizar inventario ANTES del return
+        # Si estamos en orden 3 (Preparar/Manillar), actualizar inventario
+        if orden_int == 3:
+            try:
+                # Obtener información del item del pedido
+                item_pedido = None
+                for item in pedido.get("items", []):
+                    if item.get("id") == item_id:
+                        item_pedido = item
+                        break
+                
+                if item_pedido and "codigo" in item_pedido:
+                    codigo_item = item_pedido.get("codigo")
+                    cantidad = item_pedido.get("cantidad", 1)
+                    cliente_nombre = pedido.get("cliente_nombre", "")
+                    
+                    print(f"DEBUG TERMINAR: Actualizando inventario para orden 3 - codigo: {codigo_item}, cantidad: {cantidad}, cliente: {cliente_nombre}")
+                    
+                    # Buscar el item en el inventario
+                    item_inventario = items_collection.find_one({"codigo": codigo_item})
+                    
+                    if item_inventario:
+                        # Si es TU MUNDO PUERTAS, sumar al inventario normal
+                        # Usar comparación flexible para manejar "TU MUNDO PUERTA" vs "TU MUNDO PUERTAS"
+                        if "J-507172554" in cliente_nombre and "TU MUNDO" in cliente_nombre:
+                            print(f"DEBUG TERMINAR: Cliente es TU MUNDO PUERTAS - sumando al inventario normal")
+                            result_actualizacion = items_collection.update_one(
+                                {"codigo": codigo_item},
+                                {"$inc": {"cantidad": cantidad}}
+                            )
+                            print(f"DEBUG TERMINAR: Inventario normal actualizado: {result_actualizacion.modified_count} documentos modificados")
+                        else:
+                            # Para otros clientes, sumar a apartados
+                            print(f"DEBUG TERMINAR: Cliente NO es TU MUNDO PUERTAS - sumando a apartados")
+                            item_apartado = items_collection.find_one({"codigo": codigo_item, "apartado": True})
+                            
+                            if item_apartado:
+                                # Si existe apartado, sumar la cantidad
+                                print(f"DEBUG TERMINAR: Item apartado existe - sumando cantidad")
+                                result_actualizacion = items_collection.update_one(
+                                    {"codigo": codigo_item, "apartado": True},
+                                    {"$inc": {"cantidad": cantidad}}
+                                )
+                                print(f"DEBUG TERMINAR: Apartado actualizado: {result_actualizacion.modified_count} documentos modificados")
+                            else:
+                                # Si no existe apartado, crear uno nuevo con cantidad
+                                print(f"DEBUG TERMINAR: Item apartado NO existe - creando nuevo apartado")
+                                item_apartado_data = item_inventario.copy()
+                                item_apartado_data["apartado"] = True
+                                item_apartado_data["cantidad"] = cantidad
+                                if "_id" in item_apartado_data:
+                                    del item_apartado_data["_id"]
+                                items_collection.insert_one(item_apartado_data)
+                                print(f"DEBUG TERMINAR: Nuevo apartado insertado")
+                    else:
+                        print(f"DEBUG TERMINAR: Item no encontrado en inventario con codigo: {codigo_item}")
+            except Exception as e:
+                print(f"ERROR TERMINAR: Error actualizando inventario: {str(e)}")
+                import traceback
+                print(f"ERROR TERMINAR: Traceback inventario: {traceback.format_exc()}")
+        
+        # Retornar respuesta exitosa CON el inventario actualizado
         return {
             "success": True,
             "message": "Asignación terminada y agregada a comisiones",
@@ -2513,366 +2585,36 @@ async def terminar_asignacion_articulo(
             "fecha_fin": fecha_fin,
             "estado_item_anterior": estado_item_actual,
             "estado_item_nuevo": nuevo_estado_item,
-            "comision": comision_data
+            "comision": comision_data,
+            "inventario_actualizado": orden_int == 3
         }
         
     except Exception as e:
         print(f"ERROR TERMINAR: Error actualizando pedido: {e}")
         raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
 
-    # CÓDIGO ANTIGUO - COMENTADO (SOLO TERMINAR ASIGNACIÓN SIN MOVER ITEM)
-    # Determinar el siguiente estado del item basado en el orden
-    siguiente_estado_item_map = {
-        1: 2,  # herreria -> masillar (orden1 -> orden2)
-        2: 3,  # masillar -> preparar (orden2 -> orden3)
-        3: 4,  # preparar -> facturar (orden3 -> orden4)
-        4: 5   # facturar -> terminado (orden4 -> orden5)
-    }
-
-    siguiente_estado_item = siguiente_estado_item_map.get(orden_int)
-
-    # Si estamos en orden 3 (Preparar/Manillar), actualizar inventario
-    if orden_int == 3:
-        try:
-            # Obtener información del item del pedido
-            item_pedido = None
-            for item in pedido.get("items", []):
-                if item.get("id") == item_id:
-                    item_pedido = item
-                    break
-            
-            if item_pedido and "codigo" in item_pedido:
-                codigo_item = item_pedido.get("codigo")
-                cantidad = item_pedido.get("cantidad", 1)
-                cliente_nombre = pedido.get("cliente_nombre", "")
-                
-                # Buscar el item en el inventario
-                item_inventario = items_collection.find_one({"codigo": codigo_item})
-                
-                if item_inventario:
-                    # Si es TU MUNDO PUERTAS, sumar al inventario normal
-                    if cliente_nombre == "J-507172554 - TU MUNDO PUERTAS":
-                        items_collection.update_one(
-                            {"codigo": codigo_item},
-                            {"$inc": {"cantidad": cantidad}}
-                        )
-                    else:
-                        # Para otros clientes, sumar a apartados
-                        item_apartado = items_collection.find_one({"codigo": codigo_item, "apartado": True})
-                        
-                        if item_apartado:
-                            # Si existe apartado, sumar la cantidad
-                            items_collection.update_one(
-                                {"codigo": codigo_item, "apartado": True},
-                                {"$inc": {"cantidad": cantidad}}
-                            )
-                        else:
-                            # Si no existe apartado, crear uno nuevo con cantidad
-                            item_apartado_data = item_inventario.copy()
-                            item_apartado_data["apartado"] = True
-                            item_apartado_data["cantidad"] = cantidad
-                            if "_id" in item_apartado_data:
-                                del item_apartado_data["_id"]
-                            items_collection.insert_one(item_apartado_data)
-        except Exception as e:
-            print(f"Error actualizando inventario: {str(e)}")
-
-    # Actualizar el estado del item específico
-    if siguiente_estado_item:
-        try:
-            # Actualizar el estado_item del item específico
-            result = pedidos_collection.update_one(
-                {"_id": pedido_obj_id, "items.id": item_id},
-                {
-                    "$set": {
-                        "seguimiento": seguimiento,
-                        "items.$.estado_item": siguiente_estado_item
-                    }
-                }
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
-    else:
-        # Solo actualizar seguimiento si no hay siguiente estado
-        try:
-            result = pedidos_collection.update_one(
-                {"_id": pedido_obj_id},
-                {"$set": {"seguimiento": seguimiento}}
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
-
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado al actualizar")
-
-    return {
-        "message": "Asignación de artículo actualizada correctamente",
-        "siguiente_estado_item": siguiente_estado_item,
-        "estado_anterior": orden_int,
-        "asignacion_actualizada": {
-            "pedido_id": pedido_id,
-            "item_id": item_id,
-            "empleado_id": empleado_id,
-            "estado": estado,
-            "fecha_fin": fecha_fin,
-            "siguiente_modulo": f"orden{siguiente_estado_item}" if siguiente_estado_item else None
-        }
-    }
-    
-    # ACTUALIZAR ESTADO_SUBESTADO DEL ARTÍCULO PARA MOVER AL SIGUIENTE MÓDULO
-    print(f"DEBUG TERMINAR: Actualizando estado_subestado del artículo")
-    siguiente_modulo = obtener_siguiente_modulo(orden)
-    print(f"DEBUG TERMINAR: Siguiente módulo: {siguiente_modulo}")
-    
-    try:
-        # Actualizar el estado_subestado del artículo específico
-        result_item = pedidos_collection.update_one(
-            {
-                "_id": pedido_obj_id,
-                "items.id": item_id
-            },
-            {
-                "$set": {
-                    "items.$.estado_subestado": siguiente_modulo,
-                    "items.$.fecha_progreso": datetime.now().isoformat()
-                }
-            }
-        )
-        print(f"DEBUG TERMINAR: Artículo actualizado: {result_item.modified_count} documentos modificados")
-        
-        if result_item.modified_count == 0:
-            print(f"DEBUG TERMINAR: Advertencia: No se pudo actualizar el estado_subestado del artículo")
-    except Exception as e:
-        print(f"DEBUG TERMINAR: Error al actualizar estado_subestado: {e}")
-        import traceback
-        print(f"DEBUG TERMINAR: Traceback: {traceback.format_exc()}")
-    
-    # MOVER EL ARTÍCULO INDIVIDUAL AL SIGUIENTE PROCESO
-    print(f"DEBUG TERMINAR: Moviendo artículo individual al siguiente proceso")
-    proceso_actual = None
-    asignacion_terminada = None
-    
-    try:
-        # Encontrar el proceso actual y la asignación terminada
-        for sub in seguimiento:
-            if int(sub.get("orden", -1)) == orden:
-                proceso_actual = sub
-                asignaciones = sub.get("asignaciones_articulos", [])
-                print(f"DEBUG TERMINAR: Proceso actual tiene {len(asignaciones)} asignaciones")
-                
-                for asignacion in asignaciones:
-                    if asignacion.get("itemId") == item_id and asignacion.get("empleadoId") == empleado_id:
-                        asignacion_terminada = asignacion.copy()
-                        print(f"DEBUG TERMINAR: Asignación encontrada para mover: {asignacion.get('itemId')}")
-                        break
-                break
-        
-        # Buscar el siguiente proceso
-        siguiente_orden = orden + 1
-        proceso_siguiente = None
-        
-        print(f"DEBUG TERMINAR: Buscando proceso siguiente con orden {siguiente_orden}")
-        print(f"DEBUG TERMINAR: Total de procesos en seguimiento: {len(seguimiento)}")
-        
-        for i, sub in enumerate(seguimiento):
-            orden_proceso = sub.get("orden", -1)
-            nombre_proceso = sub.get("nombre_subestado", "SIN_NOMBRE")
-            print(f"DEBUG TERMINAR: Proceso {i}: orden={orden_proceso}, nombre={nombre_proceso}, estado={sub.get('estado', 'SIN_ESTADO')}")
-            if int(orden_proceso) == siguiente_orden:
-                proceso_siguiente = sub
-                print(f"DEBUG TERMINAR: Proceso siguiente encontrado: orden={siguiente_orden}, nombre={nombre_proceso}")
-                break
-        
-        if not proceso_siguiente:
-            print(f"DEBUG TERMINAR: ERROR - No se encontró proceso con orden {siguiente_orden}")
-            print(f"DEBUG TERMINAR: Procesos disponibles:")
-            for i, sub in enumerate(seguimiento):
-                print(f"  - Proceso {i}: orden={sub.get('orden')}, nombre={sub.get('nombre_subestado')}")
-        
-        if proceso_siguiente and asignacion_terminada:
-            print(f"DEBUG TERMINAR: Moviendo artículo {item_id} al siguiente proceso (orden {siguiente_orden})")
-            
-            # Inicializar asignaciones_articulos si no existe
-            if "asignaciones_articulos" not in proceso_siguiente or proceso_siguiente["asignaciones_articulos"] is None:
-                proceso_siguiente["asignaciones_articulos"] = []
-            
-            # Crear nueva asignación para el siguiente proceso
-            nueva_asignacion = {
-                "itemId": asignacion_terminada.get("itemId"),
-                "empleadoId": None,  # Sin asignar aún
-                "nombreempleado": "",
-                "descripcionitem": asignacion_terminada.get("descripcionitem"),
-                "costoproduccion": asignacion_terminada.get("costoproduccion"),
-                "estado": "pendiente",  # Pendiente de asignar
-                "estado_subestado": "pendiente",
-                "fecha_inicio": None,
-                "fecha_fin": None
-            }
-            
-            print(f"DEBUG TERMINAR: Nueva asignación creada para siguiente proceso:")
-            print(f"  - itemId: {nueva_asignacion['itemId']}")
-            print(f"  - empleadoId: {nueva_asignacion['empleadoId']} (sin asignar)")
-            print(f"  - estado: {nueva_asignacion['estado']} (pendiente de asignar)")
-            print(f"  - siguiente módulo: {siguiente_modulo}")
-            
-            # Agregar al siguiente proceso
-            proceso_siguiente["asignaciones_articulos"].append(nueva_asignacion)
-            proceso_siguiente["estado"] = "en_proceso"
-            
-            # MARCAR LA ASIGNACIÓN COMO COMPLETADA EN EL PROCESO ACTUAL (NO REMOVER)
-            if proceso_actual and "asignaciones_articulos" in proceso_actual:
-                for asignacion in proceso_actual["asignaciones_articulos"]:
-                    if (asignacion.get("itemId") == item_id and 
-                        asignacion.get("empleadoId") == empleado_id):
-                        # Marcar como completado en lugar de remover
-                        asignacion["estado"] = "completado"
-                        asignacion["estado_subestado"] = "completado"
-                        asignacion["fecha_fin"] = fecha_fin
-                        print(f"DEBUG TERMINAR: Asignación marcada como completada en proceso actual")
-                        break
-                
-                # Verificar si todas las asignaciones del proceso están completadas
-                asignaciones_activas = [
-                    a for a in proceso_actual["asignaciones_articulos"] 
-                    if a.get("estado") not in ["completado", "terminado"]
-                ]
-                
-                if len(asignaciones_activas) == 0:
-                    proceso_actual["estado"] = "completado"
-                    print(f"DEBUG TERMINAR: Proceso actual marcado como completado (todas las asignaciones completadas)")
-                else:
-                    print(f"DEBUG TERMINAR: Proceso actual mantiene estado - {len(asignaciones_activas)} asignaciones activas restantes")
-            
-            print(f"DEBUG TERMINAR: Artículo movido exitosamente al siguiente proceso")
-        else:
-            print(f"DEBUG TERMINAR: No hay siguiente proceso o asignación no encontrada")
-            if not proceso_siguiente:
-                print(f"DEBUG TERMINAR: No se encontró proceso con orden {siguiente_orden}")
-            if not asignacion_terminada:
-                print(f"DEBUG TERMINAR: No se encontró asignación terminada")
-                
-    except Exception as e:
-        print(f"DEBUG TERMINAR: Error en movimiento de artículo: {e}")
-        import traceback
-        print(f"DEBUG TERMINAR: Traceback: {traceback.format_exc()}")
-    
-    # Actualizar el pedido en la base de datos
-    result = pedidos_collection.update_one(
-        {"_id": pedido_obj_id},
-        {"$set": {"seguimiento": seguimiento}}
-    )
-    
-    print(f"DEBUG TERMINAR: Resultado de actualización: {result.modified_count} documentos modificados")
-    
-    if result.modified_count == 0:
-        print(f"DEBUG TERMINAR: Error al actualizar el pedido")
-        raise HTTPException(status_code=500, detail="Error al actualizar el pedido")
-    
-    print(f"DEBUG TERMINAR: Asignación terminada exitosamente")
-    
-    # Información adicional para debug
-    debug_info = {
-        "proceso_actual_encontrado": proceso_actual is not None,
-        "asignacion_terminada_encontrada": asignacion_terminada is not None,
-        "proceso_siguiente_encontrado": proceso_siguiente is not None,
-        "siguiente_orden": siguiente_orden,
-        "asignaciones_restantes": len(proceso_actual.get("asignaciones_articulos", [])) if proceso_actual else 0,
-        "total_procesos": len(seguimiento),
-        "siguiente_modulo": siguiente_modulo,
-        "estado_subestado_actualizado": result_item.modified_count > 0 if 'result_item' in locals() else False
-    }
-    print(f"DEBUG TERMINAR: Info debug: {debug_info}")
-    
-    # REGISTRAR COMISIÓN EN EL PEDIDO PARA QUE APAREZCA EN EL REPORTE
-    print(f"DEBUG TERMINAR: === INICIANDO REGISTRO DE COMISIÓN ===")
-    try:
-        print(f"DEBUG TERMINAR: Registrando comisión en el pedido para el reporte")
-        print(f"DEBUG TERMINAR: pedido_obj_id: {pedido_obj_id}")
-        print(f"DEBUG TERMINAR: item_id: {item_id}")
-        print(f"DEBUG TERMINAR: empleado_id: {empleado_id}")
-        
-        # Buscar el item para obtener el costo de producción
-        print(f"DEBUG TERMINAR: Buscando item en inventario...")
-        item = items_collection.find_one({"_id": ObjectId(item_id)})
-        print(f"DEBUG TERMINAR: Item encontrado: {item is not None}")
-        
-        # Si no se encuentra en inventario, buscar en el pedido
-        if not item:
-            print(f"DEBUG TERMINAR: Item no encontrado en inventario, buscando en pedido...")
-            for item_pedido in pedido.get("items", []):
-                if item_pedido.get("id") == item_id:
-                    item = item_pedido
-                    print(f"DEBUG TERMINAR: Item encontrado en pedido: {item is not None}")
-                    break
-        
-        costo_produccion = item.get("costoProduccion", 0) if item else 0
-        print(f"DEBUG TERMINAR: Costo de producción: {costo_produccion}")
-        
-        # Determinar el módulo actual
-        modulo_actual = "herreria"
-        if orden_int == 1:
-            modulo_actual = "herreria"
-        elif orden_int == 2:
-            modulo_actual = "masillar"
-        elif orden_int == 3:
-            modulo_actual = "preparar"
-        print(f"DEBUG TERMINAR: Módulo actual: {modulo_actual}")
-        
-        # Agregar comisión al pedido para que aparezca en el reporte
-        comision_pedido = {
-            "empleado_id": empleado_id,
-            "empleado_nombre": empleado.get("nombreCompleto", f"Empleado {empleado_id}") if empleado else f"Empleado {empleado_id}",
-            "item_id": item_id,
-            "modulo": modulo_actual,
-            "costo_produccion": costo_produccion,
-            "fecha": datetime.now(),
-            "estado": "completado",
-            "descripcion": asignacion_encontrada.get("descripcionitem", "Sin descripción") if asignacion_encontrada else "Sin descripción"
-        }
-        print(f"DEBUG TERMINAR: Comisión a registrar: {comision_pedido}")
-        
-        # Agregar comisión al pedido
-        print(f"DEBUG TERMINAR: Ejecutando update_one en pedidos_collection...")
-        result_comision = pedidos_collection.update_one(
-            {"_id": pedido_obj_id},
-            {"$push": {"comisiones": comision_pedido}}
-        )
-        print(f"DEBUG TERMINAR: Resultado update_one: {result_comision.modified_count} documentos modificados")
-        
-        print(f"DEBUG TERMINAR: Comisión registrada en pedido: ${costo_produccion} para empleado {empleado_id}")
-        
-    except Exception as e:
-        print(f"ERROR TERMINAR: Error registrando comisión en pedido: {e}")
-        import traceback
-        print(f"ERROR TERMINAR: Traceback: {traceback.format_exc()}")
-    
-    print(f"DEBUG TERMINAR: === FIN REGISTRO DE COMISIÓN ===")
-    
-    # NOTA: El registro de comisiones se maneja en el dashboard
-    # La lógica existente ya maneja:
-    # - Herrería/Masillador: +costo_produccion
-    # - Preparador/Manillar: solo aparece en reporte
-    # - Vendedor: solo aparece en reporte
-    print(f"DEBUG TERMINAR: Comisión será registrada por el dashboard existente")
-    
-    return {
-        "message": "Asignación terminada correctamente",
-        "success": True,
-        "asignacion_actualizada": asignacion_encontrada,
-        "pedido_id": pedido_id,
-        "orden": orden_int,
-        "item_id": item_id,
-        "empleado_id": empleado_id,
-        "estado_anterior": "en_proceso",
-        "estado_nuevo": "terminado",
-        "fecha_fin": fecha_fin,
-        "articulo_movido": proceso_siguiente is not None,
-        "siguiente_proceso": siguiente_orden if proceso_siguiente else None,
-        "proceso_actual_vacio": len(proceso_actual.get("asignaciones_articulos", [])) == 0 if proceso_actual else False,
-        "debug_info": debug_info
-    }
-
 # Endpoint para obtener items disponibles para asignación
+@router.get("/items-disponibles-asignacion/")
+async def get_items_disponibles_asignacion():
+    """
+    Devuelve items que están disponibles para ser asignados al siguiente módulo
+    """
+    try:
+        print("DEBUG ITEMS DISPONIBLES: Buscando items disponibles para asignación")
+        
+        # Buscar pedidos con items que necesitan asignación
+        # Solo items con estado_item 1-3 (desaparecen cuando terminan MANILLAR)
+        pedidos = pedidos_collection.find({
+            "items": {
+                "$elemMatch": {
+                    "estado_item": {"$gte": 1, "$lt": 4}  # Items activos (1-3)
+                }
+            }
+        })
+        
+        items_disponibles = []
+        
+        # Endpoint para obtener items disponibles para asignación
 @router.get("/items-disponibles-asignacion/")
 async def get_items_disponibles_asignacion():
     """
