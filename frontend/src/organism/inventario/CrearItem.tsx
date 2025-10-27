@@ -36,6 +36,9 @@ const CrearItem: React.FC = () => {
   const [mensaje, setMensaje] = useState<string>("");
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const [excelMessage, setExcelMessage] = useState<string>("");
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [searchTerm, setSearchTerm] = useState<string>("");
   const { fetchItems, loading, error } = useItems();
 
   const handleChange = (
@@ -117,6 +120,40 @@ const CrearItem: React.FC = () => {
     }
   };
 
+  const handlePreviewExcel = async () => {
+    if (!excelFile) {
+      setExcelMessage("Por favor, selecciona un archivo Excel.");
+      return;
+    }
+
+    setExcelMessage("Cargando preview...");
+    const apiUrl = (import.meta.env.VITE_API_URL || "https://localhost:3000").replace('http://', 'https://');
+    const formData = new FormData();
+    formData.append("file", excelFile);
+
+    try {
+      const response = await fetch(`${apiUrl}/inventario/preview-excel`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setPreviewData(data);
+        setShowPreview(true);
+        setExcelMessage("");
+      } else {
+        setExcelMessage(`❌ Error: ${data.detail || data.message || "Error desconocido"}`);
+      }
+    } catch (err) {
+      setExcelMessage(`❌ Error de red o servidor: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   const handleExcelUpload = async () => {
     if (!excelFile) {
       setExcelMessage("Por favor, selecciona un archivo Excel.");
@@ -143,6 +180,8 @@ const CrearItem: React.FC = () => {
       if (response.ok) {
         setExcelMessage(`✅ ${data.message}`);
         setExcelFile(null); // Clear selected file
+        setShowPreview(false);
+        setPreviewData(null);
       } else {
         setExcelMessage(`❌ Error: ${data.detail || data.message || "Error desconocido"}`);
       }
@@ -344,13 +383,22 @@ const CrearItem: React.FC = () => {
               className="mt-1"
             />
           </div>
-          <Button
-            onClick={handleExcelUpload}
-            className="w-full font-bold py-2"
-            disabled={!excelFile}
-          >
-            Subir Excel
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={handlePreviewExcel}
+              className="flex-1 font-bold py-2"
+              disabled={!excelFile}
+            >
+              Abrir Preliminar
+            </Button>
+            <Button
+              onClick={handleExcelUpload}
+              className="flex-1 font-bold py-2"
+              disabled={!excelFile}
+            >
+              Subir Excel
+            </Button>
+          </div>
           {excelMessage && (
             <div className={`mt-4 text-center font-semibold ${excelMessage.startsWith('❌') ? 'text-red-600' : 'text-green-600'}`}>
               {excelMessage}
@@ -358,6 +406,84 @@ const CrearItem: React.FC = () => {
           )}
         </div>
       </CardContent>
+
+      {/* Modal de Preview */}
+      {showPreview && previewData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl w-11/12 max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b">
+              <h3 className="text-xl font-bold">Preliminar del Excel</h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Total de filas: {previewData.total_rows}
+              </p>
+            </div>
+            <div className="p-6 border-b">
+              <Input
+                type="text"
+                placeholder="Buscar por descripción..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full"
+              />
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse border border-gray-300">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      {previewData.headers.map((header: string, index: number) => (
+                        <th key={index} className="border border-gray-300 px-4 py-2 text-left font-semibold">
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewData.data
+                      .filter((row: any) => 
+                        !searchTerm || 
+                        (row.descripcion && row.descripcion.toString().toLowerCase().includes(searchTerm.toLowerCase()))
+                      )
+                      .map((row: any, index: number) => (
+                        <tr key={index} className="hover:bg-gray-50">
+                          {previewData.headers.map((header: string, colIndex: number) => (
+                            <td key={colIndex} className="border border-gray-300 px-4 py-2">
+                              {row[header] ?? ""}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+              {searchTerm && (
+                <p className="mt-4 text-sm text-gray-600">
+                  Mostrando {previewData.data.filter((row: any) => 
+                    !searchTerm || 
+                    (row.descripcion && row.descripcion.toString().toLowerCase().includes(searchTerm.toLowerCase()))
+                  ).length} de {previewData.total_rows} filas
+                </p>
+              )}
+            </div>
+            <div className="p-6 border-t flex justify-end gap-2">
+              <Button
+                onClick={() => {
+                  setShowPreview(false);
+                  setSearchTerm("");
+                }}
+                variant="outline"
+              >
+                Cerrar
+              </Button>
+              <Button
+                onClick={handleExcelUpload}
+              >
+                Cargar al Sistema
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   );
 };

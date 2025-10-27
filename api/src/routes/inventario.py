@@ -70,6 +70,44 @@ async def update_item(item_id: str, item: Item):
         # Capturar cualquier otro error inesperado
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
 
+@router.post("/preview-excel")
+async def preview_inventory_excel(file: UploadFile = File(...)):
+    """Endpoint para previsualizar el contenido del Excel antes de cargarlo"""
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Formato de archivo no válido. Se espera un archivo Excel (.xlsx o .xls)")
+
+    try:
+        contents = await file.read()
+        workbook = openpyxl.load_workbook(io.BytesIO(contents))
+        sheet = workbook.active
+
+        # Asumiendo que la primera fila son los encabezados
+        headers = [cell.value for cell in sheet[1]]
+        expected_headers = ["codigo", "descripcion", "departamento", "marca", "precio", "costo", "existencia"]
+
+        # Validar que los encabezados esperados estén presentes
+        if not all(header in headers for header in expected_headers):
+            raise HTTPException(status_code=400, detail=f"Faltan encabezados en el archivo Excel. Se esperan: {', '.join(expected_headers)}")
+
+        preview_data = []
+        for row_index in range(2, sheet.max_row + 1):
+            row_data = {headers[i]: cell.value for i, cell in enumerate(sheet[row_index])}
+            
+            # Solo incluir datos si hay información en la fila
+            if any(value is not None for value in row_data.values()):
+                preview_data.append(row_data)
+
+        return {
+            "total_rows": len(preview_data),
+            "headers": headers,
+            "data": preview_data
+        }
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al procesar el archivo Excel: {str(e)}")
+
 @router.post("/upload-excel", status_code=status.HTTP_201_CREATED)
 async def upload_inventory_excel(file: UploadFile = File(...)):
     if not file.filename.endswith(('.xlsx', '.xls')):
