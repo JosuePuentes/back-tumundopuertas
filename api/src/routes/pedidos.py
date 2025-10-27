@@ -2381,6 +2381,32 @@ async def terminar_asignacion_articulo(
         print(f"DEBUG TERMINAR: Asignación no encontrada")
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
     
+    print(f"DEBUG TERMINAR: Guardando cambios en el pedido...")
+    
+    # SOLO actualizar seguimiento (NO mover el item automáticamente)
+    try:
+        result = pedidos_collection.update_one(
+            {"_id": pedido_obj_id},
+            {"$set": {"seguimiento": seguimiento}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado al actualizar")
+            
+        print(f"DEBUG TERMINAR: Asignación terminada exitosamente")
+        
+        return {
+            "success": True,
+            "message": "Asignación terminada exitosamente",
+            "estado": estado,
+            "fecha_fin": fecha_fin
+        }
+        
+    except Exception as e:
+        print(f"ERROR TERMINAR: Error actualizando pedido: {e}")
+        raise HTTPException(status_code=500, detail=f"Error actualizando pedido: {str(e)}")
+
+    # CÓDIGO ANTIGUO - COMENTADO (SOLO TERMINAR ASIGNACIÓN SIN MOVER ITEM)
     # Determinar el siguiente estado del item basado en el orden
     siguiente_estado_item_map = {
         1: 2,  # herreria -> masillar (orden1 -> orden2)
