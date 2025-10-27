@@ -2383,9 +2383,23 @@ async def terminar_asignacion_articulo(
     
     print(f"DEBUG TERMINAR: Guardando cambios en el pedido...")
     
-    # LIMPIAR campos de asignación del item y actualizar seguimiento
+    # Obtener el estado_item actual del item
+    item = None
+    for item_pedido in pedido.get("items", []):
+        if item_pedido.get("id") == item_id:
+            item = item_pedido
+            break
+    
+    estado_item_actual = item.get("estado_item", 1) if item else 1
+    print(f"DEBUG TERMINAR: estado_item actual: {estado_item_actual}")
+    
+    # Incrementar estado_item (máximo 4)
+    nuevo_estado_item = min(estado_item_actual + 1, 4)
+    print(f"DEBUG TERMINAR: nuevo estado_item: {nuevo_estado_item}")
+    
+    # LIMPIAR campos de asignación del item, actualizar seguimiento e incrementar estado_item
     try:
-        # Limpiar empleado_asignado, nombre_empleado, modulo_actual del item
+        # Limpiar empleado_asignado, nombre_empleado, modulo_actual del item E incrementar estado_item
         result = pedidos_collection.update_one(
             {
                 "_id": pedido_obj_id,
@@ -2397,7 +2411,8 @@ async def terminar_asignacion_articulo(
                     "items.$.empleado_asignado": None,
                     "items.$.nombre_empleado": None,
                     "items.$.modulo_actual": None,
-                    "items.$.fecha_asignacion": None
+                    "items.$.fecha_asignacion": None,
+                    "items.$.estado_item": nuevo_estado_item
                 }
             }
         )
@@ -2405,20 +2420,14 @@ async def terminar_asignacion_articulo(
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Pedido no encontrado al actualizar")
             
-        print(f"DEBUG TERMINAR: Asignación terminada y campos del item limpiados exitosamente")
+        print(f"DEBUG TERMINAR: Asignación terminada, campos del item limpiados y estado_item actualizado a {nuevo_estado_item}")
         
         # REGISTRAR COMISIÓN EN EL PEDIDO
         print(f"DEBUG TERMINAR: === INICIANDO REGISTRO DE COMISIÓN ===")
         
         comision_data = None
         try:
-            # Buscar el item para obtener el costo de producción
-            item = None
-            for item_pedido in pedido.get("items", []):
-                if item_pedido.get("id") == item_id:
-                    item = item_pedido
-                    break
-            
+            # El item ya fue encontrado arriba
             costo_produccion = item.get("costoProduccion", 0) if item else 0
             print(f"DEBUG TERMINAR: Costo de producción: {costo_produccion}")
             
@@ -2482,6 +2491,8 @@ async def terminar_asignacion_articulo(
             "message": "Asignación terminada y agregada a comisiones",
             "estado": estado,
             "fecha_fin": fecha_fin,
+            "estado_item_anterior": estado_item_actual,
+            "estado_item_nuevo": nuevo_estado_item,
             "comision": comision_data
         }
         
