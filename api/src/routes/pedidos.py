@@ -423,6 +423,11 @@ async def asignar_item(
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
         
         # Mapeo de módulos a estados
+        # 0 = Pendiente
+        # 1 = Herrería
+        # 2 = Masillar/Pintar
+        # 3 = Manillar
+        # 4 = Terminado
         estado_item_map = {
             "herreria": 1,
             "masillar": 2, 
