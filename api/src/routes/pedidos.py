@@ -2302,9 +2302,11 @@ async def terminar_asignacion_articulo(
     print(f"DEBUG TERMINAR: === FIN DATOS RECIBIDOS ===")
     
     # Convertir orden a int si viene como string
+    print(f"DEBUG TERMINAR: === CONVIRTIENDO ORDEN ===")
+    print(f"DEBUG TERMINAR: orden recibido={orden}, tipo={type(orden)}")
     try:
         orden_int = int(orden) if isinstance(orden, str) else orden
-        print(f"DEBUG TERMINAR: Orden convertido a int: {orden_int}")
+        print(f"DEBUG TERMINAR: orden_int={orden_int}, tipo={type(orden_int)}")
     except (ValueError, TypeError) as e:
         print(f"ERROR TERMINAR: Error convirtiendo orden a int: {e}")
         raise HTTPException(status_code=400, detail=f"orden debe ser un número válido: {str(e)}")
