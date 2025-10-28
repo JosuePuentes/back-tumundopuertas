@@ -2383,7 +2383,7 @@ async def terminar_asignacion_articulo(
                     "itemId": item_id,
                     "empleadoId": empleado_id,
                     "nombreempleado": empleado.get("nombreCompleto", f"Empleado {empleado_id}") if empleado else f"Empleado {empleado_id}",
-                    "estado": estado,
+                    "estado": "terminado",  # Usar "terminado" para que desaparezca del dashboard
                     "estado_subestado": "terminado",
                     "fecha_inicio": datetime.now().isoformat(),
                     "fecha_fin": fecha_fin
@@ -2400,7 +2400,7 @@ async def terminar_asignacion_articulo(
                     print(f"DEBUG TERMINAR: Asignación encontrada, estado actual: {asignacion.get('estado')}")
                     
                     # Actualizar todos los campos necesarios
-                    asignacion["estado"] = estado
+                    asignacion["estado"] = "terminado"  # Cambiar estado a terminado para que desaparezca del dashboard
                     asignacion["estado_subestado"] = "terminado"  # Cambiar estado_subestado
                     asignacion["fecha_fin"] = fecha_fin
                     
