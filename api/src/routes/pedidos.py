@@ -2376,22 +2376,20 @@ async def terminar_asignacion_articulo(
             asignaciones = sub.get("asignaciones_articulos") or []
             print(f"DEBUG TERMINAR: Asignaciones encontradas: {len(asignaciones)}")
             
-            # Si no hay asignaciones, crear una nueva
+            # Si no hay asignaciones, la asignación debe existir previamente para poder terminarla
             if len(asignaciones) == 0:
-                print(f"DEBUG TERMINAR: No hay asignaciones existentes, creando nueva asignación")
-                nueva_asignacion = {
+                print(f"DEBUG TERMINAR: No hay asignaciones para este módulo")
+                # No crear asignación, dejar que el item desaparezca del dashboard
+                # Esto permite terminar asignaciones incluso si no hay registro en seguimiento
+                actualizado = True
+                asignacion_encontrada = {
                     "itemId": item_id,
                     "empleadoId": empleado_id,
-                    "nombreempleado": empleado.get("nombreCompleto", f"Empleado {empleado_id}") if empleado else f"Empleado {empleado_id}",
-                    "estado": estado,
+                    "estado": "terminado",
                     "estado_subestado": "terminado",
                     "fecha_inicio": datetime.now().isoformat(),
                     "fecha_fin": fecha_fin
                 }
-                asignaciones.append(nueva_asignacion)
-                asignacion_encontrada = nueva_asignacion
-                actualizado = True
-                print(f"DEBUG TERMINAR: Nueva asignación creada y terminada")
                 break
             
             for asignacion in asignaciones:
@@ -2436,7 +2434,7 @@ async def terminar_asignacion_articulo(
     estado_item_actual = item.get("estado_item", 1) if item else 1
     print(f"DEBUG TERMINAR: estado_item actual: {estado_item_actual}")
     
-    # Incrementar estado_item (máximo 4)
+    # Incrementar estado_item (máximo 4) para que el item desaparezca del módulo actual
     nuevo_estado_item = min(estado_item_actual + 1, 4)
     print(f"DEBUG TERMINAR: nuevo estado_item: {nuevo_estado_item}")
     
@@ -2540,7 +2538,7 @@ async def terminar_asignacion_articulo(
         siguiente_estado_item = siguiente_estado_item_map.get(orden_int)
 
         # IMPORTANTE: Actualizar inventario ANTES del return
-        # Si estamos en orden 3 (Preparar/Manillar), actualizar inventario
+        # Solo actualizar inventario cuando se termina en orden 3 (Preparar/Manillar)
         if orden_int == 3:
             try:
                 # Obtener información del item del pedido
@@ -2555,7 +2553,7 @@ async def terminar_asignacion_articulo(
                     cantidad = item_pedido.get("cantidad", 1)
                     cliente_nombre = pedido.get("cliente_nombre", "")
                     
-                    print(f"DEBUG TERMINAR: Actualizando inventario para orden 3 - codigo: {codigo_item}, cantidad: {cantidad}, cliente: {cliente_nombre}")
+                    print(f"DEBUG TERMINAR: Actualizando inventario para orden 3 (MANILLAR) - codigo: {codigo_item}, cantidad: {cantidad}, cliente: {cliente_nombre}")
                     
                     # Buscar el item en el inventario
                     item_inventario = items_collection.find_one({"codigo": codigo_item})
