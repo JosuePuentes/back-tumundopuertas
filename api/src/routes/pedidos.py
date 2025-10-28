@@ -2373,7 +2373,7 @@ async def terminar_asignacion_articulo(
     for sub in seguimiento:
         if int(sub.get("orden", -1)) == orden_int:
             print(f"DEBUG TERMINAR: Encontrado subestado con orden {orden_int}")
-            asignaciones = sub.get("asignaciones_articulos", [])
+            asignaciones = sub.get("asignaciones_articulos") or []
             print(f"DEBUG TERMINAR: Asignaciones encontradas: {len(asignaciones)}")
             
             for asignacion in asignaciones:
