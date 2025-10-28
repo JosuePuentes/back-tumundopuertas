@@ -2346,10 +2346,13 @@ async def terminar_asignacion_articulo(
         print(f"ERROR TERMINAR: Empleado {empleado_id} no tiene PIN configurado")
         raise HTTPException(status_code=400, detail="Empleado no tiene PIN configurado")
     
-    # Validar que el PIN sea correcto
-    if empleado.get("pin") != pin:
+    # Validar que el PIN sea correcto (convertir ambos a string para comparar)
+    pin_empleado = str(empleado.get("pin", "")).strip()
+    pin_recibido = str(pin).strip()
+    
+    if pin_empleado != pin_recibido:
         print(f"ERROR TERMINAR: PIN incorrecto para empleado {empleado_id}")
-        print(f"ERROR TERMINAR: PIN recibido: {pin}, PIN esperado: {empleado.get('pin')}")
+        print(f"ERROR TERMINAR: PIN recibido: '{pin_recibido}', PIN esperado: '{pin_empleado}'")
         raise HTTPException(status_code=400, detail="PIN incorrecto")
     
     print(f"DEBUG TERMINAR: PIN validado correctamente para empleado {empleado.get('nombreCompleto', empleado_id)}")
