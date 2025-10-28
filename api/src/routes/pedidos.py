@@ -2614,27 +2614,6 @@ async def get_items_disponibles_asignacion():
         
         items_disponibles = []
         
-        # Endpoint para obtener items disponibles para asignación
-@router.get("/items-disponibles-asignacion/")
-async def get_items_disponibles_asignacion():
-    """
-    Devuelve items que están disponibles para ser asignados al siguiente módulo
-    """
-    try:
-        print("DEBUG ITEMS DISPONIBLES: Buscando items disponibles para asignación")
-        
-        # Buscar pedidos con items que necesitan asignación
-        # Solo items con estado_item 1-3 (desaparecen cuando terminan MANILLAR)
-        pedidos = pedidos_collection.find({
-            "items": {
-                "$elemMatch": {
-                    "estado_item": {"$gte": 1, "$lt": 4}  # Items activos (1-3)
-                }
-            }
-        })
-        
-        items_disponibles = []
-        
         for pedido in pedidos:
             try:
                 # Validar que el pedido tenga _id
