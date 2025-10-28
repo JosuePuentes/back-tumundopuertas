@@ -2,7 +2,7 @@ from typing import List, Optional, Union
 from fastapi import APIRouter, HTTPException, Body, Depends, Query
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
-from ..config.mongodb import pedidos_collection, db, items_collection
+from ..config.mongodb import pedidos_collection, db, items_collection, clientes_collection
 from ..models.authmodels import Pedido
 from ..auth.auth import get_current_user
 from pydantic import BaseModel
@@ -17,7 +17,6 @@ metodos_pago_collection = db["metodos_pago"]
 empleados_collection = db["empleados"]
 items_collection = db["inventario"]  # La colección de items se llama "inventario"
 comisiones_collection = db["comisiones"]
-apartados_collection = db["apartados"]  # Nueva colección para módulo APARTADO
 
 def obtener_siguiente_modulo(orden_actual: int) -> str:
     """Determinar el siguiente módulo según el orden actual"""
@@ -2587,37 +2586,6 @@ async def terminar_asignacion_articulo(
                     else:
                         print(f"DEBUG TERMINAR: Item no encontrado en inventario con codigo: {codigo_item}")
                         
-                    # MOVER ITEM A MÓDULO APARTADO
-                    try:
-                        print(f"DEBUG TERMINAR: Moviendo item a módulo APARTADO")
-                        # Crear entrada en apartados con toda la información del item
-                        apartado_item = {
-                            "pedido_id": pedido_obj_id,
-                            "item_id": ObjectId(item_id),
-                            "codigo": item_pedido.get("codigo", ""),
-                            "nombre": item_pedido.get("nombre", ""),
-                            "descripcion": item_pedido.get("descripcion", ""),
-                            "detalle": item_pedido.get("detalle", ""),
-                            "cantidad": item_pedido.get("cantidad", 1),
-                            "precio": item_pedido.get("precio", 0),
-                            "costo_produccion": item_pedido.get("costoProduccion", 0),
-                            "cliente_nombre": pedido.get("cliente_nombre", ""),
-                            "numero_orden": pedido.get("numero_orden", ""),
-                            "fecha_terminado_manillar": datetime.now().isoformat(),
-                            "estado_item": nuevo_estado_item,
-                            "empleado_ultimo_trabajo": empleado.get("nombreCompleto", empleado_id) if empleado else empleado_id,
-                            "imagenes": item_pedido.get("imagenes", [])
-                        }
-                        
-                        # Insertar en apartados
-                        apartados_collection.insert_one(apartado_item)
-                        print(f"DEBUG TERMINAR: Item movido a apartados exitosamente")
-                        
-                    except Exception as e:
-                        print(f"ERROR TERMINAR: Error moviendo item a apartados: {str(e)}")
-                        import traceback
-                        print(f"ERROR TERMINAR: Traceback apartados: {traceback.format_exc()}")
-                        
             except Exception as e:
                 print(f"ERROR TERMINAR: Error actualizando inventario: {str(e)}")
                 import traceback
@@ -5107,20 +5075,30 @@ async def inicializar_estado_items():
 @router.get("/apartados/")
 async def get_apartados():
     """
-    Obtener todos los items en el módulo APARTADO
+    Obtener todos los items en apartados (items con apartado: True)
     """
     try:
-        apartados = list(apartados_collection.find({}))
+        # Buscar items con apartado: True en la colección de inventario
+        items = list(items_collection.find({"apartado": True}))
         
-        # Convertir ObjectId a string
-        for apartado in apartados:
-            apartado["_id"] = str(apartado["_id"])
-            apartado["pedido_id"] = str(apartado["pedido_id"])
-            apartado["item_id"] = str(apartado["item_id"])
+        resultados = []
+        for item in items:
+            resultado = {
+                "_id": str(item["_id"]),
+                "codigo": item.get("codigo", ""),
+                "nombre": item.get("nombre", ""),
+                "descripcion": item.get("descripcion", ""),
+                "cantidad": item.get("cantidad", 0),
+                "fecha_terminado": item.get("fecha_terminado_manillar", ""),
+                "cliente": item.get("cliente_nombre", "Sin cliente"),
+                "precio": item.get("precio", 0),
+                "costo_produccion": item.get("costo_produccion", 0)
+            }
+            resultados.append(resultado)
         
         return {
-            "apartados": apartados,
-            "total": len(apartados),
+            "apartados": resultados,
+            "total": len(resultados),
             "success": True
         }
         
@@ -5131,12 +5109,15 @@ async def get_apartados():
 @router.delete("/apartados/{apartado_id}")
 async def eliminar_apartado(apartado_id: str):
     """
-    Eliminar un item de apartados
+    Eliminar un item de apartados (cambiar apartado: True a False)
     """
     try:
-        result = apartados_collection.delete_one({"_id": ObjectId(apartado_id)})
+        result = items_collection.update_one(
+            {"_id": ObjectId(apartado_id), "apartado": True},
+            {"$set": {"apartado": False}}
+        )
         
-        if result.deleted_count == 0:
+        if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Apartado no encontrado")
         
         return {
@@ -5151,12 +5132,13 @@ async def eliminar_apartado(apartado_id: str):
 @router.put("/apartados/{apartado_id}/marcar-facturado")
 async def marcar_apartado_facturado(apartado_id: str):
     """
-    Marcar un apartado como facturado
+    Marcar un apartado como facturado y remover del flag apartado
     """
     try:
-        result = apartados_collection.update_one(
-            {"_id": ObjectId(apartado_id)},
+        result = items_collection.update_one(
+            {"_id": ObjectId(apartado_id), "apartado": True},
             {"$set": {
+                "apartado": False,
                 "facturado": True,
                 "fecha_facturado": datetime.now().isoformat()
             }}
