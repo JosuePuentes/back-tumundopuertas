@@ -2561,38 +2561,28 @@ async def terminar_asignacion_articulo(
                     item_inventario = items_collection.find_one({"codigo": codigo_item})
                     
                     if item_inventario:
-                        # Si es TU MUNDO PUERTAS, sumar al inventario normal
-                        # Usar comparación flexible para manejar "TU MUNDO PUERTA" vs "TU MUNDO PUERTAS"
-                        if "J-507172554" in cliente_nombre and "TU MUNDO" in cliente_nombre:
-                            print(f"DEBUG TERMINAR: Cliente es TU MUNDO PUERTAS - sumando al inventario normal")
+                        # TODOS los items terminados en MANILLAR van a APARTADOS
+                        print(f"DEBUG TERMINAR: Sumando a apartados para cliente: {cliente_nombre}")
+                        item_apartado = items_collection.find_one({"codigo": codigo_item, "apartado": True})
+                        
+                        if item_apartado:
+                            # Si existe apartado, sumar la cantidad
+                            print(f"DEBUG TERMINAR: Item apartado existe - sumando cantidad")
                             result_actualizacion = items_collection.update_one(
-                                {"codigo": codigo_item},
+                                {"codigo": codigo_item, "apartado": True},
                                 {"$inc": {"cantidad": cantidad}}
                             )
-                            print(f"DEBUG TERMINAR: Inventario normal actualizado: {result_actualizacion.modified_count} documentos modificados")
+                            print(f"DEBUG TERMINAR: Apartado actualizado: {result_actualizacion.modified_count} documentos modificados")
                         else:
-                            # Para otros clientes, sumar a apartados
-                            print(f"DEBUG TERMINAR: Cliente NO es TU MUNDO PUERTAS - sumando a apartados")
-                            item_apartado = items_collection.find_one({"codigo": codigo_item, "apartado": True})
-                            
-                            if item_apartado:
-                                # Si existe apartado, sumar la cantidad
-                                print(f"DEBUG TERMINAR: Item apartado existe - sumando cantidad")
-                                result_actualizacion = items_collection.update_one(
-                                    {"codigo": codigo_item, "apartado": True},
-                                    {"$inc": {"cantidad": cantidad}}
-                                )
-                                print(f"DEBUG TERMINAR: Apartado actualizado: {result_actualizacion.modified_count} documentos modificados")
-                            else:
-                                # Si no existe apartado, crear uno nuevo con cantidad
-                                print(f"DEBUG TERMINAR: Item apartado NO existe - creando nuevo apartado")
-                                item_apartado_data = item_inventario.copy()
-                                item_apartado_data["apartado"] = True
-                                item_apartado_data["cantidad"] = cantidad
-                                if "_id" in item_apartado_data:
-                                    del item_apartado_data["_id"]
-                                items_collection.insert_one(item_apartado_data)
-                                print(f"DEBUG TERMINAR: Nuevo apartado insertado")
+                            # Si no existe apartado, crear uno nuevo con cantidad
+                            print(f"DEBUG TERMINAR: Item apartado NO existe - creando nuevo apartado")
+                            item_apartado_data = item_inventario.copy()
+                            item_apartado_data["apartado"] = True
+                            item_apartado_data["cantidad"] = cantidad
+                            if "_id" in item_apartado_data:
+                                del item_apartado_data["_id"]
+                            items_collection.insert_one(item_apartado_data)
+                            print(f"DEBUG TERMINAR: Nuevo apartado insertado")
                     else:
                         print(f"DEBUG TERMINAR: Item no encontrado en inventario con codigo: {codigo_item}")
             except Exception as e:
