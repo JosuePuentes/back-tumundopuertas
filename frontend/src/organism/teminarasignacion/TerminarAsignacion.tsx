@@ -135,15 +135,30 @@ const TerminarAsignacion: React.FC = () => {
                     <div className="pt-4">
                       <button
                         onClick={async () => {
-                          await terminarEmpleado({
+                          console.log("DEBUG: Enviando datos al backend:");
+                          console.log("- orden:", asig.orden);
+                          console.log("- pedido_id:", asig.pedido_id);
+                          console.log("- item_id:", asig.item_id);
+                          console.log("- empleado_id:", identificador);
+                          
+                          const payload = {
                             orden: asig.orden,
                             pedido_id: asig.pedido_id,
                             item_id: asig.item_id,
                             empleado_id: identificador,
                             estado: "terminado",
                             fecha_fin: new Date().toISOString(),
-                          });
-                          window.location.reload();
+                          };
+                          
+                          console.log("DEBUG: Payload completo:", JSON.stringify(payload, null, 2));
+                          
+                          try {
+                            await terminarEmpleado(payload);
+                            window.location.reload();
+                          } catch (error) {
+                            console.error("ERROR al terminar:", error);
+                            alert(`Error: ${error}`);
+                          }
                         }}
                         className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition"
                       >
