@@ -17,6 +17,7 @@ metodos_pago_collection = db["metodos_pago"]
 empleados_collection = db["empleados"]
 items_collection = db["inventario"]  # La colección de items se llama "inventario"
 comisiones_collection = db["comisiones"]
+apartados_collection = db["apartados"]  # Nueva colección para módulo APARTADO
 
 def obtener_siguiente_modulo(orden_actual: int) -> str:
     """Determinar el siguiente módulo según el orden actual"""
@@ -2585,6 +2586,38 @@ async def terminar_asignacion_articulo(
                             print(f"DEBUG TERMINAR: Nuevo apartado insertado")
                     else:
                         print(f"DEBUG TERMINAR: Item no encontrado en inventario con codigo: {codigo_item}")
+                        
+                    # MOVER ITEM A MÓDULO APARTADO
+                    try:
+                        print(f"DEBUG TERMINAR: Moviendo item a módulo APARTADO")
+                        # Crear entrada en apartados con toda la información del item
+                        apartado_item = {
+                            "pedido_id": pedido_obj_id,
+                            "item_id": ObjectId(item_id),
+                            "codigo": item_pedido.get("codigo", ""),
+                            "nombre": item_pedido.get("nombre", ""),
+                            "descripcion": item_pedido.get("descripcion", ""),
+                            "detalle": item_pedido.get("detalle", ""),
+                            "cantidad": item_pedido.get("cantidad", 1),
+                            "precio": item_pedido.get("precio", 0),
+                            "costo_produccion": item_pedido.get("costoProduccion", 0),
+                            "cliente_nombre": pedido.get("cliente_nombre", ""),
+                            "numero_orden": pedido.get("numero_orden", ""),
+                            "fecha_terminado_manillar": datetime.now().isoformat(),
+                            "estado_item": nuevo_estado_item,
+                            "empleado_ultimo_trabajo": empleado.get("nombreCompleto", empleado_id) if empleado else empleado_id,
+                            "imagenes": item_pedido.get("imagenes", [])
+                        }
+                        
+                        # Insertar en apartados
+                        apartados_collection.insert_one(apartado_item)
+                        print(f"DEBUG TERMINAR: Item movido a apartados exitosamente")
+                        
+                    except Exception as e:
+                        print(f"ERROR TERMINAR: Error moviendo item a apartados: {str(e)}")
+                        import traceback
+                        print(f"ERROR TERMINAR: Traceback apartados: {traceback.format_exc()}")
+                        
             except Exception as e:
                 print(f"ERROR TERMINAR: Error actualizando inventario: {str(e)}")
                 import traceback
@@ -5066,3 +5099,77 @@ async def inicializar_estado_items():
     except Exception as e:
         print(f"Error inicializando estado_items: {e}")
         return {"error": str(e)}
+
+# ========================================
+# ENDPOINTS PARA MÓDULO APARTADO
+# ========================================
+
+@router.get("/apartados/")
+async def get_apartados():
+    """
+    Obtener todos los items en el módulo APARTADO
+    """
+    try:
+        apartados = list(apartados_collection.find({}))
+        
+        # Convertir ObjectId a string
+        for apartado in apartados:
+            apartado["_id"] = str(apartado["_id"])
+            apartado["pedido_id"] = str(apartado["pedido_id"])
+            apartado["item_id"] = str(apartado["item_id"])
+        
+        return {
+            "apartados": apartados,
+            "total": len(apartados),
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR APARTADOS: Error al obtener apartados: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener apartados: {str(e)}")
+
+@router.delete("/apartados/{apartado_id}")
+async def eliminar_apartado(apartado_id: str):
+    """
+    Eliminar un item de apartados
+    """
+    try:
+        result = apartados_collection.delete_one({"_id": ObjectId(apartado_id)})
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Apartado no encontrado")
+        
+        return {
+            "message": "Apartado eliminado correctamente",
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR APARTADOS: Error al eliminar apartado: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al eliminar apartado: {str(e)}")
+
+@router.put("/apartados/{apartado_id}/marcar-facturado")
+async def marcar_apartado_facturado(apartado_id: str):
+    """
+    Marcar un apartado como facturado
+    """
+    try:
+        result = apartados_collection.update_one(
+            {"_id": ObjectId(apartado_id)},
+            {"$set": {
+                "facturado": True,
+                "fecha_facturado": datetime.now().isoformat()
+            }}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Apartado no encontrado")
+        
+        return {
+            "message": "Apartado marcado como facturado",
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR APARTADOS: Error al marcar como facturado: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al marcar como facturado: {str(e)}")
