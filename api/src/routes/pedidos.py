@@ -2376,6 +2376,24 @@ async def terminar_asignacion_articulo(
             asignaciones = sub.get("asignaciones_articulos") or []
             print(f"DEBUG TERMINAR: Asignaciones encontradas: {len(asignaciones)}")
             
+            # Si no hay asignaciones, crear una nueva
+            if len(asignaciones) == 0:
+                print(f"DEBUG TERMINAR: No hay asignaciones existentes, creando nueva asignación")
+                nueva_asignacion = {
+                    "itemId": item_id,
+                    "empleadoId": empleado_id,
+                    "nombreempleado": empleado.get("nombreCompleto", f"Empleado {empleado_id}") if empleado else f"Empleado {empleado_id}",
+                    "estado": estado,
+                    "estado_subestado": "terminado",
+                    "fecha_inicio": datetime.now().isoformat(),
+                    "fecha_fin": fecha_fin
+                }
+                asignaciones.append(nueva_asignacion)
+                asignacion_encontrada = nueva_asignacion
+                actualizado = True
+                print(f"DEBUG TERMINAR: Nueva asignación creada y terminada")
+                break
+            
             for asignacion in asignaciones:
                 print(f"DEBUG TERMINAR: Revisando asignación: itemId={asignacion.get('itemId')}, empleadoId={asignacion.get('empleadoId')}")
                 if asignacion.get("itemId") == item_id and asignacion.get("empleadoId") == empleado_id:
@@ -2395,6 +2413,11 @@ async def terminar_asignacion_articulo(
                     print(f"  - estado_subestado: {asignacion.get('estado_subestado')}")
                     print(f"  - fecha_fin: {asignacion.get('fecha_fin')}")
                     break
+            
+            # Si llegamos aquí sin actualizar y hay asignaciones, el item no tiene asignación específica
+            if not actualizado and len(asignaciones) > 0:
+                print(f"DEBUG TERMINAR: Asignación no encontrada en la lista de asignaciones")
+            
             break
     
     if not actualizado:
