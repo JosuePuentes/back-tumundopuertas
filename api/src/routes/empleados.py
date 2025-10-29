@@ -202,7 +202,8 @@ async def agregar_vale(empleado_id: str, vale_data: dict = Body(...)):
     {
         "monto": float,
         "descripcion": str (opcional),
-        "fecha": str (opcional, formato ISO)
+        "fecha": str (opcional, formato ISO),
+        "metodo_pago_id": str (opcional pero recomendado)
     }
     """
     try:
@@ -226,7 +227,8 @@ async def agregar_vale(empleado_id: str, vale_data: dict = Body(...)):
         "pendiente": float(monto),
         "descripcion": vale_data.get("descripcion", ""),
         "fecha": vale_data.get("fecha", datetime.now().isoformat()),
-        "fecha_creacion": datetime.now().isoformat()
+        "fecha_creacion": datetime.now().isoformat(),
+        "metodo_pago_id": vale_data.get("metodo_pago_id")  # Guardar método de pago usado
     }
     
     # Inicializar array de vales si no existe
