@@ -2,11 +2,16 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, status, Query
 from ..config.mongodb import items_collection
 from ..models.authmodels import Item, InventarioExcelItem
 from bson import ObjectId
+from pydantic import BaseModel
+from typing import List, Literal # Keep this import as it's used in the /bulk endpoint
 import openpyxl
 import io
-from typing import List # Keep this import as it's used in the /bulk endpoint
 
 router = APIRouter()
+
+class ActualizarExistenciaRequest(BaseModel):
+    cantidad: float
+    tipo: Literal['cargar', 'descargar']
 
 @router.get("/all")
 async def get_all_items():
@@ -262,3 +267,66 @@ async def bulk_upsert_items(items: List[Item]):
         "updated_count": updated_count,
         "errors": errors
     }
+
+@router.post("/{item_id}/existencia")
+async def actualizar_existencia(item_id: str, request: ActualizarExistenciaRequest):
+    """
+    Cargar o descargar existencia de un item
+    Body esperado:
+    {
+        "cantidad": 10.0,
+        "tipo": "cargar" o "descargar"
+    }
+    """
+    try:
+        # Validar ObjectId
+        try:
+            item_obj_id = ObjectId(item_id)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"item_id no es un ObjectId válido: {str(e)}")
+        
+        # Buscar el item
+        item = items_collection.find_one({"_id": item_obj_id})
+        if not item:
+            raise HTTPException(status_code=404, detail="Item no encontrado")
+        
+        cantidad_actual = item.get("cantidad", 0.0)
+        
+        # Calcular nueva cantidad
+        if request.tipo == "cargar":
+            nueva_cantidad = cantidad_actual + request.cantidad
+        elif request.tipo == "descargar":
+            nueva_cantidad = cantidad_actual - request.cantidad
+            # Validar que no sea negativa
+            if nueva_cantidad < 0:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"No se puede descargar más de lo disponible. Existencia actual: {cantidad_actual}"
+                )
+        else:
+            raise HTTPException(status_code=400, detail="Tipo debe ser 'cargar' o 'descargar'")
+        
+        # Actualizar la cantidad
+        result = items_collection.update_one(
+            {"_id": item_obj_id},
+            {"$set": {"cantidad": nueva_cantidad}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Item no encontrado")
+        
+        # Obtener el item actualizado
+        item_actualizado = items_collection.find_one({"_id": item_obj_id})
+        
+        return {
+            "message": f"Existencia {request.tipo}da exitosamente",
+            "cantidad": item_actualizado.get("cantidad", nueva_cantidad),
+            "cantidad_anterior": cantidad_actual,
+            "cantidad_operacion": request.cantidad,
+            "tipo": request.tipo
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
