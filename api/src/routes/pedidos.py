@@ -163,42 +163,51 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
     # Restar cantidades del inventario SOLO para items con estado_item = 4 (disponibles)
     # Los items con estado_item = 0 (faltantes) NO se restan del inventario, van a producción
     print(f"DEBUG CREAR PEDIDO: Procesando {len(pedido.items)} items para restar inventario")
-    for item in pedido.items:
+    for idx, item in enumerate(pedido.items):
+        # Obtener valores de manera segura (puede ser objeto Pydantic o dict después de .dict())
+        estado_item = getattr(item, 'estado_item', None) if hasattr(item, 'estado_item') else (item.get('estado_item') if isinstance(item, dict) else None)
+        codigo = getattr(item, 'codigo', None) if hasattr(item, 'codigo') else (item.get('codigo') if isinstance(item, dict) else None)
+        cantidad = getattr(item, 'cantidad', None) if hasattr(item, 'cantidad') else (item.get('cantidad') if isinstance(item, dict) else None)
+        item_id = getattr(item, 'id', None) if hasattr(item, 'id') else (item.get('id') if isinstance(item, dict) else None)
+        
+        print(f"DEBUG CREAR PEDIDO [Item {idx}]: código='{codigo}', estado_item={estado_item}, cantidad={cantidad}, id='{item_id}'")
+        
         # Solo restar del inventario si estado_item = 4 (disponible) y tiene cantidad
-        if (hasattr(item, 'estado_item') and item.estado_item == 4 and 
-            item.cantidad and item.cantidad > 0):
+        if estado_item == 4 and cantidad and cantidad > 0:
+            print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item calificado para restar inventario (estado_item=4, cantidad={cantidad})")
             
             try:
                 # Buscar el item en el inventario por código o ID
                 item_inventario = None
                 
                 # Intentar buscar por código primero
-                if hasattr(item, 'codigo') and item.codigo:
-                    item_inventario = items_collection.find_one({"codigo": item.codigo})
-                    print(f"DEBUG CREAR PEDIDO: Buscando item por código: {item.codigo}")
+                if codigo:
+                    item_inventario = items_collection.find_one({"codigo": codigo})
+                    if item_inventario:
+                        print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item encontrado en inventario por código: {codigo}")
+                    else:
+                        print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item NO encontrado por código: {codigo}")
                 
                 # Si no se encontró por código, intentar por ID
-                if not item_inventario:
-                    item_id = None
-                    if hasattr(item, 'id') and item.id:
-                        item_id = item.id
-                    elif hasattr(item, '_id') and item._id:
-                        item_id = item._id
-                    
-                    if item_id:
-                        try:
-                            item_obj_id = ObjectId(item_id)
-                            item_inventario = items_collection.find_one({"_id": item_obj_id})
-                            print(f"DEBUG CREAR PEDIDO: Buscando item por ID: {item_id}")
-                        except:
-                            pass
+                if not item_inventario and item_id:
+                    try:
+                        item_obj_id = ObjectId(item_id)
+                        item_inventario = items_collection.find_one({"_id": item_obj_id})
+                        if item_inventario:
+                            print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item encontrado en inventario por ID: {item_id}")
+                        else:
+                            print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item NO encontrado por ID: {item_id}")
+                    except Exception as e_id:
+                        print(f"DEBUG CREAR PEDIDO [Item {idx}]: Error al convertir ID a ObjectId: {item_id}, error: {e_id}")
                 
                 if item_inventario:
                     cantidad_actual = item_inventario.get("cantidad", 0.0)
-                    cantidad_a_restar = float(item.cantidad)
+                    cantidad_a_restar = float(cantidad)
+                    
+                    print(f"DEBUG CREAR PEDIDO [Item {idx}]: Cantidad actual en inventario: {cantidad_actual}, cantidad a restar: {cantidad_a_restar}")
                     
                     if cantidad_a_restar > cantidad_actual:
-                        print(f"WARNING CREAR PEDIDO: No hay suficiente existencia para {item_inventario.get('codigo', 'N/A')}. Existencia: {cantidad_actual}, Requerida: {cantidad_a_restar}")
+                        print(f"WARNING CREAR PEDIDO [Item {idx}]: No hay suficiente existencia para {item_inventario.get('codigo', 'N/A')}. Existencia: {cantidad_actual}, Requerida: {cantidad_a_restar}")
                         # No lanzar error, solo registrar warning ya que el frontend ya validó
                     
                     # Restar la cantidad del inventario
@@ -207,16 +216,20 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                         {"_id": item_inventario["_id"]},
                         {"$set": {"cantidad": nueva_cantidad}}
                     )
-                    print(f"DEBUG CREAR PEDIDO: Item {item_inventario.get('codigo', 'N/A')} actualizado. Cantidad anterior: {cantidad_actual}, Cantidad nueva: {nueva_cantidad}, Actualizado: {result_update.modified_count}")
+                    
+                    if result_update.modified_count > 0:
+                        print(f"SUCCESS CREAR PEDIDO [Item {idx}]: Item {item_inventario.get('codigo', 'N/A')} actualizado. Cantidad anterior: {cantidad_actual}, Cantidad nueva: {nueva_cantidad}")
+                    else:
+                        print(f"WARNING CREAR PEDIDO [Item {idx}]: No se pudo actualizar el item (modified_count=0). Item: {item_inventario.get('codigo', 'N/A')}")
                 else:
-                    print(f"WARNING CREAR PEDIDO: Item con código '{getattr(item, 'codigo', 'N/A')}' o ID '{getattr(item, 'id', 'N/A')}' no encontrado en inventario")
+                    print(f"ERROR CREAR PEDIDO [Item {idx}]: Item con código '{codigo}' o ID '{item_id}' NO encontrado en inventario. Verificar que el item exista en la colección 'inventario'")
             except Exception as e:
-                print(f"ERROR CREAR PEDIDO: Error al actualizar inventario para item {getattr(item, 'codigo', 'N/A')}: {e}")
+                print(f"ERROR CREAR PEDIDO [Item {idx}]: Error al actualizar inventario para item código='{codigo}': {e}")
                 import traceback
-                print(f"DEBUG CREAR PEDIDO: Traceback: {traceback.format_exc()}")
+                print(f"DEBUG CREAR PEDIDO [Item {idx}]: Traceback: {traceback.format_exc()}")
         else:
-            # Item con estado_item = 0, no se resta del inventario (va a producción)
-            print(f"DEBUG CREAR PEDIDO: Item {getattr(item, 'codigo', 'N/A')} con estado_item={getattr(item, 'estado_item', 0)} NO se resta del inventario (irá a producción)")
+            # Item con estado_item != 4, no se resta del inventario (va a producción)
+            print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item código='{codigo}' con estado_item={estado_item} NO se resta del inventario (irá a producción)")
     
     # Si hay abonos iniciales en el historial_pagos, incrementar el saldo de los métodos de pago
     if pedido.historial_pagos:
