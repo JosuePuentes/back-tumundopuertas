@@ -15,7 +15,8 @@ class CancelarPedidoRequest(BaseModel):
 
 metodos_pago_collection = db["metodos_pago"]
 empleados_collection = db["empleados"]
-items_collection = db["inventario"]  # La colección de items se llama "inventario"
+# items_collection ya está importado de mongodb.py como db["INVENTARIO"]
+# NO redefinir aquí con minúsculas, usar la importación correcta
 comisiones_collection = db["comisiones"]
 apartados_collection = db["apartados"]  # Colección para módulo APARTADO
 
@@ -216,6 +217,28 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                                 if items_similares:
                                     codigos_similares = [item.get('codigo', 'N/A') for item in items_similares]
                                     print(f"DEBUG CREAR PEDIDO [Item {idx}]: Items similares encontrados (primeros 5): {codigos_similares}")
+                                
+                                # Log adicional: verificar si existe algún item en inventario
+                                total_items_inventario = items_collection.count_documents({})
+                                print(f"DEBUG CREAR PEDIDO [Item {idx}]: Total de items en inventario: {total_items_inventario}")
+                                
+                                # Log: intentar buscar el item del pedido en inventario por el ID completo
+                                if item_id:
+                                    # Buscar todos los items y verificar si alguno tiene el mismo ID
+                                    todos_items = list(items_collection.find({}).limit(100))
+                                    ids_encontrados = [str(item.get('_id', '')) for item in todos_items]
+                                    print(f"DEBUG CREAR PEDIDO [Item {idx}]: IDs de inventario (primeros 100): {ids_encontrados[:10]}... (mostrando 10 de {len(ids_encontrados)})")
+                                    
+                                    # Verificar si el ID del pedido está en la lista
+                                    if item_id in ids_encontrados:
+                                        print(f"DEBUG CREAR PEDIDO [Item {idx}]: ¡ID ENCONTRADO en inventario! Buscando directamente...")
+                                        try:
+                                            item_obj_id = ObjectId(item_id)
+                                            item_inventario = items_collection.find_one({"_id": item_obj_id})
+                                            if item_inventario:
+                                                print(f"DEBUG CREAR PEDIDO [Item {idx}]: ¡Item encontrado por ID directo después de verificación! Código: '{item_inventario.get('codigo', 'N/A')}'")
+                                        except:
+                                            pass
                 
                 # Si no se encontró por código, intentar por ID
                 if not item_inventario and item_id:
