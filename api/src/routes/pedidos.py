@@ -2667,6 +2667,36 @@ async def terminar_asignacion_articulo(
                 import traceback
                 print(f"ERROR TERMINAR: Traceback inventario: {traceback.format_exc()}")
         
+        # VERIFICAR SI EL PEDIDO PUEDE AVANZAR A FACTURACIÓN
+        # Si se terminó un item en orden3 y todos los items tienen estado_item >= 4
+        if orden_int == 3:
+            try:
+                print(f"DEBUG TERMINAR: Verificando si el pedido {pedido_id} puede avanzar a Facturación...")
+                
+                # Verificar estado actualizado del pedido
+                pedido_actualizado = pedidos_collection.find_one({"_id": pedido_obj_id})
+                
+                if pedido_actualizado:
+                    items_actualizado = pedido_actualizado.get("items", [])
+                    todos_completos = all(item.get("estado_item", 0) >= 4 for item in items_actualizado)
+                    
+                    print(f"DEBUG TERMINAR: Todos los items completos: {todos_completos}")
+                    print(f"DEBUG TERMINAR: Estados items: {[item.get('estado_item', 'N/A') for item in items_actualizado]}")
+                    
+                    if todos_completos:
+                        estado_general = pedido_actualizado.get("estado_general", "")
+                        if estado_general == "orden3":
+                            # Mover pedido a orden4 (Facturación)
+                            result_orden = pedidos_collection.update_one(
+                                {"_id": pedido_obj_id},
+                                {"$set": {"estado_general": "orden4"}}
+                            )
+                            print(f"DEBUG TERMINAR: Pedido movido a orden4 - {result_orden.modified_count} documentos modificados")
+                        
+            except Exception as e:
+                print(f"ERROR TERMINAR: Error verificando pedido completo: {e}")
+                # No lanzar error, solo loggear
+        
         # Retornar respuesta exitosa CON el inventario actualizado
         return {
             "success": True,
@@ -5218,3 +5248,55 @@ async def marcar_apartado_facturado(apartado_id: str):
     except Exception as e:
         print(f"ERROR APARTADOS: Error al marcar como facturado: {e}")
         raise HTTPException(status_code=500, detail=f"Error al marcar como facturado: {str(e)}")
+
+@router.post("/verificar-pedido-completo/{pedido_id}")
+async def verificar_pedido_completo(pedido_id: str):
+    """
+    Verificar si un pedido puede avanzar de orden3 (Preparar) a orden4 (Facturación)
+    Esto se debe llamar cuando se termina el último item en orden3
+    """
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        print(f"DEBUG VERIFICAR PEDIDO: Verificando pedido {pedido_id}")
+        
+        # Verificar si todos los items tienen estado_item >= 4
+        items = pedido.get("items", [])
+        todos_completos = all(item.get("estado_item", 0) >= 4 for item in items)
+        
+        estado_general = pedido.get("estado_general", "")
+        print(f"DEBUG VERIFICAR PEDIDO: todos_completos={todos_completos}, estado_general={estado_general}")
+        print(f"DEBUG VERIFICAR PEDIDO: Items: {[(item.get('id', 'N/A'), item.get('estado_item', 'N/A')) for item in items]}")
+        
+        # Si todos los items están completos y el pedido está en orden3
+        if todos_completos and estado_general == "orden3":
+            # Actualizar estado_general a orden4
+            result = pedidos_collection.update_one(
+                {"_id": pedido_obj_id},
+                {"$set": {"estado_general": "orden4"}}
+            )
+            
+            print(f"DEBUG VERIFICAR PEDIDO: Pedido movido a orden4 - {result.modified_count} documentos modificados")
+            
+            return {
+                "message": "Pedido completado y movido a Facturación",
+                "estado_anterior": "orden3",
+                "estado_nuevo": "orden4",
+                "completado": True
+            }
+        
+        return {
+            "message": "Pedido aún en proceso",
+            "completado": todos_completos,
+            "estado_general": estado_general
+        }
+        
+    except Exception as e:
+        print(f"ERROR VERIFICAR PEDIDO: Error verificando pedido: {e}")
+        import traceback
+        print(f"ERROR VERIFICAR PEDIDO: Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error verificando pedido: {str(e)}")
