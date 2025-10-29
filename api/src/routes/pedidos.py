@@ -2380,26 +2380,46 @@ async def terminar_asignacion_articulo(
             asignaciones = sub.get("asignaciones_articulos") or []
             print(f"DEBUG TERMINAR: Asignaciones encontradas: {len(asignaciones)}")
             
-            # Buscar la asignación existente
+            # Buscar la asignación existente - primero por empleado específico, luego por cualquier empleado
             for asignacion in asignaciones:
                 print(f"DEBUG TERMINAR: Revisando asignación: itemId={asignacion.get('itemId')}, empleadoId={asignacion.get('empleadoId')}")
-                if asignacion.get("itemId") == item_id and asignacion.get("empleadoId") == empleado_id:
-                    print(f"DEBUG TERMINAR: Asignación encontrada, estado actual: {asignacion.get('estado')}")
-                    
-                    # Actualizar todos los campos necesarios
-                    asignacion["estado"] = "terminado"  # Cambiar estado a terminado para que desaparezca del dashboard
-                    asignacion["estado_subestado"] = "terminado"  # Cambiar estado_subestado
-                    asignacion["fecha_fin"] = fecha_fin
-                    
-                    # Guardar copia para respuesta
-                    asignacion_encontrada = asignacion.copy()
-                    actualizado = True
-                    
-                    print(f"DEBUG TERMINAR: Asignación actualizada:")
-                    print(f"  - estado: {asignacion.get('estado')}")
-                    print(f"  - estado_subestado: {asignacion.get('estado_subestado')}")
-                    print(f"  - fecha_fin: {asignacion.get('fecha_fin')}")
-                    break
+                if asignacion.get("itemId") == item_id:
+                    # Primero intentar coincidencia exacta de empleado
+                    if asignacion.get("empleadoId") == empleado_id:
+                        print(f"DEBUG TERMINAR: Asignación encontrada con empleado exacto, estado actual: {asignacion.get('estado')}")
+                        
+                        # Actualizar todos los campos necesarios
+                        asignacion["estado"] = "terminado"  # Cambiar estado a terminado para que desaparezca del dashboard
+                        asignacion["estado_subestado"] = "terminado"  # Cambiar estado_subestado
+                        asignacion["fecha_fin"] = fecha_fin
+                        
+                        # Guardar copia para respuesta
+                        asignacion_encontrada = asignacion.copy()
+                        actualizado = True
+                        
+                        print(f"DEBUG TERMINAR: Asignación actualizada:")
+                        print(f"  - estado: {asignacion.get('estado')}")
+                        print(f"  - estado_subestado: {asignacion.get('estado_subestado')}")
+                        print(f"  - fecha_fin: {asignacion.get('fecha_fin')}")
+                        break
+                    elif not actualizado:
+                        # Si no encontró con empleado exacto, usar esta asignación (cualquier empleado)
+                        print(f"DEBUG TERMINAR: Asignación encontrada sin empleado exacto, usando esta asignación")
+                        
+                        # Actualizar todos los campos necesarios
+                        asignacion["estado"] = "terminado"  # Cambiar estado a terminado para que desaparezca del dashboard
+                        asignacion["estado_subestado"] = "terminado"  # Cambiar estado_subestado
+                        asignacion["fecha_fin"] = fecha_fin
+                        
+                        # Guardar copia para respuesta
+                        asignacion_encontrada = asignacion.copy()
+                        actualizado = True
+                        
+                        print(f"DEBUG TERMINAR: Asignación actualizada:")
+                        print(f"  - estado: {asignacion.get('estado')}")
+                        print(f"  - estado_subestado: {asignacion.get('estado_subestado')}")
+                        print(f"  - fecha_fin: {asignacion.get('fecha_fin')}")
+                        # No hacer break aquí para permitir buscar otra mejor coincidencia
             
             # Si llegamos aquí sin actualizar y hay asignaciones, el item no tiene asignación específica
             if not actualizado and len(asignaciones) > 0:
