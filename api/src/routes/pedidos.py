@@ -483,14 +483,27 @@ async def asignar_item(
         # CREAR ASIGNACIÓN EN SEGUIMIENTO PARA DASHBOARD
         print(f"DEBUG ASIGNAR ITEM: Creando asignación en seguimiento...")
         
-        # Mapeo de módulos a órdenes
-        modulo_orden_map = {
-            "herreria": 1,
-            "masillar": 2, 
-            "preparar": 3
-        }
+        # Obtener el estado_item actual del item para determinar el orden correcto
+        estado_item_actual = item.get("estado_item", 0) if item else 0
         
-        orden = modulo_orden_map.get(modulo, 1)
+        # Determinar el orden según el estado_item del item
+        # El orden debe basarse en el estado_item actual del item, NO en el módulo del frontend
+        if estado_item_actual == 0 or estado_item_actual == 1:
+            orden = 1  # Pendiente o Herrería -> orden 1
+        elif estado_item_actual == 2:
+            orden = 2  # Masillar
+        elif estado_item_actual == 3:
+            orden = 3  # Preparar
+        else:
+            # Fallback al módulo
+            modulo_orden_map = {
+                "herreria": 1,
+                "masillar": 2, 
+                "preparar": 3
+            }
+            orden = modulo_orden_map.get(modulo, 1)
+        
+        print(f"DEBUG ASIGNAR ITEM: estado_item={estado_item_actual}, orden={orden}, modulo={modulo}")
         
         # Crear la asignación
         nueva_asignacion = {
@@ -500,7 +513,9 @@ async def asignar_item(
             "estado": "en_proceso",
             "fecha_inicio": datetime.now().isoformat(),
             "fecha_fin": None,
-            "modulo": modulo
+            "modulo": modulo,
+            "descripcionitem": item.get("nombre", item.get("descripcion", "")) if item else "",
+            "costoproduccion": item.get("costoProduccion", 0) if item else 0
         }
         
         # Buscar o crear el proceso en seguimiento
@@ -517,10 +532,17 @@ async def asignar_item(
             print(f"DEBUG ASIGNAR ITEM: Actualizando proceso existente orden {orden}")
             asignaciones_articulos = proceso_existente.get("asignaciones_articulos") or []
             
-            # Verificar si ya existe asignación para este item
+            # IMPORTANTE: Eliminar asignaciones TERMINADAS del mismo item
+            # Esto evita que haya múltiples asignaciones (terminadas y en proceso) del mismo item
+            asignaciones_articulos = [
+                asignacion for asignacion in asignaciones_articulos 
+                if not (asignacion.get("itemId") == item_id and asignacion.get("estado") == "terminado")
+            ]
+            
+            # Verificar si ya existe asignación ACTIVA para este item
             asignacion_existente = None
             for i, asignacion in enumerate(asignaciones_articulos):
-                if asignacion.get("itemId") == item_id:
+                if asignacion.get("itemId") == item_id and asignacion.get("estado") == "en_proceso":
                     asignacion_existente = i
                     break
             
