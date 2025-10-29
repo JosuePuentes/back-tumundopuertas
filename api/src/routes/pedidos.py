@@ -2380,24 +2380,7 @@ async def terminar_asignacion_articulo(
             asignaciones = sub.get("asignaciones_articulos") or []
             print(f"DEBUG TERMINAR: Asignaciones encontradas: {len(asignaciones)}")
             
-            # Si no hay asignaciones, crear una nueva marcada como terminada
-            if len(asignaciones) == 0:
-                print(f"DEBUG TERMINAR: No hay asignaciones, creando asignación terminada")
-                nueva_asignacion = {
-                    "itemId": item_id,
-                    "empleadoId": empleado_id,
-                    "nombreempleado": empleado.get("nombreCompleto", f"Empleado {empleado_id}") if empleado else f"Empleado {empleado_id}",
-                    "estado": "terminado",  # Usar "terminado" para que desaparezca del dashboard
-                    "estado_subestado": "terminado",
-                    "fecha_inicio": datetime.now().isoformat(),
-                    "fecha_fin": fecha_fin
-                }
-                asignaciones.append(nueva_asignacion)
-                asignacion_encontrada = nueva_asignacion
-                actualizado = True
-                print(f"DEBUG TERMINAR: Asignación terminada creada en seguimiento")
-                break
-            
+            # Buscar la asignación existente
             for asignacion in asignaciones:
                 print(f"DEBUG TERMINAR: Revisando asignación: itemId={asignacion.get('itemId')}, empleadoId={asignacion.get('empleadoId')}")
                 if asignacion.get("itemId") == item_id and asignacion.get("empleadoId") == empleado_id:
