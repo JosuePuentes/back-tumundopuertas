@@ -995,6 +995,42 @@ async def get_pedidos_por_estado(estado_general: list[str] = Query(..., descript
         pedido["_id"] = str(pedido["_id"])
     return pedidos
 
+@router.post("/{pedido_id}/facturar")
+async def facturar_pedido(
+    pedido_id: str,
+    factura_data: dict = Body(...),
+):
+    """
+    Marcar un pedido como facturado y guardar el número de factura
+    """
+    try:
+        from ..config.mongodb import pedidos_collection
+        
+        pedido_obj_id = ObjectId(pedido_id)
+        
+        # Actualizar el pedido agregando información de facturación
+        result = pedidos_collection.update_one(
+            {"_id": pedido_obj_id},
+            {
+                "$set": {
+                    "facturado": True,
+                    "numero_factura": factura_data.get("numeroFactura"),
+                    "fecha_facturacion": datetime.now().isoformat(),
+                }
+            }
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        return {
+            "message": "Pedido facturado exitosamente",
+            "numero_factura": factura_data.get("numeroFactura")
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al facturar pedido: {str(e)}")
+
 @router.get("/comisiones/produccion/terminadas/")
 async def get_empleados_comisiones_produccion_terminadas(
     fecha_inicio: str = None,
