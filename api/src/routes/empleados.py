@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Body, Depends
 from bson import ObjectId
+from datetime import datetime
 from ..config.mongodb import empleados_collection
 from ..auth.auth import get_password_hash, get_current_admin_user
 from ..models.authmodels import Empleado, EmpleadoCreate, EmpleadoUpdate
@@ -157,4 +158,197 @@ async def verificar_disponibilidad_pin(pin: str):
     return {
         "disponible": True,
         "mensaje": "PIN disponible para uso"
+    }
+
+# ========== ENDPOINTS PARA VALES ==========
+
+@router.get("/{empleado_id}/vales")
+async def get_vales_empleado(empleado_id: str):
+    """
+    Obtener todos los vales de un empleado
+    """
+    try:
+        object_id = ObjectId(empleado_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID de empleado inválido")
+    
+    empleado = empleados_collection.find_one({"_id": object_id})
+    if not empleado:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado")
+    
+    # Retornar vales o array vacío si no existen
+    vales = empleado.get("vales", [])
+    
+    # Calcular total de vales pendientes
+    total_pendiente = sum(
+        vale.get("monto", 0) - vale.get("abonado", 0) 
+        for vale in vales 
+        if isinstance(vale, dict)
+    )
+    
+    return {
+        "empleado_id": empleado_id,
+        "nombre_empleado": empleado.get("nombreCompleto", ""),
+        "vales": vales,
+        "total_pendiente": total_pendiente,
+        "cantidad_vales": len(vales)
+    }
+
+@router.post("/{empleado_id}/vales")
+async def agregar_vale(empleado_id: str, vale_data: dict = Body(...)):
+    """
+    Agregar un nuevo vale a un empleado
+    Body esperado:
+    {
+        "monto": float,
+        "descripcion": str (opcional),
+        "fecha": str (opcional, formato ISO)
+    }
+    """
+    try:
+        object_id = ObjectId(empleado_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID de empleado inválido")
+    
+    empleado = empleados_collection.find_one({"_id": object_id})
+    if not empleado:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado")
+    
+    # Validar monto
+    monto = vale_data.get("monto")
+    if not monto or monto <= 0:
+        raise HTTPException(status_code=400, detail="El monto debe ser mayor a cero")
+    
+    # Crear nuevo vale
+    nuevo_vale = {
+        "monto": float(monto),
+        "abonado": 0,
+        "pendiente": float(monto),
+        "descripcion": vale_data.get("descripcion", ""),
+        "fecha": vale_data.get("fecha", datetime.now().isoformat()),
+        "fecha_creacion": datetime.now().isoformat()
+    }
+    
+    # Inicializar array de vales si no existe
+    vales = empleado.get("vales", [])
+    vales.append(nuevo_vale)
+    
+    # Actualizar empleado
+    result = empleados_collection.update_one(
+        {"_id": object_id},
+        {"$set": {"vales": vales}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado")
+    
+    return {
+        "message": "Vale agregado correctamente",
+        "vale": nuevo_vale,
+        "total_vales": len(vales)
+    }
+
+@router.post("/{empleado_id}/vales/abonar")
+async def abonar_vale(empleado_id: str, abono_data: dict = Body(...)):
+    """
+    Abonar (reducir) un vale específico
+    Body esperado:
+    {
+        "vale_index": int (índice del vale en el array, opcional - si no se envía, se abona al más antiguo pendiente),
+        "monto_abono": float,
+        "descripcion": str (opcional)
+    }
+    """
+    try:
+        object_id = ObjectId(empleado_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID de empleado inválido")
+    
+    empleado = empleados_collection.find_one({"_id": object_id})
+    if not empleado:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado")
+    
+    # Validar monto de abono
+    monto_abono = abono_data.get("monto_abono")
+    if not monto_abono or monto_abono <= 0:
+        raise HTTPException(status_code=400, detail="El monto de abono debe ser mayor a cero")
+    
+    vales = empleado.get("vales", [])
+    if not vales:
+        raise HTTPException(status_code=400, detail="El empleado no tiene vales registrados")
+    
+    # Buscar vale a abonar
+    vale_index = abono_data.get("vale_index")
+    
+    if vale_index is not None:
+        # Abonar vale específico por índice
+        if vale_index < 0 or vale_index >= len(vales):
+            raise HTTPException(status_code=400, detail="Índice de vale inválido")
+        
+        vale = vales[vale_index]
+        pendiente_actual = vale.get("monto", 0) - vale.get("abonado", 0)
+        
+        if monto_abono > pendiente_actual:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"El monto de abono ({monto_abono}) excede el pendiente ({pendiente_actual})"
+            )
+        
+        # Actualizar vale
+        nuevo_abonado = vale.get("abonado", 0) + monto_abono
+        vales[vale_index] = {
+            **vale,
+            "abonado": nuevo_abonado,
+            "pendiente": vale.get("monto", 0) - nuevo_abonado,
+            "ultimo_abono": {
+                "monto": monto_abono,
+                "fecha": datetime.now().isoformat(),
+                "descripcion": abono_data.get("descripcion", "")
+            }
+        }
+    else:
+        # Abonar el vale más antiguo que tenga pendiente
+        vale_encontrado = False
+        for idx, vale in enumerate(vales):
+            pendiente_actual = vale.get("monto", 0) - vale.get("abonado", 0)
+            if pendiente_actual > 0:
+                if monto_abono > pendiente_actual:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"El monto de abono ({monto_abono}) excede el pendiente del vale ({pendiente_actual})"
+                    )
+                
+                # Actualizar vale
+                nuevo_abonado = vale.get("abonado", 0) + monto_abono
+                vales[idx] = {
+                    **vale,
+                    "abonado": nuevo_abonado,
+                    "pendiente": vale.get("monto", 0) - nuevo_abonado,
+                    "ultimo_abono": {
+                        "monto": monto_abono,
+                        "fecha": datetime.now().isoformat(),
+                        "descripcion": abono_data.get("descripcion", "")
+                    }
+                }
+                vale_index = idx
+                vale_encontrado = True
+                break
+        
+        if not vale_encontrado:
+            raise HTTPException(status_code=400, detail="No hay vales pendientes para abonar")
+    
+    # Actualizar empleado
+    result = empleados_collection.update_one(
+        {"_id": object_id},
+        {"$set": {"vales": vales}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado")
+    
+    return {
+        "message": "Abono aplicado correctamente",
+        "vale_index": vale_index,
+        "vale_actualizado": vales[vale_index],
+        "monto_abonado": monto_abono
     }
