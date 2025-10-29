@@ -180,13 +180,42 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                 # Buscar el item en el inventario por código o ID
                 item_inventario = None
                 
-                # Intentar buscar por código primero
+                # Intentar buscar por código primero (múltiples variantes)
                 if codigo:
-                    item_inventario = items_collection.find_one({"codigo": codigo})
+                    # Limpiar el código: quitar espacios al inicio y final
+                    codigo_limpio = str(codigo).strip()
+                    
+                    # 1. Buscar exacto
+                    item_inventario = items_collection.find_one({"codigo": codigo_limpio})
                     if item_inventario:
-                        print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item encontrado en inventario por código: {codigo}")
+                        print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item encontrado en inventario por código exacto: '{codigo_limpio}'")
                     else:
-                        print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item NO encontrado por código: {codigo}")
+                        # 2. Buscar con regex (insensible a mayúsculas/minúsculas y espacios)
+                        codigo_regex = codigo_limpio.replace(" ", "\\s*")
+                        item_inventario = items_collection.find_one({"codigo": {"$regex": f"^{codigo_regex}$", "$options": "i"}})
+                        if item_inventario:
+                            print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item encontrado en inventario por código regex: '{codigo_limpio}' (encontrado como: '{item_inventario.get('codigo', 'N/A')}')")
+                        else:
+                            # 3. Buscar como número si el código es numérico
+                            try:
+                                if codigo_limpio.isdigit() or (codigo_limpio.replace('.', '', 1).isdigit()):
+                                    codigo_num = int(float(codigo_limpio))
+                                    item_inventario = items_collection.find_one({"codigo": str(codigo_num)})
+                                    if not item_inventario:
+                                        item_inventario = items_collection.find_one({"codigo": codigo_num})
+                                    if item_inventario:
+                                        print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item encontrado en inventario por código numérico: {codigo_num}")
+                            except:
+                                pass
+                            
+                            if not item_inventario:
+                                print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item NO encontrado por código (probado: exacto, regex, numérico): '{codigo_limpio}'")
+                                
+                                # Log adicional: buscar items similares para diagnóstico
+                                items_similares = list(items_collection.find({"codigo": {"$regex": codigo_limpio[:3] if len(codigo_limpio) >= 3 else codigo_limpio, "$options": "i"}}).limit(5))
+                                if items_similares:
+                                    codigos_similares = [item.get('codigo', 'N/A') for item in items_similares]
+                                    print(f"DEBUG CREAR PEDIDO [Item {idx}]: Items similares encontrados (primeros 5): {codigos_similares}")
                 
                 # Si no se encontró por código, intentar por ID
                 if not item_inventario and item_id:
@@ -194,7 +223,7 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                         item_obj_id = ObjectId(item_id)
                         item_inventario = items_collection.find_one({"_id": item_obj_id})
                         if item_inventario:
-                            print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item encontrado en inventario por ID: {item_id}")
+                            print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item encontrado en inventario por ID: {item_id} (código: '{item_inventario.get('codigo', 'N/A')}')")
                         else:
                             print(f"DEBUG CREAR PEDIDO [Item {idx}]: Item NO encontrado por ID: {item_id}")
                     except Exception as e_id:
