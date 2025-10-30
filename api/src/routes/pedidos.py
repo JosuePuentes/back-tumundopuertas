@@ -1033,12 +1033,7 @@ async def asignar_items_bulk(payload: dict = Body(...)):
     ok_count = sum(1 for r in resultados if r.get("ok"))
     fail_count = len(resultados) - ok_count
     return {"message": "Asignaciones procesadas", "ok": ok_count, "errores": fail_count, "resultados": resultados}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error asignando item: {e}")
-        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
 
 @router.put("/terminar-asignacion/")
 async def terminar_asignacion(
