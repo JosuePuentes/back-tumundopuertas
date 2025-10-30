@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, status, Query
-from ..config.mongodb import items_collection
+from ..config.mongodb import items_collection, pedidos_collection
 from ..models.authmodels import Item, InventarioExcelItem
 from bson import ObjectId
 from pydantic import BaseModel
@@ -12,6 +12,78 @@ router = APIRouter()
 class ActualizarExistenciaRequest(BaseModel):
     cantidad: float
     tipo: Literal['cargar', 'descargar']
+
+@router.post("/cargar-existencias-desde-pedido")
+async def cargar_existencias_desde_pedido(pedido_id: str):
+    """Carga existencias al inventario a partir de un pedido específico para el cliente especial.
+
+    Reglas:
+    - Solo permitido si pedido.cliente_id normalizado es 'J-507172554'.
+    - Recorre items del pedido y suma 'cantidad' al inventario por 'codigo' (o id/_id si falta).
+    """
+    # Validar y buscar pedido
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"pedido_id no es un ObjectId válido: {str(e)}")
+
+    pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+    rif = str(pedido.get("cliente_id", "")).upper().replace(" ", "")
+    if rif != "J-507172554":
+        raise HTTPException(status_code=400, detail="Solo permitido para el cliente especial")
+
+    items = pedido.get("items") or []
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="Items inválidos en el pedido")
+
+    actualizados = 0
+    insertados = 0
+    errores = []
+
+    for it in items:
+        try:
+            # it se asume dict desde la DB
+            codigo = it.get("codigo") or it.get("id") or it.get("_id")
+            if not codigo:
+                continue
+            try:
+                cantidad = int(it.get("cantidad") or 0)
+            except Exception:
+                cantidad = 0
+            if cantidad <= 0:
+                continue
+
+            inv = items_collection.find_one({"codigo": codigo})
+            if inv:
+                items_collection.update_one({"_id": inv["_id"]}, {"$inc": {"cantidad": cantidad}})
+                actualizados += 1
+            else:
+                nuevo = {
+                    "codigo": codigo,
+                    "nombre": it.get("nombre", ""),
+                    "descripcion": it.get("descripcion", ""),
+                    "categoria": it.get("categoria", ""),
+                    "precio": it.get("precio", 0),
+                    "costo": it.get("costo", 0),
+                    "costoProduccion": it.get("costoProduccion", it.get("costo_produccion", 0)),
+                    "cantidad": cantidad,
+                    "activo": True if it.get("activo", True) else False,
+                    "imagenes": it.get("imagenes", []),
+                }
+                items_collection.insert_one(nuevo)
+                insertados += 1
+        except Exception as e:
+            errores.append({"item": it, "error": str(e)})
+
+    return {
+        "message": "Existencias cargadas",
+        "items_actualizados": actualizados,
+        "items_insertados": insertados,
+        "errores": errores,
+    }
 
 @router.get("/all")
 async def get_all_items():
