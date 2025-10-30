@@ -860,6 +860,179 @@ async def asignar_item(
                 "cliente_nombre": pedido.get("cliente_nombre", "")
             }
         }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error asignar_item: {str(e)}")
+
+@router.post("/asignar-bulk")
+async def asignar_items_bulk(payload: dict = Body(...)):
+    """Asignar múltiples unidades de múltiples items en un solo POST.
+
+    Espera: {
+      "asignaciones": [
+        { "pedido_id", "item_id", "empleado_id", "empleado_nombre", "modulo", "unidad_index"? }
+      ]
+    }
+    """
+    asignaciones_req = payload.get("asignaciones") or []
+    if not isinstance(asignaciones_req, list) or len(asignaciones_req) == 0:
+        raise HTTPException(status_code=400, detail="'asignaciones' debe ser una lista no vacía")
+
+    # Agrupar por pedido para minimizar I/O a BD
+    from collections import defaultdict
+    grupos: dict = defaultdict(list)
+    for a in asignaciones_req:
+        pid = a.get("pedido_id")
+        if not pid:
+            continue
+        grupos[pid].append(a)
+
+    resultados = []
+    now_iso = datetime.now().isoformat()
+
+    for pedido_id, asigns in grupos.items():
+        try:
+            pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+            if not pedido:
+                for a in asigns:
+                    resultados.append({"pedido_id": pedido_id, "item_id": a.get("item_id"), "ok": False, "error": "Pedido no encontrado"})
+                continue
+
+            seguimiento = pedido.get("seguimiento") or []
+            items_lista = pedido.get("items", [])
+
+            # Índice de items por id para acceso rápido
+            id_to_item = {}
+            for it in items_lista:
+                it_id = it.get("id")
+                if it_id:
+                    id_to_item[it_id] = it
+
+            # Procesar asignaciones del mismo pedido en memoria
+            for a in asigns:
+                item_id = a.get("item_id")
+                empleado_id = a.get("empleado_id")
+                empleado_nombre = a.get("empleado_nombre")
+                modulo = a.get("modulo")
+                unidad_index = a.get("unidad_index")
+
+                if not (item_id and empleado_id and modulo):
+                    resultados.append({"pedido_id": pedido_id, "item_id": item_id, "ok": False, "error": "Faltan campos requeridos"})
+                    continue
+
+                item = id_to_item.get(item_id)
+                estado_item_actual = item.get("estado_item", 0) if item else 0
+
+                # Determinar orden basándose en estado_item, fallback a modulo
+                if estado_item_actual in [0, 1]:
+                    orden = 1
+                elif estado_item_actual == 2:
+                    orden = 2
+                elif estado_item_actual == 3:
+                    orden = 3
+                else:
+                    orden = {"herreria": 1, "masillar": 2, "preparar": 3}.get(modulo, 1)
+
+                # Buscar o crear proceso
+                proceso = None
+                for p in seguimiento:
+                    if p.get("orden") == orden:
+                        proceso = p
+                        break
+                if not proceso:
+                    proceso = {
+                        "orden": orden,
+                        "nombre_subestado": f"Módulo {modulo.title()}",
+                        "estado": "en_proceso",
+                        "asignaciones_articulos": [],
+                        "fecha_inicio": now_iso,
+                        "fecha_fin": None,
+                    }
+                    seguimiento.append(proceso)
+
+                asignaciones_articulos = proceso.get("asignaciones_articulos") or []
+
+                # Elegir target segun unidad_index o primera pendiente
+                target_index = None
+                if unidad_index is not None:
+                    try:
+                        unidad_index_int = int(unidad_index)
+                    except Exception:
+                        unidad_index_int = None
+                    for i, asignacion in enumerate(asignaciones_articulos):
+                        if (
+                            asignacion.get("itemId") == item_id and
+                            asignacion.get("modulo") == modulo and
+                            int(asignacion.get("unidad_index", 0) or 0) == (unidad_index_int or 0)
+                        ):
+                            if asignacion.get("empleadoId") and asignacion.get("estado") in ["pendiente", "en_proceso"]:
+                                resultados.append({"pedido_id": pedido_id, "item_id": item_id, "unidad_index": unidad_index_int, "ok": False, "error": "Esa unidad ya está asignada"})
+                                target_index = None
+                                break
+                            target_index = i
+                            break
+                    if target_index is None:
+                        # Si no se encontró la unidad solicitada
+                        resultados.append({"pedido_id": pedido_id, "item_id": item_id, "unidad_index": unidad_index, "ok": False, "error": "Unidad solicitada no disponible para asignar"})
+                        continue
+                else:
+                    for i, asignacion in enumerate(asignaciones_articulos):
+                        if (
+                            asignacion.get("itemId") == item_id and
+                            asignacion.get("modulo") == modulo and
+                            asignacion.get("estado") == "pendiente" and
+                            not asignacion.get("empleadoId")
+                        ):
+                            target_index = i
+                            break
+                    if target_index is None:
+                        resultados.append({"pedido_id": pedido_id, "item_id": item_id, "ok": False, "error": "No hay unidades pendientes para asignar"})
+                        continue
+
+                asignacion_obj = asignaciones_articulos[target_index]
+                asignacion_obj.update({
+                    "empleadoId": empleado_id,
+                    "nombreempleado": empleado_nombre,
+                    "estado": "en_proceso",
+                    "fecha_inicio": now_iso,
+                })
+                if asignacion_obj.get("unidad_index") is None and unidad_index is not None:
+                    asignacion_obj["unidad_index"] = unidad_index
+                asignaciones_articulos[target_index] = asignacion_obj
+
+                # Actualizar item meta info de forma optimista
+                if item is not None:
+                    if estado_item_actual == 0:
+                        item["estado_item"] = {"herreria": 1, "masillar": 2, "preparar": 3}.get(modulo, 1)
+                    item["empleado_asignado"] = empleado_id
+                    item["nombre_empleado"] = empleado_nombre
+                    item["modulo_actual"] = modulo
+                    item["fecha_asignacion"] = now_iso
+
+                resultados.append({
+                    "pedido_id": pedido_id,
+                    "item_id": item_id,
+                    "unidad_index": asignacion_obj.get("unidad_index"),
+                    "ok": True
+                })
+
+            # Persistir cambios del pedido (una sola escritura por pedido)
+            pedidos_collection.update_one(
+                {"_id": ObjectId(pedido_id)},
+                {"$set": {"seguimiento": seguimiento, "items": items_lista}}
+            )
+
+        except HTTPException as he:
+            for a in asigns:
+                resultados.append({"pedido_id": pedido_id, "item_id": a.get("item_id"), "ok": False, "error": he.detail})
+        except Exception as e:
+            for a in asigns:
+                resultados.append({"pedido_id": pedido_id, "item_id": a.get("item_id"), "ok": False, "error": str(e)})
+
+    ok_count = sum(1 for r in resultados if r.get("ok"))
+    fail_count = len(resultados) - ok_count
+    return {"message": "Asignaciones procesadas", "ok": ok_count, "errores": fail_count, "resultados": resultados}
         
     except HTTPException:
         raise
