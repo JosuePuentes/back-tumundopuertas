@@ -150,6 +150,32 @@ async def get_pedido(pedido_id: str):
 async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
     pedido.creado_por = user.get("usuario")
     
+    # Salvaguarda para cliente con RIF específico: forzar producción
+    try:
+        rif_cliente = str(getattr(pedido, "cliente_id", "") or pedido.dict().get("cliente_id", "")).upper().replace(" ", "")
+        if rif_cliente == "J-507172554":
+            print("[AUDITORIA] Regla especial aplicada (RIF J-507172554): forzando items a produccion y desactivando todos_items_disponibles")
+            # Forzar todos los items a estado pendiente/producción
+            for item in pedido.items:
+                try:
+                    item.estado_item = 0
+                except Exception:
+                    pass
+            # Asegurar estado general pendiente
+            try:
+                if getattr(pedido, "estado_general", None) != "pendiente":
+                    pedido.estado_general = "pendiente"
+            except Exception:
+                pass
+            # Si llega el flag 'todos_items_disponibles', desactivarlo
+            try:
+                if isinstance(getattr(pedido, "__dict__", None), dict) and "todos_items_disponibles" in pedido.__dict__:
+                    pedido.__dict__["todos_items_disponibles"] = False
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[WARN] No se pudo evaluar salvaguarda por RIF: {e}")
+    
     # Asegurar que cada item tenga estado_item si no viene del frontend
     for item in pedido.items:
         if not hasattr(item, 'estado_item') or item.estado_item is None:
