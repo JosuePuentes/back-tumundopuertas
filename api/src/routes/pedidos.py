@@ -159,6 +159,54 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
     result = pedidos_collection.insert_one(pedido.dict())
     pedido_id = str(result.inserted_id)
     
+    # Generar asignaciones unitarias "pendientes" para herrería (orden 1)
+    try:
+        pedido_doc = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if pedido_doc:
+            seguimiento = pedido_doc.get("seguimiento") or []
+            # Ubicar proceso de herrería por orden 1
+            proceso_idx = None
+            for i, proceso in enumerate(seguimiento):
+                if proceso.get("orden") == 1:
+                    proceso_idx = i
+                    break
+            if proceso_idx is None:
+                seguimiento.append({
+                    "orden": 1,
+                    "nombre_subestado": "Herreria / soldadura",
+                    "estado": "pendiente",
+                    "asignaciones_articulos": [],
+                    "fecha_inicio": None,
+                    "fecha_fin": None
+                })
+                proceso_idx = len(seguimiento) - 1
+            asignaciones = seguimiento[proceso_idx].get("asignaciones_articulos") or []
+            # Crear una asignación unitaria por cada unidad a producir (estado_item == 0)
+            for it in pedido_doc.get("items", []):
+                estado_item_val = it.get("estado_item", 0)
+                cantidad_val = int(it.get("cantidad", 0) or 0)
+                if estado_item_val == 0 and cantidad_val > 0:
+                    item_id_val = str(it.get("id") or it.get("_id") or "")
+                    for idx in range(cantidad_val):
+                        asignaciones.append({
+                            "itemId": item_id_val,
+                            "empleadoId": None,
+                            "nombreempleado": None,
+                            "estado": "pendiente",
+                            "fecha_inicio": None,
+                            "fecha_fin": None,
+                            "modulo": "herreria",
+                            "cantidad": 1,
+                            "unidad_index": idx + 1
+                        })
+            seguimiento[proceso_idx]["asignaciones_articulos"] = asignaciones
+            pedidos_collection.update_one(
+                {"_id": ObjectId(pedido_id)},
+                {"$set": {"seguimiento": seguimiento}}
+            )
+    except Exception as e:
+        print(f"DEBUG CREAR PEDIDO: Error generando asignaciones unitarias: {e}")
+    
     # Si hay abonos iniciales en el historial_pagos, incrementar el saldo de los métodos de pago
     if pedido.historial_pagos:
         print(f"DEBUG CREAR PEDIDO: Procesando {len(pedido.historial_pagos)} abonos iniciales")
@@ -512,27 +560,49 @@ async def asignar_item(
                 break
         
         if proceso_existente:
-            # Actualizar proceso existente
             print(f"DEBUG ASIGNAR ITEM: Actualizando proceso existente orden {orden}")
             asignaciones_articulos = proceso_existente.get("asignaciones_articulos") or []
             
-            # Verificar si ya existe asignación para este item
-            asignacion_existente = None
-            for i, asignacion in enumerate(asignaciones_articulos):
-                if asignacion.get("itemId") == item_id:
-                    asignacion_existente = i
-                    break
-            
-            if asignacion_existente is not None:
-                # Actualizar asignación existente
-                asignaciones_articulos[asignacion_existente] = nueva_asignacion
-                print(f"DEBUG ASIGNAR ITEM: Actualizando asignación existente para item {item_id}")
+            if modulo == "herreria":
+                # Tomar la PRIMERA asignación pendiente para este itemId y pasarla a en_proceso
+                indice_pendiente = None
+                for i, asignacion in enumerate(asignaciones_articulos):
+                    if asignacion.get("modulo") == "herreria" and asignacion.get("itemId") == item_id and asignacion.get("estado") == "pendiente":
+                        indice_pendiente = i
+                        break
+                if indice_pendiente is not None:
+                    asignaciones_articulos[indice_pendiente].update({
+                        "empleadoId": empleado_id,
+                        "nombreempleado": nombre_empleado,
+                        "estado": "en_proceso",
+                        "fecha_inicio": datetime.now().isoformat()
+                    })
+                    print(f"DEBUG ASIGNAR ITEM: Marcada unidad pendiente como en_proceso para item {item_id}")
+                else:
+                    # Fallback: crear/actualizar una asignación activa por ítem (comportamiento previo)
+                    asignacion_existente = None
+                    for i, asignacion in enumerate(asignaciones_articulos):
+                        if asignacion.get("itemId") == item_id and asignacion.get("modulo") == "herreria":
+                            asignacion_existente = i
+                            break
+                    if asignacion_existente is not None:
+                        asignaciones_articulos[asignacion_existente] = nueva_asignacion
+                        print(f"DEBUG ASIGNAR ITEM: Actualizando asignación existente (fallback) para item {item_id}")
+                    else:
+                        asignaciones_articulos.append(nueva_asignacion)
+                        print(f"DEBUG ASIGNAR ITEM: Agregando nueva asignación (fallback) para item {item_id}")
             else:
-                # Agregar nueva asignación
-                asignaciones_articulos.append(nueva_asignacion)
-                print(f"DEBUG ASIGNAR ITEM: Agregando nueva asignación para item {item_id}")
+                # Otros módulos: comportamiento existente por item
+                asignacion_existente = None
+                for i, asignacion in enumerate(asignaciones_articulos):
+                    if asignacion.get("itemId") == item_id and asignacion.get("modulo") == modulo:
+                        asignacion_existente = i
+                        break
+                if asignacion_existente is not None:
+                    asignaciones_articulos[asignacion_existente] = nueva_asignacion
+                else:
+                    asignaciones_articulos.append(nueva_asignacion)
             
-            # Actualizar en la base de datos
             pedidos_collection.update_one(
                 {
                     "_id": ObjectId(pedido_id),
