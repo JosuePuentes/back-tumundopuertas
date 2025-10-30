@@ -160,6 +160,69 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
     # Insertar el pedido
     result = pedidos_collection.insert_one(pedido.dict())
     pedido_id = str(result.inserted_id)
+
+    # Generar asignaciones unitarias para herrería (orden 1) por cada unidad pendiente (estado_item == 0)
+    try:
+        pedido_db = pedidos_collection.find_one({"_id": ObjectId(pedido_id)}) or pedido.dict()
+        seguimiento = pedido_db.get("seguimiento") or []
+
+        # Ubicar proceso de herrería por orden 1 o por nombre
+        orden_herreria = 1
+        proceso_herreria = None
+        for proc in seguimiento:
+            if proc.get("orden") == orden_herreria or (
+                str(proc.get("nombre_subestado", "")).strip().lower().startswith("herreria")
+            ):
+                proceso_herreria = proc
+                break
+
+        if not proceso_herreria:
+            proceso_herreria = {
+                "orden": orden_herreria,
+                "nombre_subestado": "Herreria / soldadura",
+                "estado": "pendiente",
+                "asignaciones_articulos": [],
+                "fecha_inicio": None,
+                "fecha_fin": None,
+            }
+            seguimiento.append(proceso_herreria)
+
+        asignaciones_articulos = proceso_herreria.get("asignaciones_articulos") or []
+
+        items_src = pedido_db.get("items", [])
+        items_iter = []
+        for it in items_src:
+            if hasattr(it, "dict"):
+                items_iter.append(it.dict())
+            else:
+                items_iter.append(it)
+
+        for it in items_iter:
+            estado_item_val = it.get("estado_item", 0)
+            cantidad_val = int(it.get("cantidad", 0) or 0)
+            if estado_item_val == 0 and cantidad_val > 0:
+                item_id_ref = str(it.get("id") or it.get("_id") or "")
+                for idx in range(cantidad_val):
+                    asignaciones_articulos.append({
+                        "itemId": item_id_ref,
+                        "empleadoId": None,
+                        "nombreempleado": None,
+                        "estado": "pendiente",
+                        "fecha_inicio": None,
+                        "fecha_fin": None,
+                        "modulo": "herreria",
+                        "cantidad": 1,
+                        "unidad_index": idx + 1,
+                    })
+
+        proceso_herreria["asignaciones_articulos"] = asignaciones_articulos
+
+        pedidos_collection.update_one(
+            {"_id": ObjectId(pedido_id)},
+            {"$set": {"seguimiento": seguimiento}},
+        )
+    except Exception as e:
+        print(f"ERROR CREAR PEDIDO - asignaciones herreria: {e}")
     
     # Restar cantidades del inventario SOLO para items con estado_item = 4 (disponibles)
     # Los items con estado_item = 0 (faltantes) NO se restan del inventario, van a producción
@@ -628,7 +691,7 @@ async def asignar_item(
         
         print(f"DEBUG ASIGNAR ITEM: estado_item={estado_item_actual}, orden={orden}, modulo={modulo}")
         
-        # Crear la asignación
+        # Crear la asignación base (plantilla)
         nueva_asignacion = {
             "itemId": item_id,
             "empleadoId": empleado_id,
@@ -654,29 +717,58 @@ async def asignar_item(
             # Actualizar proceso existente
             print(f"DEBUG ASIGNAR ITEM: Actualizando proceso existente orden {orden}")
             asignaciones_articulos = proceso_existente.get("asignaciones_articulos") or []
-            
-            # IMPORTANTE: Eliminar asignaciones TERMINADAS del mismo item
-            # Esto evita que haya múltiples asignaciones (terminadas y en proceso) del mismo item
-            asignaciones_articulos = [
-                asignacion for asignacion in asignaciones_articulos 
-                if not (asignacion.get("itemId") == item_id and asignacion.get("estado") == "terminado")
-            ]
-            
-            # Verificar si ya existe asignación ACTIVA para este item
-            asignacion_existente = None
-            for i, asignacion in enumerate(asignaciones_articulos):
-                if asignacion.get("itemId") == item_id and asignacion.get("estado") == "en_proceso":
-                    asignacion_existente = i
-                    break
-            
-            if asignacion_existente is not None:
-                # Actualizar asignación existente
-                asignaciones_articulos[asignacion_existente] = nueva_asignacion
-                print(f"DEBUG ASIGNAR ITEM: Actualizando asignación existente para item {item_id}")
+
+            if modulo == "herreria":
+                # Tomar la primera asignación pendiente de este item en herrería
+                idx_pendiente = None
+                for i, asignacion in enumerate(asignaciones_articulos):
+                    if (
+                        asignacion.get("itemId") == item_id and
+                        asignacion.get("modulo") == "herreria" and
+                        asignacion.get("estado") == "pendiente"
+                    ):
+                        idx_pendiente = i
+                        break
+
+                if idx_pendiente is not None:
+                    asignacion_obj = asignaciones_articulos[idx_pendiente]
+                    asignacion_obj.update({
+                        "empleadoId": empleado_id,
+                        "nombreempleado": nombre_empleado,
+                        "estado": "en_proceso",
+                        "fecha_inicio": datetime.now().isoformat(),
+                    })
+                    asignaciones_articulos[idx_pendiente] = asignacion_obj
+                    print(f"DEBUG ASIGNAR ITEM: Toma asignación pendiente #{idx_pendiente+1} para item {item_id}")
+                else:
+                    # Fallback: mantener política previa
+                    actualizado = False
+                    for i, asignacion in enumerate(asignaciones_articulos):
+                        if asignacion.get("itemId") == item_id and asignacion.get("estado") == "en_proceso":
+                            asignaciones_articulos[i] = nueva_asignacion
+                            actualizado = True
+                            print(f"DEBUG ASIGNAR ITEM: Actualiza asignación en_proceso existente para item {item_id}")
+                            break
+                    if not actualizado:
+                        asignaciones_articulos.append(nueva_asignacion)
+                        print(f"DEBUG ASIGNAR ITEM: Crea nueva asignación por falta de pendientes para item {item_id}")
             else:
-                # Agregar nueva asignación
-                asignaciones_articulos.append(nueva_asignacion)
-                print(f"DEBUG ASIGNAR ITEM: Agregando nueva asignación para item {item_id}")
+                # Otros módulos: mantener lógica de única activa
+                asignaciones_articulos = [
+                    a for a in asignaciones_articulos
+                    if not (a.get("itemId") == item_id and a.get("estado") == "terminado")
+                ]
+                asignacion_existente = None
+                for i, asignacion in enumerate(asignaciones_articulos):
+                    if asignacion.get("itemId") == item_id and asignacion.get("estado") == "en_proceso":
+                        asignacion_existente = i
+                        break
+                if asignacion_existente is not None:
+                    asignaciones_articulos[asignacion_existente] = nueva_asignacion
+                    print(f"DEBUG ASIGNAR ITEM: Actualizando asignación existente para item {item_id}")
+                else:
+                    asignaciones_articulos.append(nueva_asignacion)
+                    print(f"DEBUG ASIGNAR ITEM: Agregando nueva asignación para item {item_id}")
             
             # Actualizar en la base de datos
             pedidos_collection.update_one(
@@ -4909,6 +5001,135 @@ def mover_item_siguiente_modulo(seguimiento: list, item_id: str, orden_actual: i
         "estado_subestado": "pendiente",
         "fecha_inicio": None,
         "fecha_fin": None
+    }
+
+# =========================
+# ASIGNAR ITEMS (multi-asignación)
+# =========================
+@router.post("/asignar")
+async def asignar_item_multiple(
+    pedido_id: str = Body(...),
+    item_id: str = Body(...),
+    orden: Union[int, str] = Body(...),
+    asignaciones: List[dict] = Body(...),  # [{ empleado_id, cantidad, modulo? }]
+    descripcionitem: Optional[str] = Body(None),
+    costoproduccion: Optional[float] = Body(None)
+):
+    """
+    Asignar cantidades de un item a uno o varios empleados en un módulo (orden).
+    Validaciones:
+      - sum(cantidad) <= cantidad_pendiente_item
+      - cantidad > 0
+    Efectos:
+      - Agrega entradas en seguimiento[orden].asignaciones_articulos con estado="en_proceso"
+      - Mantiene acumuladores por item dentro del pedido
+    """
+    # Normalizar orden
+    try:
+        orden_int = int(orden) if isinstance(orden, str) else orden
+    except Exception:
+        raise HTTPException(status_code=400, detail="orden inválido")
+
+    # Obtener pedido
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"pedido_id inválido: {str(e)}")
+
+    pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+    items = pedido.get("items", [])
+    item_doc = next((it for it in items if str(it.get("id") or it.get("_id") or it.get("itemId")) == str(item_id)), None)
+    if not item_doc:
+        raise HTTPException(status_code=404, detail="Item del pedido no encontrado")
+
+    cantidad_total_item = float(item_doc.get("cantidad", 0) or 0)
+    cantidad_asignada_acumulada = float(item_doc.get("cantidad_asignada_acumulada", 0) or 0)
+    cantidad_terminada_acumulada = float(item_doc.get("cantidad_terminada_acumulada", 0) or 0)
+    cantidad_pendiente_item = max(cantidad_total_item - cantidad_asignada_acumulada, 0)
+
+    # Validaciones sobre asignaciones
+    if not isinstance(asignaciones, list) or len(asignaciones) == 0:
+        raise HTTPException(status_code=400, detail="asignaciones debe ser una lista no vacía")
+
+    suma_cantidades = 0.0
+    for a in asignaciones:
+        try:
+            cantidad = float(a.get("cantidad", 0))
+        except Exception:
+            raise HTTPException(status_code=400, detail="cantidad inválida en asignación")
+        if cantidad <= 0:
+            raise HTTPException(status_code=400, detail="Cada cantidad debe ser mayor a 0")
+        suma_cantidades += cantidad
+
+    if suma_cantidades > cantidad_pendiente_item:
+        raise HTTPException(status_code=400, detail=f"La suma de cantidades ({suma_cantidades}) excede la pendiente ({cantidad_pendiente_item})")
+
+    # Preparar estructura de seguimiento para el módulo
+    seguimiento = pedido.get("seguimiento", [])
+    subestado = next((s for s in seguimiento if s.get("orden") == orden_int), None)
+    if not subestado:
+        subestado = {"orden": orden_int, "estado": "pendiente", "asignaciones_articulos": []}
+        seguimiento.append(subestado)
+
+    asignaciones_articulos = subestado.get("asignaciones_articulos", [])
+
+    # Insertar cada asignación
+    now_iso = datetime.now().isoformat()
+    for a in asignaciones:
+        empleado_id_val = str(a.get("empleado_id") or a.get("empleadoId") or "").strip()
+        cantidad_val = float(a.get("cantidad", 0) or 0)
+        if not empleado_id_val:
+            raise HTTPException(status_code=400, detail="empleado_id es requerido en cada asignación")
+
+        asignaciones_articulos.append({
+            "itemId": str(item_id),
+            "empleadoId": empleado_id_val,
+            "cantidad_asignada": cantidad_val,
+            "cantidad_terminada": 0.0,
+            "estado": "en_proceso",
+            "estado_subestado": "en_proceso",
+            "fecha_inicio": now_iso,
+            "modulo": orden_int,
+            "orden": orden_int,
+            "descripcionitem": descripcionitem or item_doc.get("descripcion", ""),
+            "costoproduccion": costoproduccion if costoproduccion is not None else item_doc.get("costoProduccion")
+        })
+
+    subestado["asignaciones_articulos"] = asignaciones_articulos
+
+    # Actualizar acumuladores del item
+    nueva_asignada = cantidad_asignada_acumulada + suma_cantidades
+    nueva_pendiente = max(cantidad_total_item - nueva_asignada, 0)
+
+    for it in items:
+        if str(it.get("id") or it.get("_id") or it.get("itemId")) == str(item_id):
+            it["cantidad_total_item"] = cantidad_total_item
+            it["cantidad_asignada_acumulada"] = nueva_asignada
+            it["cantidad_terminada_acumulada"] = cantidad_terminada_acumulada
+            it["cantidad_pendiente_item"] = nueva_pendiente
+            break
+
+    # Persistir cambios
+    result = pedidos_collection.update_one(
+        {"_id": pedido_obj_id},
+        {"$set": {"seguimiento": seguimiento, "items": items}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado al actualizar")
+
+    return {
+        "message": "Asignaciones registradas",
+        "success": True,
+        "pedido_id": pedido_id,
+        "item_id": item_id,
+        "orden": orden_int,
+        "cantidad_total_item": cantidad_total_item,
+        "cantidad_asignada_acumulada": nueva_asignada,
+        "cantidad_terminada_acumulada": cantidad_terminada_acumulada,
+        "cantidad_pendiente_item": nueva_pendiente,
     }
     
     # Agregar asignación al proceso siguiente
