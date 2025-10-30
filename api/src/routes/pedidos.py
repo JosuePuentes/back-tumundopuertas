@@ -4910,6 +4910,135 @@ def mover_item_siguiente_modulo(seguimiento: list, item_id: str, orden_actual: i
         "fecha_inicio": None,
         "fecha_fin": None
     }
+
+# =========================
+# ASIGNAR ITEMS (multi-asignación)
+# =========================
+@router.post("/asignar")
+async def asignar_item_multiple(
+    pedido_id: str = Body(...),
+    item_id: str = Body(...),
+    orden: Union[int, str] = Body(...),
+    asignaciones: List[dict] = Body(...),  # [{ empleado_id, cantidad, modulo? }]
+    descripcionitem: Optional[str] = Body(None),
+    costoproduccion: Optional[float] = Body(None)
+):
+    """
+    Asignar cantidades de un item a uno o varios empleados en un módulo (orden).
+    Validaciones:
+      - sum(cantidad) <= cantidad_pendiente_item
+      - cantidad > 0
+    Efectos:
+      - Agrega entradas en seguimiento[orden].asignaciones_articulos con estado="en_proceso"
+      - Mantiene acumuladores por item dentro del pedido
+    """
+    # Normalizar orden
+    try:
+        orden_int = int(orden) if isinstance(orden, str) else orden
+    except Exception:
+        raise HTTPException(status_code=400, detail="orden inválido")
+
+    # Obtener pedido
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"pedido_id inválido: {str(e)}")
+
+    pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+    items = pedido.get("items", [])
+    item_doc = next((it for it in items if str(it.get("id") or it.get("_id") or it.get("itemId")) == str(item_id)), None)
+    if not item_doc:
+        raise HTTPException(status_code=404, detail="Item del pedido no encontrado")
+
+    cantidad_total_item = float(item_doc.get("cantidad", 0) or 0)
+    cantidad_asignada_acumulada = float(item_doc.get("cantidad_asignada_acumulada", 0) or 0)
+    cantidad_terminada_acumulada = float(item_doc.get("cantidad_terminada_acumulada", 0) or 0)
+    cantidad_pendiente_item = max(cantidad_total_item - cantidad_asignada_acumulada, 0)
+
+    # Validaciones sobre asignaciones
+    if not isinstance(asignaciones, list) or len(asignaciones) == 0:
+        raise HTTPException(status_code=400, detail="asignaciones debe ser una lista no vacía")
+
+    suma_cantidades = 0.0
+    for a in asignaciones:
+        try:
+            cantidad = float(a.get("cantidad", 0))
+        except Exception:
+            raise HTTPException(status_code=400, detail="cantidad inválida en asignación")
+        if cantidad <= 0:
+            raise HTTPException(status_code=400, detail="Cada cantidad debe ser mayor a 0")
+        suma_cantidades += cantidad
+
+    if suma_cantidades > cantidad_pendiente_item:
+        raise HTTPException(status_code=400, detail=f"La suma de cantidades ({suma_cantidades}) excede la pendiente ({cantidad_pendiente_item})")
+
+    # Preparar estructura de seguimiento para el módulo
+    seguimiento = pedido.get("seguimiento", [])
+    subestado = next((s for s in seguimiento if s.get("orden") == orden_int), None)
+    if not subestado:
+        subestado = {"orden": orden_int, "estado": "pendiente", "asignaciones_articulos": []}
+        seguimiento.append(subestado)
+
+    asignaciones_articulos = subestado.get("asignaciones_articulos", [])
+
+    # Insertar cada asignación
+    now_iso = datetime.now().isoformat()
+    for a in asignaciones:
+        empleado_id_val = str(a.get("empleado_id") or a.get("empleadoId") or "").strip()
+        cantidad_val = float(a.get("cantidad", 0) or 0)
+        if not empleado_id_val:
+            raise HTTPException(status_code=400, detail="empleado_id es requerido en cada asignación")
+
+        asignaciones_articulos.append({
+            "itemId": str(item_id),
+            "empleadoId": empleado_id_val,
+            "cantidad_asignada": cantidad_val,
+            "cantidad_terminada": 0.0,
+            "estado": "en_proceso",
+            "estado_subestado": "en_proceso",
+            "fecha_inicio": now_iso,
+            "modulo": orden_int,
+            "orden": orden_int,
+            "descripcionitem": descripcionitem or item_doc.get("descripcion", ""),
+            "costoproduccion": costoproduccion if costoproduccion is not None else item_doc.get("costoProduccion")
+        })
+
+    subestado["asignaciones_articulos"] = asignaciones_articulos
+
+    # Actualizar acumuladores del item
+    nueva_asignada = cantidad_asignada_acumulada + suma_cantidades
+    nueva_pendiente = max(cantidad_total_item - nueva_asignada, 0)
+
+    for it in items:
+        if str(it.get("id") or it.get("_id") or it.get("itemId")) == str(item_id):
+            it["cantidad_total_item"] = cantidad_total_item
+            it["cantidad_asignada_acumulada"] = nueva_asignada
+            it["cantidad_terminada_acumulada"] = cantidad_terminada_acumulada
+            it["cantidad_pendiente_item"] = nueva_pendiente
+            break
+
+    # Persistir cambios
+    result = pedidos_collection.update_one(
+        {"_id": pedido_obj_id},
+        {"$set": {"seguimiento": seguimiento, "items": items}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado al actualizar")
+
+    return {
+        "message": "Asignaciones registradas",
+        "success": True,
+        "pedido_id": pedido_id,
+        "item_id": item_id,
+        "orden": orden_int,
+        "cantidad_total_item": cantidad_total_item,
+        "cantidad_asignada_acumulada": nueva_asignada,
+        "cantidad_terminada_acumulada": cantidad_terminada_acumulada,
+        "cantidad_pendiente_item": nueva_pendiente,
+    }
     
     # Agregar asignación al proceso siguiente
     if "asignaciones_articulos" not in proceso_siguiente:
