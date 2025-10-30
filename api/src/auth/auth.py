@@ -1,5 +1,7 @@
 from passlib.context import CryptContext
 from ..config.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from ..config.mongodb import usuarios_collection
+from bson import ObjectId
 from datetime import datetime, timedelta
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -27,17 +29,44 @@ def create_admin_access_token(admin: dict, expires_delta: timedelta = timedelta(
     return encoded_jwt
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
+    """
+    Obtiene el usuario actual desde la base de datos en tiempo real.
+    Valida el token JWT y luego consulta la BD para obtener datos actualizados.
+    Esto garantiza que los permisos y datos del usuario estén siempre sincronizados.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        # Decodificar token para obtener user_id
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("id")
         if user_id is None:
             raise credentials_exception
-        return payload
+        
+        # Consultar la base de datos en tiempo real para obtener datos actualizados
+        try:
+            user_doc = usuarios_collection.find_one({"_id": ObjectId(user_id)})
+            if not user_doc:
+                raise credentials_exception
+            
+            # Retornar datos actualizados desde la BD, no del token
+            return {
+                "id": str(user_doc["_id"]),
+                "usuario": user_doc.get("usuario", ""),
+                "rol": user_doc.get("rol", "admin"),
+                "permisos": user_doc.get("permisos", []),
+                "modulos": user_doc.get("modulos", []),
+                "nombreCompleto": user_doc.get("nombreCompleto", ""),
+                "identificador": user_doc.get("identificador", ""),
+            }
+        except Exception as e:
+            # Si hay error al consultar la BD, usar datos del token como fallback
+            print(f"WARNING: Error consultando usuario en BD: {e}, usando datos del token")
+            return payload
+            
     except jwt.PyJWTError:
         raise credentials_exception
 
