@@ -44,14 +44,14 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://www.tumundopuerta.com",
+        "https://tumundopuerta.com",
         "https://crafteo-three.vercel.app",
-        "https://crafteo-three-git-main-josuepuentes.vercel.app",
         "https://crafteo-three-git-main-josuepuentes.vercel.app",
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
-        "*"  # Fallback para desarrollo
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
