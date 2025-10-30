@@ -616,7 +616,8 @@ async def asignar_item(
     item_id: str = Body(...),
     empleado_id: str = Body(...),
     empleado_nombre: str = Body(...),
-    modulo: str = Body(...)  # "herreria", "masillar", "preparar"
+    modulo: str = Body(...),  # "herreria", "masillar", "preparar"
+    unidad_index: Optional[int] = Body(None)
 ):
     """
     Asignar un item a un empleado en un módulo específico
@@ -629,6 +630,7 @@ async def asignar_item(
         print(f"DEBUG ASIGNAR ITEM: empleado_id={empleado_id} (tipo: {type(empleado_id)})")
         print(f"DEBUG ASIGNAR ITEM: empleado_nombre={empleado_nombre} (tipo: {type(empleado_nombre)})")
         print(f"DEBUG ASIGNAR ITEM: modulo={modulo} (tipo: {type(modulo)})")
+        print(f"DEBUG ASIGNAR ITEM: unidad_index={unidad_index}")
         print(f"DEBUG ASIGNAR ITEM: === FIN DATOS RECIBIDOS ===")
         # Buscar el pedido
         pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
@@ -727,7 +729,8 @@ async def asignar_item(
             "fecha_fin": None,
             "modulo": modulo,
             "descripcionitem": item.get("nombre", item.get("descripcion", "")) if item else "",
-            "costoproduccion": item.get("costoProduccion", 0) if item else 0
+            "costoproduccion": item.get("costoProduccion", 0) if item else 0,
+            "unidad_index": unidad_index
         }
         
         # Buscar o crear el proceso en seguimiento
@@ -740,61 +743,52 @@ async def asignar_item(
                 break
         
         if proceso_existente:
-            # Actualizar proceso existente
+            # Actualizar proceso existente con soporte para unidad_index
             print(f"DEBUG ASIGNAR ITEM: Actualizando proceso existente orden {orden}")
             asignaciones_articulos = proceso_existente.get("asignaciones_articulos") or []
 
-            if modulo == "herreria":
-                # Tomar la primera asignación pendiente de este item en herrería
-                idx_pendiente = None
+            # Elegir target según unidad_index o primera pendiente sin empleado
+            target_index = None
+            if unidad_index is not None:
                 for i, asignacion in enumerate(asignaciones_articulos):
                     if (
                         asignacion.get("itemId") == item_id and
-                        asignacion.get("modulo") == "herreria" and
-                        asignacion.get("estado") == "pendiente"
+                        asignacion.get("modulo") == modulo and
+                        int(asignacion.get("unidad_index", 0) or 0) == int(unidad_index)
                     ):
-                        idx_pendiente = i
+                        # Si ya está asignada y en pendiente/en_proceso, bloquear
+                        if asignacion.get("empleadoId") and asignacion.get("estado") in ["pendiente", "en_proceso"]:
+                            raise HTTPException(status_code=409, detail="Esa unidad ya está asignada")
+                        target_index = i
                         break
-
-                if idx_pendiente is not None:
-                    asignacion_obj = asignaciones_articulos[idx_pendiente]
-                    asignacion_obj.update({
-                        "empleadoId": empleado_id,
-                        "nombreempleado": nombre_empleado,
-                        "estado": "en_proceso",
-                        "fecha_inicio": datetime.now().isoformat(),
-                    })
-                    asignaciones_articulos[idx_pendiente] = asignacion_obj
-                    print(f"DEBUG ASIGNAR ITEM: Toma asignación pendiente #{idx_pendiente+1} para item {item_id}")
-                else:
-                    # Fallback: mantener política previa
-                    actualizado = False
-                    for i, asignacion in enumerate(asignaciones_articulos):
-                        if asignacion.get("itemId") == item_id and asignacion.get("estado") == "en_proceso":
-                            asignaciones_articulos[i] = nueva_asignacion
-                            actualizado = True
-                            print(f"DEBUG ASIGNAR ITEM: Actualiza asignación en_proceso existente para item {item_id}")
-                            break
-                    if not actualizado:
-                        asignaciones_articulos.append(nueva_asignacion)
-                        print(f"DEBUG ASIGNAR ITEM: Crea nueva asignación por falta de pendientes para item {item_id}")
+                if target_index is None:
+                    raise HTTPException(status_code=409, detail="Unidad solicitada no disponible para asignar")
             else:
-                # Otros módulos: mantener lógica de única activa
-                asignaciones_articulos = [
-                    a for a in asignaciones_articulos
-                    if not (a.get("itemId") == item_id and a.get("estado") == "terminado")
-                ]
-                asignacion_existente = None
                 for i, asignacion in enumerate(asignaciones_articulos):
-                    if asignacion.get("itemId") == item_id and asignacion.get("estado") == "en_proceso":
-                        asignacion_existente = i
+                    if (
+                        asignacion.get("itemId") == item_id and
+                        asignacion.get("modulo") == modulo and
+                        asignacion.get("estado") == "pendiente" and
+                        not asignacion.get("empleadoId")
+                    ):
+                        target_index = i
                         break
-                if asignacion_existente is not None:
-                    asignaciones_articulos[asignacion_existente] = nueva_asignacion
-                    print(f"DEBUG ASIGNAR ITEM: Actualizando asignación existente para item {item_id}")
-                else:
-                    asignaciones_articulos.append(nueva_asignacion)
-                    print(f"DEBUG ASIGNAR ITEM: Agregando nueva asignación para item {item_id}")
+                if target_index is None:
+                    raise HTTPException(status_code=409, detail="No hay unidades pendientes para asignar")
+
+            # Actualizar solo la asignación objetivo
+            asignacion_obj = asignaciones_articulos[target_index]
+            asignacion_obj.update({
+                "empleadoId": empleado_id,
+                "nombreempleado": nombre_empleado,
+                "estado": "en_proceso",
+                "fecha_inicio": datetime.now().isoformat(),
+            })
+            # Preservar unidad_index existente si no vino en body
+            if asignacion_obj.get("unidad_index") is None and unidad_index is not None:
+                asignacion_obj["unidad_index"] = unidad_index
+            asignaciones_articulos[target_index] = asignacion_obj
+            print(f"DEBUG ASIGNAR ITEM: Asignada unidad_index={asignacion_obj.get('unidad_index')} para item {item_id}")
             
             # Actualizar en la base de datos
             pedidos_collection.update_one(
@@ -2598,6 +2592,12 @@ async def terminar_asignacion_articulo(
     print(f"DEBUG TERMINAR: empleado_id={empleado_id}")
     print(f"DEBUG TERMINAR: estado={estado}")
     print(f"DEBUG TERMINAR: fecha_fin={fecha_fin}")
+    # unidad_index puede venir para identificar la unidad específica
+    try:
+        unidad_index_int = int(unidad_index) if unidad_index is not None else None
+    except Exception:
+        unidad_index_int = None
+    print(f"DEBUG TERMINAR: unidad_index={unidad_index_int}")
     print(f"DEBUG TERMINAR: pin={'***' if pin else None}")
     print(f"DEBUG TERMINAR: === FIN DATOS RECIBIDOS ===")
     
@@ -2697,10 +2697,12 @@ async def terminar_asignacion_articulo(
                 print(f"DEBUG TERMINAR: Nueva asignación terminada creada")
                 break
             
-            # Buscar la asignación existente - primero por empleado específico, luego por cualquier empleado
+            # Buscar la asignación existente - primero por unidad_index si viene, luego empleado, luego cualquiera
             for asignacion in asignaciones:
                 print(f"DEBUG TERMINAR: Revisando asignación: itemId={asignacion.get('itemId')}, empleadoId={asignacion.get('empleadoId')}")
                 if asignacion.get("itemId") == item_id:
+                    if unidad_index_int is not None and int(asignacion.get("unidad_index", 0) or 0) != unidad_index_int:
+                        continue
                     # Primero intentar coincidencia exacta de empleado
                     if asignacion.get("empleadoId") == empleado_id:
                         print(f"DEBUG TERMINAR: Asignación encontrada con empleado exacto, estado actual: {asignacion.get('estado')}")
@@ -2760,9 +2762,29 @@ async def terminar_asignacion_articulo(
     estado_item_actual = item.get("estado_item", 1) if item else 1
     print(f"DEBUG TERMINAR: estado_item actual: {estado_item_actual}")
     
-    # Incrementar estado_item (máximo 4) para que el item desaparezca del módulo actual
-    nuevo_estado_item = min(estado_item_actual + 1, 4)
-    print(f"DEBUG TERMINAR: nuevo estado_item: {nuevo_estado_item}")
+    # Incrementar estado_item SOLO si no quedan unidades pendientes/en_proceso en este orden para el mismo item
+    modulo_actual = "herreria"
+    if orden_int == 1:
+        modulo_actual = "herreria"
+    elif orden_int == 2:
+        modulo_actual = "masillar"
+    elif orden_int == 3:
+        modulo_actual = "preparar"
+
+    quedan_pendientes = False
+    for sub in seguimiento:
+        if int(sub.get("orden", -1)) == orden_int:
+            for a in (sub.get("asignaciones_articulos") or []):
+                if a.get("itemId") == item_id and a.get("modulo") == modulo_actual and a.get("estado") in ["pendiente", "en_proceso"]:
+                    quedan_pendientes = True
+                    break
+            break
+
+    if quedan_pendientes:
+        nuevo_estado_item = estado_item_actual
+    else:
+        nuevo_estado_item = min(estado_item_actual + 1, 4)
+    print(f"DEBUG TERMINAR: nuevo estado_item: {nuevo_estado_item} (quedan_pendientes={quedan_pendientes})")
     
     # LIMPIAR campos de asignación del item, actualizar seguimiento e incrementar estado_item
     try:
