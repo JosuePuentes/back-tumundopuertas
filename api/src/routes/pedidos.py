@@ -1173,6 +1173,126 @@ async def get_all_pedidos():
         print(f"Error en get_all_pedidos: {e}")
         return []
 
+@router.get("/asignaciones-disponibles/{pedido_id}/{modulo}")
+async def get_asignaciones_disponibles(pedido_id: str, modulo: str):
+    """
+    Obtener información detallada de unidades disponibles para asignar por item y módulo.
+    Retorna estadísticas por item: total, asignadas, disponibles, y detalles de cada unidad.
+    """
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"ID de pedido inválido: {str(e)}")
+    
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    # Buscar asignaciones en el seguimiento del módulo especificado
+    seguimiento = pedido.get("seguimiento", [])
+    asignaciones_por_item = {}
+    
+    # Mapear número de orden a módulo
+    orden_modulo_map = {
+        "1": "herreria",
+        "2": "masillar",
+        "3": "preparar"
+    }
+    
+    # Buscar en todos los procesos del seguimiento
+    for proceso in seguimiento:
+        proceso_modulo = None
+        orden = proceso.get("orden")
+        if orden and str(orden) in orden_modulo_map:
+            proceso_modulo = orden_modulo_map[str(orden)]
+        elif proceso.get("nombre_subestado", "").lower().startswith("herreria"):
+            proceso_modulo = "herreria"
+        elif proceso.get("nombre_subestado", "").lower().startswith("masillar"):
+            proceso_modulo = "masillar"
+        elif proceso.get("nombre_subestado", "").lower().startswith("prepar"):
+            proceso_modulo = "preparar"
+        
+        if proceso_modulo != modulo:
+            continue
+        
+        asignaciones_articulos = proceso.get("asignaciones_articulos", [])
+        
+        for asignacion in asignaciones_articulos:
+            item_id = asignacion.get("itemId")
+            unidad_index = asignacion.get("unidad_index", 1)
+            estado = asignacion.get("estado", "pendiente")
+            empleado_id = asignacion.get("empleadoId")
+            
+            if item_id not in asignaciones_por_item:
+                asignaciones_por_item[item_id] = {
+                    "unidades": {}
+                }
+            
+            asignaciones_por_item[item_id]["unidades"][unidad_index] = {
+                "unidad_index": unidad_index,
+                "estado": estado,
+                "empleadoId": empleado_id,
+                "nombreempleado": asignacion.get("nombreempleado"),
+                "fecha_inicio": asignacion.get("fecha_inicio"),
+                "disponible": not empleado_id or estado == "terminado"
+            }
+    
+    # Agregar información del item (cantidad total) y calcular estadísticas
+    items = pedido.get("items", [])
+    resultado = []
+    
+    for item in items:
+        item_id = str(item.get("id") or item.get("_id") or "")
+        if not item_id:
+            continue
+        
+        cantidad_total = int(item.get("cantidad", 0) or 0)
+        info_item = asignaciones_por_item.get(item_id, {"unidades": {}})
+        
+        unidades_info = []
+        asignadas = 0
+        disponibles = 0
+        terminadas = 0
+        
+        # Procesar unidades existentes en asignaciones
+        for unidad_idx in range(1, cantidad_total + 1):
+            if unidad_idx in info_item["unidades"]:
+                unidad_data = info_item["unidades"][unidad_idx]
+                unidades_info.append(unidad_data)
+                if unidad_data["estado"] == "terminado":
+                    terminadas += 1
+                elif unidad_data["empleadoId"]:
+                    asignadas += 1
+                else:
+                    disponibles += 1
+            else:
+                # Unidad no tiene asignación, está disponible
+                unidades_info.append({
+                    "unidad_index": unidad_idx,
+                    "estado": "pendiente",
+                    "empleadoId": None,
+                    "nombreempleado": None,
+                    "fecha_inicio": None,
+                    "disponible": True
+                })
+                disponibles += 1
+        
+        resultado.append({
+            "item_id": item_id,
+            "item_nombre": item.get("nombre") or item.get("descripcion") or "",
+            "cantidad_total": cantidad_total,
+            "unidades_asignadas": asignadas,
+            "unidades_disponibles": disponibles,
+            "unidades_terminadas": terminadas,
+            "unidades": unidades_info
+        })
+    
+    return {
+        "pedido_id": pedido_id,
+        "modulo": modulo,
+        "items": resultado
+    }
+
 @router.get("/item-estado/{pedido_id}/{item_id}")
 async def get_item_estado(pedido_id: str, item_id: str):
     """Obtener estado detallado de un item específico"""
