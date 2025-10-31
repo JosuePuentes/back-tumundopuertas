@@ -2948,6 +2948,8 @@ async def terminar_asignacion_articulo(
     Endpoint mejorado para terminar asignaciones con flujo flexible.
     Mantiene el item visible en pedidosherreria y lo mueve al siguiente módulo.
     """
+    print(f"DEBUG TERMINAR: === Endpoint llamado ===")
+    print(f"DEBUG TERMINAR: pedido_id={pedido_id}, orden={orden}, item_id={item_id}, empleado_id={empleado_id}")
     print(f"DEBUG TERMINAR: === DATOS RECIBIDOS ===")
     print(f"DEBUG TERMINAR: pedido_id={pedido_id}")
     print(f"DEBUG TERMINAR: orden={orden} (tipo: {type(orden)})")
