@@ -137,6 +137,27 @@ async def crear_factura_confirmada(
         estado_general = request.estadoGeneral or None
         datos_completos = request.datosCompletos or {}
         
+        # Si no vienen en el request pero están en datos_completos, extraerlos de ahí
+        if not cliente_nombre and datos_completos:
+            cliente_nombre = (
+                datos_completos.get("cliente_nombre") or 
+                datos_completos.get("clienteNombre") or
+                (datos_completos.get("pedido") or {}).get("cliente_nombre") if isinstance(datos_completos.get("pedido"), dict) else None
+            )
+        
+        if monto_total is None and datos_completos:
+            monto_total = (
+                datos_completos.get("monto_total") or 
+                datos_completos.get("montoTotal") or
+                (datos_completos.get("pedido") or {}).get("monto_total") if isinstance(datos_completos.get("pedido"), dict) else None
+            )
+        
+        if not items and datos_completos:
+            items = (
+                datos_completos.get("items") or 
+                (datos_completos.get("pedido") or {}).get("items") if isinstance(datos_completos.get("pedido"), dict) else []
+            )
+        
         # Preparar datos de la factura (guardar en snake_case en BD para consistencia)
         factura_dict = {
             "pedidoId": pedido_id,
