@@ -778,12 +778,12 @@ async def asignar_item(
 
             # Actualizar solo la asignación objetivo
             asignacion_obj = asignaciones_articulos[target_index]
-            asignacion_obj.update({
-                "empleadoId": empleado_id,
-                "nombreempleado": nombre_empleado,
-                "estado": "en_proceso",
-                "fecha_inicio": datetime.now().isoformat(),
-            })
+                    asignacion_obj.update({
+                        "empleadoId": empleado_id,
+                        "nombreempleado": nombre_empleado,
+                        "estado": "en_proceso",
+                        "fecha_inicio": datetime.now().isoformat(),
+                    })
             # Preservar unidad_index existente si no vino en body
             if asignacion_obj.get("unidad_index") is None and unidad_index is not None:
                 asignacion_obj["unidad_index"] = unidad_index
@@ -2928,7 +2928,8 @@ async def terminar_asignacion_articulo(
     empleado_id: str = Body(...),
     estado: str = Body(...),
     fecha_fin: str = Body(...),
-    pin: Optional[str] = Body(None)  # PIN opcional
+    pin: Optional[str] = Body(None),  # PIN opcional
+    unidad_index: Optional[int] = Body(None)  # unidad_index opcional
 ):
     """
     Endpoint mejorado para terminar asignaciones con flujo flexible.
@@ -2942,10 +2943,12 @@ async def terminar_asignacion_articulo(
     print(f"DEBUG TERMINAR: estado={estado}")
     print(f"DEBUG TERMINAR: fecha_fin={fecha_fin}")
     # unidad_index puede venir para identificar la unidad específica
-    try:
-        unidad_index_int = int(unidad_index) if unidad_index is not None else None
-    except Exception:
-        unidad_index_int = None
+    unidad_index_int = None
+    if unidad_index is not None:
+        try:
+            unidad_index_int = int(unidad_index)
+        except (ValueError, TypeError):
+            unidad_index_int = None
     print(f"DEBUG TERMINAR: unidad_index={unidad_index_int}")
     print(f"DEBUG TERMINAR: pin={'***' if pin else None}")
     print(f"DEBUG TERMINAR: === FIN DATOS RECIBIDOS ===")
