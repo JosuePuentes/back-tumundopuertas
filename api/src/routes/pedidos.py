@@ -778,7 +778,7 @@ async def asignar_item(
 
             # Actualizar solo la asignación objetivo
             asignacion_obj = asignaciones_articulos[target_index]
-                    asignacion_obj.update({
+            asignacion_obj.update({
                         "empleadoId": empleado_id,
                         "nombreempleado": nombre_empleado,
                         "estado": "en_proceso",
