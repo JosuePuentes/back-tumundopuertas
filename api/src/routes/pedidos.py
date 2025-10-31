@@ -1194,7 +1194,7 @@ async def get_all_pedidos():
             "fecha_creacion": 1,
             "estado_general": 1,
             "items": 1
-        }).limit(100))  # Limitar a 100 pedidos para mejor rendimiento
+        }).limit(1000))  # Aumentar el límite para incluir más pedidos
         
         # Convertir ObjectId a string
         for pedido in pedidos:
