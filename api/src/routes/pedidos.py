@@ -2920,6 +2920,7 @@ async def debug_buscar_anubis():
         return {"error": str(e)}
 
 # Endpoint para terminar una asignación de artículo dentro de un pedido
+# Actualizado para buscar empleado por _id (ObjectId) o identificador
 @router.put("/asignacion/terminar")
 async def terminar_asignacion_articulo(
     pedido_id: str = Body(...),
