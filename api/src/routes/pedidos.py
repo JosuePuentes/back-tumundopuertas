@@ -2977,7 +2977,10 @@ async def terminar_asignacion_articulo(
         try:
             empleado_obj_id = ObjectId(empleado_id)
             empleado = empleados_collection.find_one({"_id": empleado_obj_id})
-            print(f"DEBUG TERMINAR: Búsqueda por _id: {empleado is not None}")
+            if empleado:
+                print(f"DEBUG TERMINAR: ✓ Empleado encontrado por _id: {empleado.get('nombreCompleto', 'N/A')}")
+            else:
+                print(f"DEBUG TERMINAR: ✗ No se encontró empleado por _id")
         except Exception as e:
             print(f"DEBUG TERMINAR: No es un ObjectId válido: {e}")
         
@@ -2985,7 +2988,10 @@ async def terminar_asignacion_articulo(
         if not empleado:
             print(f"DEBUG TERMINAR: Buscando empleado con identificador string: '{empleado_id}'")
             empleado = empleados_collection.find_one({"identificador": empleado_id})
-            print(f"DEBUG TERMINAR: Búsqueda como string: {empleado is not None}")
+            if empleado:
+                print(f"DEBUG TERMINAR: ✓ Empleado encontrado por identificador string: {empleado.get('nombreCompleto', 'N/A')}")
+            else:
+                print(f"DEBUG TERMINAR: ✗ No se encontró empleado por identificador string")
         
         # Si no se encuentra, intentar identificador como número
         if not empleado:
@@ -2993,12 +2999,25 @@ async def terminar_asignacion_articulo(
                 empleado_id_num = int(empleado_id)
                 print(f"DEBUG TERMINAR: Buscando empleado con identificador número: {empleado_id_num}")
                 empleado = empleados_collection.find_one({"identificador": empleado_id_num})
-                print(f"DEBUG TERMINAR: Búsqueda como número: {empleado is not None}")
+                if empleado:
+                    print(f"DEBUG TERMINAR: ✓ Empleado encontrado por identificador número: {empleado.get('nombreCompleto', 'N/A')}")
+                else:
+                    print(f"DEBUG TERMINAR: ✗ No se encontró empleado por identificador número")
             except ValueError:
                 print(f"DEBUG TERMINAR: No se pudo convertir a número: {empleado_id}")
+        
+        # Debug adicional: listar todos los empleados para verificar la colección
+        if not empleado:
+            print(f"DEBUG TERMINAR: === DEBUG: Listando todos los empleados ===")
+            todos_empleados = list(empleados_collection.find({}, {"_id": 1, "identificador": 1, "nombreCompleto": 1}))
+            print(f"DEBUG TERMINAR: Total empleados en BD: {len(todos_empleados)}")
+            for emp in todos_empleados:
+                print(f"DEBUG TERMINAR:   - _id: {emp.get('_id')}, identificador: {emp.get('identificador')}, nombre: {emp.get('nombreCompleto', 'N/A')}")
             
     except Exception as e:
         print(f"DEBUG TERMINAR: Error buscando empleado: {e}")
+        import traceback
+        print(f"DEBUG TERMINAR: Traceback: {traceback.format_exc()}")
     
     if not empleado:
         print(f"ERROR TERMINAR: Empleado no encontrado: {empleado_id}")
