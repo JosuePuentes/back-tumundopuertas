@@ -2968,23 +2968,36 @@ async def terminar_asignacion_articulo(
     
     print(f"DEBUG TERMINAR: Validando PIN para empleado {empleado_id}")
     
-    # Buscar empleado por identificador (tanto string como número)
+    # Buscar empleado primero por _id (ObjectId), luego por identificador
     empleado = None
     try:
-        # Intentar primero como string
-        print(f"DEBUG TERMINAR: Buscando empleado con identificador string: '{empleado_id}'")
-        empleado = empleados_collection.find_one({"identificador": empleado_id})
-        print(f"DEBUG TERMINAR: Búsqueda como string: {empleado is not None}")
+        # Intentar primero como ObjectId (_id)
+        print(f"DEBUG TERMINAR: Buscando empleado por _id (ObjectId): '{empleado_id}'")
+        try:
+            empleado_obj_id = ObjectId(empleado_id)
+            empleado = empleados_collection.find_one({"_id": empleado_obj_id})
+            print(f"DEBUG TERMINAR: Búsqueda por _id: {empleado is not None}")
+        except Exception as e:
+            print(f"DEBUG TERMINAR: No es un ObjectId válido: {e}")
         
-        # Si no se encuentra, intentar como número
+        # Si no se encuentra por _id, intentar por identificador como string
         if not empleado:
-            empleado_id_num = int(empleado_id)
-            print(f"DEBUG TERMINAR: Buscando empleado con identificador número: {empleado_id_num}")
-            empleado = empleados_collection.find_one({"identificador": empleado_id_num})
-            print(f"DEBUG TERMINAR: Búsqueda como número: {empleado is not None}")
+            print(f"DEBUG TERMINAR: Buscando empleado con identificador string: '{empleado_id}'")
+            empleado = empleados_collection.find_one({"identificador": empleado_id})
+            print(f"DEBUG TERMINAR: Búsqueda como string: {empleado is not None}")
+        
+        # Si no se encuentra, intentar identificador como número
+        if not empleado:
+            try:
+                empleado_id_num = int(empleado_id)
+                print(f"DEBUG TERMINAR: Buscando empleado con identificador número: {empleado_id_num}")
+                empleado = empleados_collection.find_one({"identificador": empleado_id_num})
+                print(f"DEBUG TERMINAR: Búsqueda como número: {empleado is not None}")
+            except ValueError:
+                print(f"DEBUG TERMINAR: No se pudo convertir a número: {empleado_id}")
             
-    except ValueError:
-        print(f"DEBUG TERMINAR: No se pudo convertir a número: {empleado_id}")
+    except Exception as e:
+        print(f"DEBUG TERMINAR: Error buscando empleado: {e}")
     
     if not empleado:
         print(f"ERROR TERMINAR: Empleado no encontrado: {empleado_id}")
@@ -5313,19 +5326,28 @@ async def terminar_asignacion_articulo_v2(
     }
 
 def buscar_empleado_por_identificador(empleado_id: str):
-    """Buscar empleado por identificador (string o número)"""
+    """Buscar empleado primero por _id (ObjectId), luego por identificador (string o número)"""
     try:
-        # Intentar como string
+        # Intentar primero como ObjectId (_id)
+        try:
+            empleado_obj_id = ObjectId(empleado_id)
+            empleado = empleados_collection.find_one({"_id": empleado_obj_id})
+            if empleado:
+                return empleado
+        except Exception:
+            pass
+        
+        # Si no se encuentra por _id, intentar por identificador como string
         empleado = empleados_collection.find_one({"identificador": empleado_id})
         if empleado:
             return empleado
         
-        # Intentar como número
+        # Intentar identificador como número
         empleado_id_num = int(empleado_id)
         empleado = empleados_collection.find_one({"identificador": empleado_id_num})
         return empleado
         
-    except ValueError:
+    except (ValueError, Exception):
         return None
 
 def actualizar_asignacion_terminada(seguimiento: list, orden: int, item_id: str, empleado_id: str, estado: str, fecha_fin: str):
