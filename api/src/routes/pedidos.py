@@ -759,22 +759,55 @@ async def asignar_item(
                         # Si ya está asignada y en pendiente/en_proceso, bloquear
                         if asignacion.get("empleadoId") and asignacion.get("estado") in ["pendiente", "en_proceso"]:
                             raise HTTPException(status_code=409, detail="Esa unidad ya está asignada")
+                        # Permitir reasignar si está terminada (para reasignar en el mismo módulo)
+                        # o si no tiene empleado asignado
                         target_index = i
                         break
+                # Si no se encuentra en este módulo, buscar en módulos anteriores para verificar que existe
                 if target_index is None:
-                    raise HTTPException(status_code=409, detail="Unidad solicitada no disponible para asignar")
+                    # Buscar en otros órdenes del seguimiento para verificar que la unidad existe
+                    unidad_existe_en_otro_modulo = False
+                    for proceso in seguimiento:
+                        for asignacion_otra in proceso.get("asignaciones_articulos", []):
+                            if (
+                                asignacion_otra.get("itemId") == item_id and
+                                int(asignacion_otra.get("unidad_index", 0) or 0) == int(unidad_index)
+                            ):
+                                unidad_existe_en_otro_modulo = True
+                                break
+                        if unidad_existe_en_otro_modulo:
+                            break
+                    
+                    # Si la unidad existe en otro módulo o es una nueva unidad, crear nueva asignación
+                    if unidad_existe_en_otro_modulo or True:  # Permitir crear nuevas asignaciones
+                        # Agregar nueva asignación al array
+                        nueva_asignacion_unidad = nueva_asignacion.copy()
+                        nueva_asignacion_unidad["unidad_index"] = unidad_index
+                        asignaciones_articulos.append(nueva_asignacion_unidad)
+                        target_index = len(asignaciones_articulos) - 1
+                        print(f"DEBUG ASIGNAR ITEM: Creando nueva asignación para unidad_index={unidad_index} en módulo {modulo}")
+                    else:
+                        raise HTTPException(status_code=409, detail="Unidad solicitada no disponible para asignar")
             else:
+                # Buscar primera pendiente sin empleado o terminada disponible
                 for i, asignacion in enumerate(asignaciones_articulos):
                     if (
                         asignacion.get("itemId") == item_id and
-                        asignacion.get("modulo") == modulo and
-                        asignacion.get("estado") == "pendiente" and
-                        not asignacion.get("empleadoId")
+                        asignacion.get("modulo") == modulo
                     ):
-                        target_index = i
-                        break
+                        # Permitir asignar si está pendiente sin empleado
+                        if asignacion.get("estado") == "pendiente" and not asignacion.get("empleadoId"):
+                            target_index = i
+                            break
+                        # Permitir reasignar si está terminada (para reasignar en el mismo módulo)
+                        elif asignacion.get("estado") == "terminado" and not asignacion.get("empleadoId"):
+                            target_index = i
+                            break
+                # Si no se encuentra, crear una nueva asignación (unidad nueva o movida desde otro módulo)
                 if target_index is None:
-                    raise HTTPException(status_code=409, detail="No hay unidades pendientes para asignar")
+                    asignaciones_articulos.append(nueva_asignacion)
+                    target_index = len(asignaciones_articulos) - 1
+                    print(f"DEBUG ASIGNAR ITEM: Creando nueva asignación para item {item_id} en módulo {modulo}")
 
             # Actualizar solo la asignación objetivo
             asignacion_obj = asignaciones_articulos[target_index]
@@ -2996,7 +3029,9 @@ async def terminar_asignacion_articulo(
             else:
                 print(f"DEBUG TERMINAR: ✗ No se encontró empleado por _id")
         except Exception as e:
-            print(f"DEBUG TERMINAR: No es un ObjectId válido: {e}")
+            print(f"DEBUG TERMINAR: Error al convertir a ObjectId o buscar por _id: {e}")
+            import traceback
+            print(f"DEBUG TERMINAR: Traceback ObjectId: {traceback.format_exc()}")
         
         # Si no se encuentra por _id, intentar por identificador como string
         if not empleado:
