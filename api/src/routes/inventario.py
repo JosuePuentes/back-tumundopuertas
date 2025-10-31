@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, status, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, status, Query, Body
 from ..config.mongodb import items_collection, pedidos_collection
 from ..models.authmodels import Item, InventarioExcelItem
 from bson import ObjectId
@@ -14,76 +14,76 @@ class ActualizarExistenciaRequest(BaseModel):
     tipo: Literal['cargar', 'descargar']
 
 @router.post("/cargar-existencias-desde-pedido")
-async def cargar_existencias_desde_pedido(pedido_id: str):
-    """Carga existencias al inventario a partir de un pedido específico para el cliente especial.
-
-    Reglas:
-    - Solo permitido si pedido.cliente_id normalizado es 'J-507172554'.
-    - Recorre items del pedido y suma 'cantidad' al inventario por 'codigo' (o id/_id si falta).
+async def cargar_existencias_desde_pedido(pedido_id: str = Body(..., embed=True)):
+    """Carga existencias al inventario a partir de un pedido específico.
+    
+    Request Body:
+    {
+        "pedido_id": "69042b91a9a8ebdaf861c3f0"
+    }
+    
+    Para cada item del pedido:
+    - Si existe en inventario: incrementa existencia con item.cantidad del pedido
+    - Si no existe: crea un nuevo item en el inventario con existencia igual a cantidad del pedido
     """
-    # Validar y buscar pedido
     try:
+        # Obtener el pedido
         pedido_obj_id = ObjectId(pedido_id)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"pedido_id no es un ObjectId válido: {str(e)}")
-
-    pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
-    if not pedido:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-
-    rif = str(pedido.get("cliente_id", "")).upper().replace(" ", "")
-    if rif != "J-507172554":
-        raise HTTPException(status_code=400, detail="Solo permitido para el cliente especial")
-
-    items = pedido.get("items") or []
-    if not isinstance(items, list):
-        raise HTTPException(status_code=400, detail="Items inválidos en el pedido")
-
-    actualizados = 0
-    insertados = 0
-    errores = []
-
-    for it in items:
-        try:
-            # it se asume dict desde la DB
-            codigo = it.get("codigo") or it.get("id") or it.get("_id")
-            if not codigo:
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        items_actualizados = 0
+        items_creados = 0
+        
+        # Para cada item del pedido
+        for item_pedido in pedido.get("items", []):
+            codigo_item = item_pedido.get("codigo") or item_pedido.get("id") or item_pedido.get("_id")
+            if not codigo_item:
                 continue
-            try:
-                cantidad = int(it.get("cantidad") or 0)
-            except Exception:
-                cantidad = 0
+            
+            cantidad = int(item_pedido.get("cantidad", 0))
             if cantidad <= 0:
                 continue
-
-            inv = items_collection.find_one({"codigo": codigo})
-            if inv:
-                items_collection.update_one({"_id": inv["_id"]}, {"$inc": {"cantidad": cantidad}})
-                actualizados += 1
+            
+            # Buscar item en inventario
+            item_inventario = items_collection.find_one({"codigo": codigo_item})
+            
+            if item_inventario:
+                # Actualizar existencia (incrementar)
+                items_collection.update_one(
+                    {"codigo": codigo_item},
+                    {"$inc": {"existencia": cantidad}}
+                )
+                items_actualizados += 1
             else:
-                nuevo = {
-                    "codigo": codigo,
-                    "nombre": it.get("nombre", ""),
-                    "descripcion": it.get("descripcion", ""),
-                    "categoria": it.get("categoria", ""),
-                    "precio": it.get("precio", 0),
-                    "costo": it.get("costo", 0),
-                    "costoProduccion": it.get("costoProduccion", it.get("costo_produccion", 0)),
-                    "cantidad": cantidad,
-                    "activo": True if it.get("activo", True) else False,
-                    "imagenes": it.get("imagenes", []),
+                # Crear nuevo item en inventario
+                nuevo_item = {
+                    "codigo": codigo_item,
+                    "nombre": item_pedido.get("nombre", item_pedido.get("descripcion", "")),
+                    "descripcion": item_pedido.get("descripcion", ""),
+                    "existencia": cantidad,
+                    "precio": item_pedido.get("precio", 0),
+                    "costo": item_pedido.get("costo", 0),
+                    "costoProduccion": item_pedido.get("costoProduccion", 0),
+                    "activo": True,
+                    "cantidad": 0,
+                    "imagenes": item_pedido.get("imagenes", [])
                 }
-                items_collection.insert_one(nuevo)
-                insertados += 1
-        except Exception as e:
-            errores.append({"item": it, "error": str(e)})
-
-    return {
-        "message": "Existencias cargadas",
-        "items_actualizados": actualizados,
-        "items_insertados": insertados,
-        "errores": errores,
-    }
+                items_collection.insert_one(nuevo_item)
+                items_creados += 1
+        
+        return {
+            "message": "Existencias cargadas al inventario correctamente",
+            "items_actualizados": items_actualizados,
+            "items_creados": items_creados
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al cargar existencias: {str(e)}")
 
 @router.get("/all")
 async def get_all_items():
