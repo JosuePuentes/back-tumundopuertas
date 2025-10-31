@@ -2919,8 +2919,20 @@ async def debug_buscar_anubis():
     except Exception as e:
         return {"error": str(e)}
 
+# Endpoint de prueba para verificar que PUT funciona
+@router.put("/test-asignacion-terminar")
+async def test_asignacion_terminar():
+    """Endpoint de prueba para verificar que PUT /pedidos/asignacion/terminar funciona"""
+    return {
+        "message": "Endpoint PUT funcionando",
+        "status": "ok",
+        "timestamp": datetime.now().isoformat()
+    }
+
 # Endpoint para terminar una asignación de artículo dentro de un pedido
 # Actualizado para buscar empleado por _id (ObjectId) o identificador
+# LOG: Registrando endpoint PUT /asignacion/terminar
+print("DEBUG: Registrando endpoint PUT /pedidos/asignacion/terminar")
 @router.put("/asignacion/terminar")
 async def terminar_asignacion_articulo(
     pedido_id: str = Body(...),
