@@ -28,6 +28,43 @@ def object_id_to_str(data):
         return [object_id_to_str(item) for item in data]
     return data
 
+def transform_factura_to_camelcase(data):
+    """Transforma una factura de snake_case a camelCase para el frontend
+    
+    Maneja ambos formatos (snake_case y camelCase) para compatibilidad
+    """
+    if not isinstance(data, dict):
+        return data
+    
+    # Función helper para obtener valor con múltiples posibles nombres
+    def get_value(*keys, default=None):
+        for key in keys:
+            if key in data and data[key] is not None:
+                return data[key]
+        return default
+    
+    transformed = {
+        "id": str(data.get("_id", "")) if data.get("_id") else None,
+        "pedidoId": get_value("pedidoId", "pedido_id", default=""),
+        "numeroFactura": get_value("numeroFactura", "numero_factura"),
+        "clienteNombre": get_value("clienteNombre", "cliente_nombre"),
+        "clienteId": get_value("clienteId", "cliente_id"),
+        "fechaFacturacion": get_value("fechaFacturacion", "fecha_facturacion", default=""),
+        "fechaCreacion": get_value("fechaCreacion", "fecha_creacion", "createdAt", default=""),
+        "items": data.get("items", []),
+        "montoTotal": get_value("montoTotal", "monto_total"),
+        "estadoGeneral": get_value("estadoGeneral", "estado_general"),
+        "datosCompletos": get_value("datosCompletos", "datos_completos", default={})
+    }
+    
+    # Limpiar valores None (excepto items que puede ser lista vacía)
+    result = {}
+    for k, v in transformed.items():
+        if v is not None or k == "items":
+            result[k] = v
+    
+    return result
+
 # ============================================================================
 # ENDPOINTS PARA FACTURAS CONFIRMADAS
 # ============================================================================
@@ -84,7 +121,9 @@ async def crear_factura_confirmada(
             
             factura_actualizada = facturas_confirmadas_collection.find_one({"pedidoId": pedido_id})
             print(f"DEBUG FACTURA: Factura confirmada actualizada para pedidoId: {pedido_id}")
-            return object_id_to_str(factura_actualizada)
+            # Transformar a camelCase para el frontend
+            factura_transformed = transform_factura_to_camelcase(factura_actualizada)
+            return factura_transformed
         else:
             # Crear nuevo registro
             factura_dict["fecha_creacion"] = fecha_actual
@@ -93,7 +132,9 @@ async def crear_factura_confirmada(
             factura_creada = facturas_confirmadas_collection.find_one({"_id": result.inserted_id})
             
             print(f"DEBUG FACTURA: Nueva factura confirmada creada para pedidoId: {pedido_id}")
-            return object_id_to_str(factura_creada)
+            # Transformar a camelCase para el frontend
+            factura_transformed = transform_factura_to_camelcase(factura_creada)
+            return factura_transformed
         
     except HTTPException:
         raise
@@ -115,7 +156,8 @@ async def listar_facturas_confirmadas(
         facturas = list(
             facturas_confirmadas_collection.find().sort("fecha_creacion", -1)
         )
-        return [object_id_to_str(factura) for factura in facturas]
+        # Transformar todas las facturas a camelCase para el frontend
+        return [transform_factura_to_camelcase(factura) for factura in facturas]
     except Exception as e:
         print(f"ERROR GET FACTURAS: {str(e)}")
         import traceback

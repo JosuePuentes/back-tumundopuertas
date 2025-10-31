@@ -3,21 +3,26 @@ from typing import Optional, Dict, Any
 from bson import ObjectId
 
 class FacturaConfirmada(BaseModel):
-    """Modelo para facturas confirmadas"""
+    """Modelo para facturas confirmadas - Devuelve siempre camelCase
+    
+    El modelo acepta datos en snake_case desde la BD pero devuelve camelCase.
+    Usa aliases para mapear campos automáticamente.
+    """
     id: Optional[str] = Field(None, alias="_id")
     pedidoId: str  # Debe ser único
-    numeroFactura: Optional[str] = None
-    cliente_nombre: Optional[str] = None
-    cliente_id: Optional[str] = None
-    fecha_facturacion: str
-    fecha_creacion: str
+    numeroFactura: Optional[str] = Field(None, alias="numero_factura")
+    clienteNombre: Optional[str] = Field(None, alias="cliente_nombre")
+    clienteId: Optional[str] = Field(None, alias="cliente_id")
+    fechaFacturacion: Optional[str] = Field(None, alias="fecha_facturacion")
+    fechaCreacion: Optional[str] = Field(None, alias="fecha_creacion")
     items: Optional[list] = []
-    monto_total: Optional[float] = None
-    estado_general: Optional[str] = None
-    datos_completos: Optional[Dict[str, Any]] = {}  # Guardar el pedido completo como backup
+    montoTotal: Optional[float] = Field(None, alias="monto_total")
+    estadoGeneral: Optional[str] = Field(None, alias="estado_general")
+    datosCompletos: Optional[Dict[str, Any]] = Field(None, alias="datos_completos")
     
     class Config:
         populate_by_name = True
+        allow_population_by_field_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str}
 
