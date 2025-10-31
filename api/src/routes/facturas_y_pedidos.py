@@ -34,31 +34,58 @@ def transform_factura_to_camelcase(data):
     Asegura que TODOS los campos necesarios se devuelvan siempre, 
     incluso si están vacíos o son None.
     Maneja ambos formatos (snake_case y camelCase) para compatibilidad.
+    Si los datos no están en el nivel principal, busca en datos_completos como fallback.
     """
     if not isinstance(data, dict):
         return data
     
+    # Obtener datos_completos primero para usarlo como fallback
+    datos_completos = data.get("datos_completos") or data.get("datosCompletos") or {}
+    if not isinstance(datos_completos, dict):
+        datos_completos = {}
+    
     # Función helper para obtener valor con múltiples posibles nombres
+    # Busca primero en data, luego en datos_completos como fallback
     def get_value(*keys, default=None):
+        # Primero buscar en el nivel principal
         for key in keys:
             if key in data and data[key] is not None:
                 return data[key]
+        # Si no se encuentra, buscar en datos_completos
+        for key in keys:
+            if key in datos_completos and datos_completos[key] is not None:
+                return datos_completos[key]
         return default
     
+    # Extraer datos del pedido completo si está disponible
+    # Si datos_completos contiene información del pedido, usarla para llenar campos faltantes
+    pedido_completo = datos_completos.get("pedido") or datos_completos.get("pedido_completo") or datos_completos
+    
+    # Obtener nombre del cliente desde múltiples fuentes
+    cliente_nombre_final = (
+        get_value("clienteNombre", "cliente_nombre") or 
+        pedido_completo.get("cliente_nombre") if isinstance(pedido_completo, dict) else None or
+        None
+    )
+    
+    # Obtener monto total desde múltiples fuentes
+    monto_total_final = get_value("montoTotal", "monto_total")
+    if monto_total_final is None and isinstance(pedido_completo, dict):
+        monto_total_final = pedido_completo.get("monto_total") or pedido_completo.get("montoTotal")
+    
     # Transformar a camelCase - SIEMPRE incluir todos los campos necesarios
-    # Incluso si están None o vacíos, para mantener consistencia en el frontend
     result = {
         "id": str(data.get("_id", "")) if data.get("_id") else None,
         "pedidoId": get_value("pedidoId", "pedido_id", default=""),
         "numeroFactura": get_value("numeroFactura", "numero_factura") or None,
-        "clienteNombre": get_value("clienteNombre", "cliente_nombre") or None,
+        "clienteNombre": cliente_nombre_final,
         "clienteId": get_value("clienteId", "cliente_id") or None,
         "fechaFacturacion": get_value("fechaFacturacion", "fecha_facturacion", default="") or None,
         "fechaCreacion": get_value("fechaCreacion", "fecha_creacion", "createdAt", default="") or None,
-        "items": data.get("items", []),  # Siempre incluir items, aunque sea lista vacía
-        "montoTotal": get_value("montoTotal", "monto_total") if get_value("montoTotal", "monto_total") is not None else None,
+        "items": data.get("items", []) or datos_completos.get("items", []),  # Siempre incluir items
+        "montoTotal": float(monto_total_final) if monto_total_final is not None else None,
         "estadoGeneral": get_value("estadoGeneral", "estado_general") or None,
-        "datosCompletos": get_value("datosCompletos", "datos_completos", default={})
+        "datosCompletos": datos_completos
     }
     
     # Asegurar que items siempre sea una lista (nunca None)
