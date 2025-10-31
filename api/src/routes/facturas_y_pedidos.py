@@ -100,26 +100,48 @@ async def crear_factura_confirmada(
         # Verificar si ya existe un registro con este pedidoId
         factura_existente = facturas_confirmadas_collection.find_one({"pedidoId": pedido_id})
         
-        # Preparar datos de la factura
+        # Obtener valores del request (acepta camelCase y snake_case)
+        numero_factura = request.numeroFactura or None
+        cliente_nombre = request.clienteNombre or None
+        cliente_id = request.clienteId or None
+        fecha_facturacion = request.fechaFacturacion or fecha_actual
+        items = request.items or []
+        monto_total = request.montoTotal if request.montoTotal is not None else None
+        estado_general = request.estadoGeneral or None
+        datos_completos = request.datosCompletos or {}
+        
+        # Preparar datos de la factura (guardar en snake_case en BD para consistencia)
         factura_dict = {
             "pedidoId": pedido_id,
-            "numeroFactura": request.numeroFactura.strip() if request.numeroFactura else None,
-            "cliente_nombre": request.cliente_nombre.strip() if request.cliente_nombre else None,
-            "cliente_id": request.cliente_id.strip() if request.cliente_id else None,
-            "fecha_facturacion": request.fecha_facturacion or fecha_actual,
-            "items": request.items or [],
-            "monto_total": float(request.monto_total) if request.monto_total is not None else None,
-            "estado_general": request.estado_general.strip() if request.estado_general else None,
-            "datos_completos": request.datos_completos or {}
+            "numeroFactura": numero_factura.strip() if numero_factura else None,
+            "cliente_nombre": cliente_nombre.strip() if cliente_nombre else None,
+            "cliente_id": cliente_id.strip() if cliente_id else None,
+            "fecha_facturacion": fecha_facturacion,
+            "items": items,
+            "monto_total": float(monto_total) if monto_total is not None else None,
+            "estado_general": estado_general.strip() if estado_general else None,
+            "datos_completos": datos_completos
         }
         
         if factura_existente:
-            # Actualizar registro existente
-            factura_dict["fecha_creacion"] = factura_existente.get("fecha_creacion", fecha_actual)
+            # Actualizar registro existente - Combinar datos existentes con nuevos datos
+            # Si un campo viene en el request, usarlo; si no, preservar el existente
+            factura_dict_actualizada = {
+                "pedidoId": pedido_id,
+                "numeroFactura": numero_factura.strip() if numero_factura else factura_existente.get("numeroFactura"),
+                "cliente_nombre": cliente_nombre.strip() if cliente_nombre else factura_existente.get("cliente_nombre"),
+                "cliente_id": cliente_id.strip() if cliente_id else factura_existente.get("cliente_id"),
+                "fecha_facturacion": fecha_facturacion,
+                "items": items if items else factura_existente.get("items", []),
+                "monto_total": float(monto_total) if monto_total is not None else factura_existente.get("monto_total"),
+                "estado_general": estado_general.strip() if estado_general else factura_existente.get("estado_general"),
+                "datos_completos": datos_completos if datos_completos else factura_existente.get("datos_completos", {}),
+                "fecha_creacion": factura_existente.get("fecha_creacion", fecha_actual)
+            }
             
             result = facturas_confirmadas_collection.update_one(
                 {"pedidoId": pedido_id},
-                {"$set": factura_dict}
+                {"$set": factura_dict_actualizada}
             )
             
             if result.modified_count == 0:

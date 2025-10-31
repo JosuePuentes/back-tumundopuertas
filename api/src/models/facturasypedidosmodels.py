@@ -27,16 +27,22 @@ class FacturaConfirmada(BaseModel):
         json_encoders = {ObjectId: str}
 
 class CrearFacturaConfirmadaRequest(BaseModel):
-    """Request para crear/actualizar una factura confirmada"""
+    """Request para crear/actualizar una factura confirmada
+    Acepta tanto camelCase como snake_case para compatibilidad
+    """
     pedidoId: str
-    numeroFactura: Optional[str] = None
-    cliente_nombre: Optional[str] = None
-    cliente_id: Optional[str] = None
-    fecha_facturacion: Optional[str] = None
+    numeroFactura: Optional[str] = Field(None, alias="numero_factura")
+    clienteNombre: Optional[str] = Field(None, alias="cliente_nombre")
+    clienteId: Optional[str] = Field(None, alias="cliente_id")
+    fechaFacturacion: Optional[str] = Field(None, alias="fecha_facturacion")
     items: Optional[list] = []
-    monto_total: Optional[float] = None
-    estado_general: Optional[str] = None
-    datos_completos: Optional[Dict[str, Any]] = {}
+    montoTotal: Optional[float] = Field(None, alias="monto_total")
+    estadoGeneral: Optional[str] = Field(None, alias="estado_general")
+    datosCompletos: Optional[Dict[str, Any]] = Field(None, alias="datos_completos")
+    
+    class Config:
+        populate_by_name = True
+        allow_population_by_field_name = True
 
 class PedidoCargadoInventario(BaseModel):
     """Modelo para pedidos cargados al inventario"""
