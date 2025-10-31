@@ -31,7 +31,9 @@ def object_id_to_str(data):
 def transform_factura_to_camelcase(data):
     """Transforma una factura de snake_case a camelCase para el frontend
     
-    Maneja ambos formatos (snake_case y camelCase) para compatibilidad
+    Asegura que TODOS los campos necesarios se devuelvan siempre, 
+    incluso si están vacíos o son None.
+    Maneja ambos formatos (snake_case y camelCase) para compatibilidad.
     """
     if not isinstance(data, dict):
         return data
@@ -43,25 +45,29 @@ def transform_factura_to_camelcase(data):
                 return data[key]
         return default
     
-    transformed = {
+    # Transformar a camelCase - SIEMPRE incluir todos los campos necesarios
+    # Incluso si están None o vacíos, para mantener consistencia en el frontend
+    result = {
         "id": str(data.get("_id", "")) if data.get("_id") else None,
         "pedidoId": get_value("pedidoId", "pedido_id", default=""),
-        "numeroFactura": get_value("numeroFactura", "numero_factura"),
-        "clienteNombre": get_value("clienteNombre", "cliente_nombre"),
-        "clienteId": get_value("clienteId", "cliente_id"),
-        "fechaFacturacion": get_value("fechaFacturacion", "fecha_facturacion", default=""),
-        "fechaCreacion": get_value("fechaCreacion", "fecha_creacion", "createdAt", default=""),
-        "items": data.get("items", []),
-        "montoTotal": get_value("montoTotal", "monto_total"),
-        "estadoGeneral": get_value("estadoGeneral", "estado_general"),
+        "numeroFactura": get_value("numeroFactura", "numero_factura") or None,
+        "clienteNombre": get_value("clienteNombre", "cliente_nombre") or None,
+        "clienteId": get_value("clienteId", "cliente_id") or None,
+        "fechaFacturacion": get_value("fechaFacturacion", "fecha_facturacion", default="") or None,
+        "fechaCreacion": get_value("fechaCreacion", "fecha_creacion", "createdAt", default="") or None,
+        "items": data.get("items", []),  # Siempre incluir items, aunque sea lista vacía
+        "montoTotal": get_value("montoTotal", "monto_total") if get_value("montoTotal", "monto_total") is not None else None,
+        "estadoGeneral": get_value("estadoGeneral", "estado_general") or None,
         "datosCompletos": get_value("datosCompletos", "datos_completos", default={})
     }
     
-    # Limpiar valores None (excepto items que puede ser lista vacía)
-    result = {}
-    for k, v in transformed.items():
-        if v is not None or k == "items":
-            result[k] = v
+    # Asegurar que items siempre sea una lista (nunca None)
+    if result["items"] is None:
+        result["items"] = []
+    
+    # Asegurar que datosCompletos siempre sea un objeto (nunca None)
+    if result["datosCompletos"] is None:
+        result["datosCompletos"] = {}
     
     return result
 
