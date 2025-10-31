@@ -3135,7 +3135,7 @@ async def terminar_asignacion_articulo(
     if quedan_pendientes:
         nuevo_estado_item = estado_item_actual
     else:
-    nuevo_estado_item = min(estado_item_actual + 1, 4)
+        nuevo_estado_item = min(estado_item_actual + 1, 4)
     print(f"DEBUG TERMINAR: nuevo estado_item: {nuevo_estado_item} (quedan_pendientes={quedan_pendientes})")
     
     # LIMPIAR campos de asignación del item, actualizar seguimiento e incrementar estado_item
