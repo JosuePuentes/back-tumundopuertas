@@ -15,7 +15,7 @@ class ActualizarExistenciaRequest(BaseModel):
 
 @router.post("/cargar-existencias-desde-pedido")
 async def cargar_existencias_desde_pedido(pedido_id: str = Body(..., embed=True)):
-    """Carga existencias al inventario a partir de un pedido específico.
+    """Carga cantidades al inventario a partir de un pedido específico.
     
     Request Body:
     {
@@ -23,8 +23,10 @@ async def cargar_existencias_desde_pedido(pedido_id: str = Body(..., embed=True)
     }
     
     Para cada item del pedido:
-    - Si existe en inventario: incrementa existencia con item.cantidad del pedido
-    - Si no existe: crea un nuevo item en el inventario con existencia igual a cantidad del pedido
+    - Si existe en inventario: incrementa CANTIDAD con item.cantidad del pedido
+    - Si no existe: crea un nuevo item en el inventario con CANTIDAD igual a cantidad del pedido
+    
+    NOTA: Este endpoint incrementa el campo 'cantidad' en lugar de 'existencia'
     """
     try:
         # Obtener el pedido
@@ -59,43 +61,78 @@ async def cargar_existencias_desde_pedido(pedido_id: str = Body(..., embed=True)
             # Buscar item en inventario con código normalizado
             # Intentar búsqueda exacta primero
             item_inventario = items_collection.find_one({"codigo": codigo_item})
+            codigo_bd = codigo_item  # Código que usaremos para actualizar
             
             # Si no se encuentra, intentar búsqueda sin distinguir mayúsculas/minúsculas
             if not item_inventario:
+                print(f"DEBUG CARGAR EXISTENCIAS: No se encontró item con código exacto '{codigo_item}', intentando búsqueda case-insensitive")
                 item_inventario = items_collection.find_one({
                     "codigo": {"$regex": f"^{codigo_item}$", "$options": "i"}
                 })
+                if item_inventario:
+                    # Usar el código exacto de la BD, no el normalizado del pedido
+                    codigo_bd = item_inventario.get("codigo")
+                    print(f"DEBUG CARGAR EXISTENCIAS: Item encontrado con búsqueda flexible. Código en BD: '{codigo_bd}', código pedido: '{codigo_item}'")
             
             if item_inventario:
-                # Verificar si el campo existencia existe y es numérico
-                existencia_actual = item_inventario.get("existencia")
-                if existencia_actual is None:
-                    print(f"DEBUG CARGAR EXISTENCIAS: Item '{codigo_item}' no tiene campo 'existencia', creándolo con valor {cantidad}")
-                    items_collection.update_one(
-                        {"codigo": codigo_item},
-                        {"$set": {"existencia": cantidad}}
+                codigo_bd_real = item_inventario.get("codigo", codigo_bd)
+                item_id = item_inventario.get("_id")
+                
+                print(f"DEBUG CARGAR EXISTENCIAS: Item encontrado en inventario:")
+                print(f"  - _id: {item_id}")
+                print(f"  - código en BD: '{codigo_bd_real}'")
+                print(f"  - código buscado: '{codigo_item}'")
+                print(f"  - cantidad actual: {item_inventario.get('cantidad')}")
+                print(f"  - existencia actual: {item_inventario.get('existencia')}")
+                
+                # Verificar si el campo cantidad existe y es numérico (usamos cantidad, no existencia)
+                cantidad_actual = item_inventario.get("cantidad")
+                if cantidad_actual is None:
+                    print(f"DEBUG CARGAR EXISTENCIAS: Item '{codigo_bd_real}' no tiene campo 'cantidad', creándolo con valor {cantidad}")
+                    result = items_collection.update_one(
+                        {"_id": item_id},
+                        {"$set": {"cantidad": cantidad}}
                     )
+                    print(f"DEBUG CARGAR EXISTENCIAS: Resultado $set cantidad - matched: {result.matched_count}, modified: {result.modified_count}")
                 else:
                     # Verificar que sea numérico
-                    if not isinstance(existencia_actual, (int, float)):
-                        print(f"WARNING CARGAR EXISTENCIAS: Item '{codigo_item}' tiene existencia no numérica: {existencia_actual}, convirtiendo a número")
+                    if not isinstance(cantidad_actual, (int, float)):
+                        print(f"WARNING CARGAR EXISTENCIAS: Item '{codigo_bd_real}' tiene cantidad no numérica: {cantidad_actual} (tipo: {type(cantidad_actual)}), convirtiendo a número")
                         try:
-                            existencia_actual = float(existencia_actual)
-                            items_collection.update_one(
-                                {"codigo": codigo_item},
-                                {"$set": {"existencia": existencia_actual}}
+                            cantidad_actual = float(cantidad_actual)
+                            result = items_collection.update_one(
+                                {"_id": item_id},
+                                {"$set": {"cantidad": cantidad_actual}}
                             )
-                        except (ValueError, TypeError):
-                            print(f"ERROR CARGAR EXISTENCIAS: No se pudo convertir existencia a número para item '{codigo_item}', usando 0")
-                            existencia_actual = 0
+                            print(f"DEBUG CARGAR EXISTENCIAS: Resultado $set cantidad convertida - matched: {result.matched_count}, modified: {result.modified_count}")
+                        except (ValueError, TypeError) as e:
+                            print(f"ERROR CARGAR EXISTENCIAS: No se pudo convertir cantidad a número para item '{codigo_bd_real}': {e}, usando 0")
+                            cantidad_actual = 0
+                            items_collection.update_one(
+                                {"_id": item_id},
+                                {"$set": {"cantidad": 0}}
+                            )
                     
-                    # Incrementar existencia
-                    print(f"DEBUG CARGAR EXISTENCIAS: Incrementando existencia de '{codigo_item}' de {existencia_actual} a {existencia_actual + cantidad}")
+                    # Incrementar cantidad usando _id para asegurar que actualice el documento correcto
+                    print(f"DEBUG CARGAR EXISTENCIAS: Incrementando cantidad de item '{codigo_bd_real}' (_id: {item_id}) de {cantidad_actual} a {cantidad_actual + cantidad}")
                     result = items_collection.update_one(
-                        {"codigo": codigo_item},
-                        {"$inc": {"existencia": cantidad}}
+                        {"_id": item_id},
+                        {"$inc": {"cantidad": cantidad}}
                     )
                     print(f"DEBUG CARGAR EXISTENCIAS: Resultado update_one - matched: {result.matched_count}, modified: {result.modified_count}")
+                    
+                    # Verificar el resultado después del update
+                    if result.modified_count == 0:
+                        print(f"WARNING CARGAR EXISTENCIAS: update_one no modificó ningún documento. Verificar que el _id sea correcto.")
+                        # Re-leer el item para ver su estado actual
+                        item_actualizado = items_collection.find_one({"_id": item_id})
+                        if item_actualizado:
+                            print(f"DEBUG CARGAR EXISTENCIAS: Estado actual del item después del update: cantidad={item_actualizado.get('cantidad')}")
+                    else:
+                        # Verificar que se incrementó correctamente
+                        item_actualizado = items_collection.find_one({"_id": item_id})
+                        if item_actualizado:
+                            print(f"DEBUG CARGAR EXISTENCIAS: ✓ Item actualizado correctamente. Nueva cantidad: {item_actualizado.get('cantidad')}")
                 
                 items_actualizados += 1
             else:
@@ -105,16 +142,16 @@ async def cargar_existencias_desde_pedido(pedido_id: str = Body(..., embed=True)
                     "codigo": codigo_item,
                     "nombre": item_pedido.get("nombre", item_pedido.get("descripcion", "")),
                     "descripcion": item_pedido.get("descripcion", ""),
-                    "existencia": cantidad,
+                    "cantidad": cantidad,  # Usar cantidad en lugar de existencia
+                    "existencia": 0,  # Dejar existencia en 0 por defecto
                     "precio": item_pedido.get("precio", 0),
                     "costo": item_pedido.get("costo", 0),
                     "costoProduccion": item_pedido.get("costoProduccion", 0),
                     "activo": True,
-                    "cantidad": 0,
                     "imagenes": item_pedido.get("imagenes", [])
                 }
                 result = items_collection.insert_one(nuevo_item)
-                print(f"DEBUG CARGAR EXISTENCIAS: Item '{codigo_item}' creado con _id: {result.inserted_id}")
+                print(f"DEBUG CARGAR EXISTENCIAS: Item '{codigo_item}' creado con _id: {result.inserted_id}, cantidad inicial: {cantidad}")
                 items_creados += 1
         
         print(f"DEBUG CARGAR EXISTENCIAS: Proceso completado - Actualizados: {items_actualizados}, Creados: {items_creados}")
