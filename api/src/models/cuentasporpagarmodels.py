@@ -56,16 +56,20 @@ class CuentaPorPagar(BaseModel):
         json_encoders = {ObjectId: str}
 
 class CrearCuentaPorPagarRequest(BaseModel):
-    """Request para crear una nueva cuenta por pagar"""
-    proveedor_id: Optional[str] = Field(None, alias="proveedorId")
-    proveedor_nombre: str = Field(..., alias="proveedorNombre")
-    proveedor_rif: Optional[str] = Field(None, alias="proveedorRif")
-    proveedor_telefono: Optional[str] = Field(None, alias="proveedorTelefono")
-    proveedor_direccion: Optional[str] = Field(None, alias="proveedorDireccion")
-    fecha_vencimiento: Optional[str] = Field(None, alias="fechaVencimiento")
+    """Request para crear una nueva cuenta por pagar
+    Acepta tanto camelCase (proveedorNombre, montoTotal) como snake_case (proveedor_nombre, monto_total)
+    """
+    # Campos con alias para aceptar camelCase del frontend
+    # Usar Field(..., alias="...") hace que el campo sea requerido pero acepte el alias
+    proveedor_id: Optional[str] = Field(default=None, alias="proveedorId")
+    proveedor_nombre: str = Field(..., alias="proveedorNombre")  # Requerido - acepta proveedorNombre o proveedor_nombre
+    proveedor_rif: Optional[str] = Field(default=None, alias="proveedorRif")
+    proveedor_telefono: Optional[str] = Field(default=None, alias="proveedorTelefono")
+    proveedor_direccion: Optional[str] = Field(default=None, alias="proveedorDireccion")
+    fecha_vencimiento: Optional[str] = Field(default=None, alias="fechaVencimiento")
     descripcion: Optional[str] = None
     items: Optional[List[CuentaPorPagarItem]] = []
-    monto_total: float = Field(..., alias="montoTotal")
+    monto_total: float = Field(..., alias="montoTotal")  # Requerido - acepta montoTotal o monto_total
     notas: Optional[str] = None
     
     class Config:
