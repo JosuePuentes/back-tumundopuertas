@@ -241,29 +241,30 @@ async def create_cuenta_por_pagar(
                         
                         if item_inventario:
                             cantidad_a_sumar = float(item.cantidad)
-                            costo_unitario = float(item.costo_unitario)
-                            costo_total_item = costo_unitario * cantidad_a_sumar
+                            costo_unitario = float(item.costo_unitario)  # Costo por unidad (NO el total)
                             
                             cantidad_actual = float(item_inventario.get("cantidad", 0))
                             costo_actual = float(item_inventario.get("costo", 0))
                             
-                            # SUMAR cantidad y costo usando $inc
+                            # SUMAR cantidad y ESTABLECER costo unitario (costo más reciente)
+                            # El campo "costo" en inventario debe representar: costo por unidad, no costo total
                             items_collection.update_one(
                                 {"_id": item_inventario["_id"]},
                                 {
                                     "$inc": {
-                                        "cantidad": cantidad_a_sumar,  # Sumar cantidad
-                                        "costo": costo_total_item  # Sumar costo total (costo_unitario * cantidad)
+                                        "cantidad": cantidad_a_sumar  # Sumar cantidad
+                                    },
+                                    "$set": {
+                                        "costo": costo_unitario  # Establecer costo unitario (costo más reciente)
                                     }
                                 }
                             )
                             
                             nueva_cantidad = cantidad_actual + cantidad_a_sumar
-                            nuevo_costo = costo_actual + costo_total_item
                             
                             print(f"DEBUG CREAR CUENTA: Item {item_inventario.get('codigo', 'N/A')} actualizado:")
                             print(f"  - Cantidad: {cantidad_actual} + {cantidad_a_sumar} = {nueva_cantidad}")
-                            print(f"  - Costo: {costo_actual} + {costo_total_item} = {nuevo_costo}")
+                            print(f"  - Costo unitario establecido: {costo_actual} -> {costo_unitario} (costo más reciente)")
                         else:
                             print(f"WARNING CREAR CUENTA: Item no encontrado en inventario - codigo: {item.codigo}, item_id: {item.item_id}")
                     except Exception as e:
