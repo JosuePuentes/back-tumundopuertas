@@ -98,20 +98,34 @@ async def get_current_cliente(token: str = Depends(oauth2_cliente_scheme)):
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        print(f"DEBUG GET_CURRENT_CLIENTE: Token recibido (primeros 20 chars): {token[:20] if token else 'None'}...")
+        
         # Decodificar token para obtener cliente_id
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        print(f"DEBUG GET_CURRENT_CLIENTE: Payload decodificado - id: {payload.get('id')}, rol: {payload.get('rol')}")
+        
         cliente_id: str = payload.get("id")
         if cliente_id is None:
+            print(f"ERROR GET_CURRENT_CLIENTE: No se encontró 'id' en el payload")
+            raise credentials_exception
+        
+        # Validar que el rol sea "cliente"
+        if payload.get("rol") != "cliente":
+            print(f"ERROR GET_CURRENT_CLIENTE: Token no es de cliente, rol: {payload.get('rol')}")
             raise credentials_exception
         
         # Consultar la base de datos en tiempo real para obtener datos actualizados
         try:
             cliente_doc = clientes_usuarios_collection.find_one({"_id": ObjectId(cliente_id)})
             if not cliente_doc:
+                print(f"ERROR GET_CURRENT_CLIENTE: Cliente no encontrado en BD con id: {cliente_id}")
                 raise credentials_exception
             
             if not cliente_doc.get("activo", True):
+                print(f"ERROR GET_CURRENT_CLIENTE: Cliente inactivo: {cliente_id}")
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cliente inactivo")
+            
+            print(f"DEBUG GET_CURRENT_CLIENTE: Cliente encontrado y validado: {cliente_id}")
             
             # Retornar datos actualizados desde la BD
             return {
@@ -125,8 +139,23 @@ async def get_current_cliente(token: str = Depends(oauth2_cliente_scheme)):
             }
         except Exception as e:
             # Si hay error al consultar la BD, usar datos del token como fallback
-            print(f"WARNING: Error consultando cliente en BD: {e}, usando datos del token")
+            print(f"WARNING GET_CURRENT_CLIENTE: Error consultando cliente en BD: {e}, usando datos del token")
+            import traceback
+            print(f"TRACEBACK: {traceback.format_exc()}")
             return payload
             
-    except jwt.PyJWTError:
+    except jwt.ExpiredSignatureError:
+        print(f"ERROR GET_CURRENT_CLIENTE: Token expirado")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError as e:
+        print(f"ERROR GET_CURRENT_CLIENTE: Token inválido: {str(e)}")
+        raise credentials_exception
+    except Exception as e:
+        print(f"ERROR GET_CURRENT_CLIENTE: Error inesperado: {str(e)}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
         raise credentials_exception
