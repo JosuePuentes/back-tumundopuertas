@@ -2,9 +2,9 @@ from typing import List, Optional, Union
 from fastapi import APIRouter, HTTPException, Body, Depends, Query
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
-from ..config.mongodb import pedidos_collection, db, items_collection, clientes_collection
+from ..config.mongodb import pedidos_collection, db, items_collection, clientes_collection, clientes_usuarios_collection
 from ..models.authmodels import Pedido
-from ..auth.auth import get_current_user
+from ..auth.auth import get_current_user, get_current_cliente
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -6171,3 +6171,134 @@ async def verificar_pedido_completo(pedido_id: str):
         import traceback
         print(f"ERROR VERIFICAR PEDIDO: Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error verificando pedido: {str(e)}")
+
+# ============================================================================
+# ENDPOINTS PARA CLIENTES AUTENTICADOS
+# ============================================================================
+
+@router.post("/cliente")
+async def create_pedido_cliente(pedido: Pedido, cliente: dict = Depends(get_current_cliente)):
+    """
+    Crear pedido desde cliente autenticado.
+    Los pedidos creados por clientes tienen tipo: "cliente"
+    """
+    try:
+        # Obtener datos del cliente autenticado
+        cliente_id = cliente.get("id")
+        cliente_nombre = cliente.get("nombre")
+        
+        # Asegurar que el cliente_id del pedido coincida con el cliente autenticado
+        pedido.cliente_id = cliente_id
+        pedido.cliente_nombre = cliente_nombre
+        pedido.creado_por = cliente.get("usuario")
+        
+        # Marcar el pedido como tipo "cliente"
+        pedido_dict = pedido.dict()
+        pedido_dict["tipo"] = "cliente"
+        pedido_dict["fecha_creacion"] = datetime.now().isoformat()
+        pedido_dict["fecha_actualizacion"] = datetime.now().isoformat()
+        
+        # Asegurar estado_item inicial para cada item
+        for item in pedido_dict.get("items", []):
+            if item.get("estado_item") is None:
+                item["estado_item"] = 0
+        
+        # Insertar el pedido
+        result = pedidos_collection.insert_one(pedido_dict)
+        pedido_id = str(result.inserted_id)
+        
+        # Generar asignaciones unitarias para herrería (similar al endpoint normal)
+        try:
+            seguimiento = pedido_dict.get("seguimiento") or []
+            orden_herreria = 1
+            proceso_herreria = None
+            
+            for proc in seguimiento:
+                if proc.get("orden") == orden_herreria:
+                    proceso_herreria = proc
+                    break
+            
+            if not proceso_herreria:
+                proceso_herreria = {
+                    "orden": orden_herreria,
+                    "nombre_subestado": "Herreria / soldadura",
+                    "estado": "pendiente",
+                    "asignaciones_articulos": [],
+                    "fecha_inicio": None,
+                    "fecha_fin": None,
+                }
+                seguimiento.append(proceso_herreria)
+            
+            asignaciones_articulos = proceso_herreria.get("asignaciones_articulos") or []
+            items_iter = pedido_dict.get("items", [])
+            
+            for it in items_iter:
+                estado_item_val = it.get("estado_item", 0)
+                cantidad_val = int(it.get("cantidad", 0) or 0)
+                if estado_item_val == 0 and cantidad_val > 0:
+                    item_id_ref = str(it.get("id") or it.get("_id") or "")
+                    for idx in range(cantidad_val):
+                        asignaciones_articulos.append({
+                            "itemId": item_id_ref,
+                            "empleadoId": None,
+                            "nombreempleado": None,
+                            "estado": "pendiente",
+                            "fecha_inicio": None,
+                            "fecha_fin": None,
+                            "modulo": "herreria",
+                            "cantidad": 1,
+                            "unidad_index": idx + 1,
+                        })
+            
+            proceso_herreria["asignaciones_articulos"] = asignaciones_articulos
+            
+            pedidos_collection.update_one(
+                {"_id": ObjectId(pedido_id)},
+                {"$set": {"seguimiento": seguimiento}},
+            )
+        except Exception as e:
+            print(f"ERROR CREAR PEDIDO CLIENTE - asignaciones herreria: {e}")
+        
+        return {
+            "message": "Pedido creado exitosamente",
+            "pedido_id": pedido_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR CREAR PEDIDO CLIENTE: {str(e)}")
+        import traceback
+        print(f"ERROR CREAR PEDIDO CLIENTE TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al crear pedido: {str(e)}")
+
+@router.get("/cliente/{cliente_id}")
+async def get_pedidos_cliente(cliente_id: str, cliente: dict = Depends(get_current_cliente)):
+    """
+    Obtener todos los pedidos de un cliente autenticado.
+    Solo puede ver sus propios pedidos.
+    """
+    try:
+        # Verificar que el cliente_id coincida con el cliente autenticado
+        if cliente.get("id") != cliente_id:
+            raise HTTPException(status_code=403, detail="No puedes ver pedidos de otros clientes")
+        
+        # Buscar pedidos del cliente con tipo "cliente"
+        pedidos = list(pedidos_collection.find({
+            "cliente_id": cliente_id,
+            "tipo": "cliente"
+        }).sort("fecha_creacion", -1))
+        
+        # Convertir ObjectId a string
+        for pedido in pedidos:
+            pedido["_id"] = str(pedido["_id"])
+        
+        return pedidos
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR GET PEDIDOS CLIENTE: {str(e)}")
+        import traceback
+        print(f"ERROR GET PEDIDOS CLIENTE TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener pedidos: {str(e)}")

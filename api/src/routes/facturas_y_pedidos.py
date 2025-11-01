@@ -10,7 +10,8 @@ from ..models.facturasypedidosmodels import (
     CrearPedidoCargadoRequest,
     ActualizarPedidoCargadoRequest
 )
-from ..auth.auth import get_current_user
+from ..auth.auth import get_current_user, get_current_cliente
+from ..config.mongodb import pedidos_collection
 
 router = APIRouter()
 facturas_confirmadas_collection = db["facturas_confirmadas"]
@@ -429,4 +430,47 @@ async def actualizar_pedido_cargado_inventario(
         import traceback
         print(f"TRACEBACK: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error al actualizar pedido cargado: {str(e)}")
+
+# ============================================================================
+# ENDPOINTS PARA CLIENTES AUTENTICADOS - FACTURAS
+# ============================================================================
+
+@router.get("/facturas/cliente/{cliente_id}")
+async def get_facturas_cliente(cliente_id: str, cliente: dict = Depends(get_current_cliente)):
+    """
+    Obtener todas las facturas de un cliente autenticado.
+    Solo puede ver sus propias facturas.
+    Las facturas se obtienen de los pedidos del cliente que tienen facturación.
+    """
+    try:
+        # Verificar que el cliente_id coincida con el cliente autenticado
+        if cliente.get("id") != cliente_id:
+            raise HTTPException(status_code=403, detail="No puedes ver facturas de otros clientes")
+        
+        # Buscar facturas confirmadas que tengan el cliente_id en pedidoId o datos_completos
+        # Primero obtenemos los pedidos del cliente
+        pedidos_cliente = list(pedidos_collection.find({
+            "cliente_id": cliente_id,
+            "tipo": "cliente"
+        }, {"_id": 1}))
+        
+        pedido_ids = [str(p["_id"]) for p in pedidos_cliente]
+        
+        # Buscar facturas confirmadas que pertenezcan a estos pedidos
+        facturas = list(facturas_confirmadas_collection.find({
+            "pedidoId": {"$in": pedido_ids}
+        }).sort("fecha_creacion", -1))
+        
+        # Transformar a camelCase para el frontend
+        facturas_transformed = [transform_factura_to_camelcase(factura) for factura in facturas]
+        
+        return facturas_transformed
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR GET FACTURAS CLIENTE: {str(e)}")
+        import traceback
+        print(f"ERROR GET FACTURAS CLIENTE TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener facturas: {str(e)}")
 

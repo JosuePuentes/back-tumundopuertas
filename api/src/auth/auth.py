@@ -1,6 +1,6 @@
 from passlib.context import CryptContext
 from ..config.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
-from ..config.mongodb import usuarios_collection
+from ..config.mongodb import usuarios_collection, clientes_usuarios_collection
 from bson import ObjectId
 from datetime import datetime, timedelta
 import jwt
@@ -10,6 +10,7 @@ from fastapi.security import OAuth2PasswordBearer
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+oauth2_cliente_scheme = OAuth2PasswordBearer(tokenUrl="auth/clientes/login")
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
@@ -74,3 +75,58 @@ async def get_current_admin_user(current_user: dict = Depends(get_current_user))
     if current_user.get("rol") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
     return current_user
+
+def create_cliente_access_token(cliente: dict, expires_delta: timedelta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)) -> str:
+    """Crea un token JWT para clientes autenticados"""
+    to_encode = {
+        "id": str(cliente["_id"]),
+        "usuario": cliente["usuario"],
+        "rol": "cliente",
+        "exp": datetime.utcnow() + expires_delta,
+    }
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_cliente(token: str = Depends(oauth2_cliente_scheme)):
+    """
+    Obtiene el cliente actual desde la base de datos en tiempo real.
+    Valida el token JWT de cliente y luego consulta la BD para obtener datos actualizados.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        # Decodificar token para obtener cliente_id
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        cliente_id: str = payload.get("id")
+        if cliente_id is None:
+            raise credentials_exception
+        
+        # Consultar la base de datos en tiempo real para obtener datos actualizados
+        try:
+            cliente_doc = clientes_usuarios_collection.find_one({"_id": ObjectId(cliente_id)})
+            if not cliente_doc:
+                raise credentials_exception
+            
+            if not cliente_doc.get("activo", True):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cliente inactivo")
+            
+            # Retornar datos actualizados desde la BD
+            return {
+                "id": str(cliente_doc["_id"]),
+                "usuario": cliente_doc.get("usuario", ""),
+                "nombre": cliente_doc.get("nombre", ""),
+                "cedula": cliente_doc.get("cedula", ""),
+                "direccion": cliente_doc.get("direccion", ""),
+                "telefono": cliente_doc.get("telefono", ""),
+                "rol": "cliente",
+            }
+        except Exception as e:
+            # Si hay error al consultar la BD, usar datos del token como fallback
+            print(f"WARNING: Error consultando cliente en BD: {e}, usando datos del token")
+            return payload
+            
+    except jwt.PyJWTError:
+        raise credentials_exception

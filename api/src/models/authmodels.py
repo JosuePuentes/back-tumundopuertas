@@ -130,7 +130,30 @@ class Cliente(BaseModel):
     rif: str
     direccion: str
     telefono: str
-    
+
+# Modelos para clientes autenticados (usuarios clientes)
+class ClienteRegister(BaseModel):
+    usuario: str
+    password: str
+    nombre: str
+    cedula: str
+    direccion: str
+    telefono: str
+
+class ClienteLogin(BaseModel):
+    usuario: str
+    password: str
+
+class ClienteResponse(BaseModel):
+    id: str
+    usuario: str
+    nombre: str
+    cedula: str
+    direccion: str
+    telefono: str
+    rol: str = "cliente"
+    fecha_creacion: str
+    activo: bool
 
 class PedidoItem(BaseModel):
     id: str

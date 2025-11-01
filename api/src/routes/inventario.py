@@ -169,7 +169,15 @@ async def cargar_existencias_desde_pedido(pedido_id: str = Body(..., embed=True)
 
 @router.get("/all")
 async def get_all_items():
-    items = list(items_collection.find())
+    """
+    Obtener todos los items del inventario.
+    Filtra solo items activos con precio > 0.
+    """
+    # Filtrar items activos con precio > 0
+    items = list(items_collection.find({
+        "activo": True,
+        "precio": {"$gt": 0}
+    }))
     for item in items:
         item["_id"] = str(item["_id"])
     return items

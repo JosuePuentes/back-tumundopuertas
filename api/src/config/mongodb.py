@@ -11,7 +11,8 @@ client = MongoClient(MONGO_URI, tls=True, tlsAllowInvalidCertificates=True)
 db = client["PROCESOS"]
 
 usuarios_collection = db["USUARIOS"]
-clientes_collection = db["CLIENTES"]
+clientes_collection = db["CLIENTES"]  # Clientes de negocios (para pedidos)
+clientes_usuarios_collection = db["clientes_usuarios"]  # Usuarios clientes autenticados
 empleados_collection = db["EMPLEADOS"]
 pedidos_collection = db["PEDIDOS"]
 items_collection = db["INVENTARIO"]
