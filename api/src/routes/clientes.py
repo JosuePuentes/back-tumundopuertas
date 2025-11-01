@@ -706,3 +706,109 @@ async def get_soporte_reclamos_cliente(cliente_id: str, cliente: dict = Depends(
         import traceback
         print(f"ERROR GET SOPORTE RECLAMOS TRACEBACK: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error al obtener tickets: {str(e)}")
+
+# ----------------------------- DATOS COMPLETOS DEL DASHBOARD -----------------------------
+
+@router.get("/{cliente_id}/datos-dashboard")
+async def get_datos_dashboard_cliente(cliente_id: str, cliente: dict = Depends(get_current_cliente)):
+    """
+    Obtener TODOS los datos del dashboard del cliente autenticado en una sola llamada.
+    Incluye: carrito, borradores, preferencias y tickets de soporte/reclamos.
+    
+    Este endpoint es útil para cargar todos los datos al iniciar sesión o recargar la página.
+    Solo puede ver sus propios datos.
+    """
+    try:
+        # Verificar que el cliente_id coincida con el cliente autenticado
+        if cliente.get("id") != cliente_id:
+            raise HTTPException(status_code=403, detail="No puedes ver los datos de otros clientes")
+        
+        try:
+            obj_id = ObjectId(cliente_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="ID de cliente inválido")
+        
+        # Obtener carrito
+        carrito_doc = carritos_clientes_collection.find_one({"cliente_id": cliente_id})
+        carrito = {
+            "cliente_id": cliente_id,
+            "items": [],
+            "fecha_actualizacion": None
+        }
+        if carrito_doc:
+            carrito = {
+                "cliente_id": cliente_id,
+                "items": carrito_doc.get("items", []),
+                "fecha_actualizacion": carrito_doc.get("fecha_actualizacion")
+            }
+            if "_id" in carrito_doc:
+                carrito["_id"] = str(carrito_doc["_id"])
+        
+        # Obtener borradores
+        borradores_doc = borradores_clientes_collection.find_one({"cliente_id": cliente_id})
+        borradores = {
+            "cliente_id": cliente_id,
+            "borradores": {
+                "reclamo": None,
+                "soporte": None
+            },
+            "fecha_actualizacion": None
+        }
+        if borradores_doc:
+            borradores = {
+                "cliente_id": cliente_id,
+                "borradores": borradores_doc.get("borradores", {"reclamo": None, "soporte": None}),
+                "fecha_actualizacion": borradores_doc.get("fecha_actualizacion")
+            }
+            if "_id" in borradores_doc:
+                borradores["_id"] = str(borradores_doc["_id"])
+            # Asegurar estructura de borradores
+            if "borradores" not in borradores or not isinstance(borradores["borradores"], dict):
+                borradores["borradores"] = {"reclamo": None, "soporte": None}
+        
+        # Obtener preferencias
+        preferencias_doc = preferencias_clientes_collection.find_one({"cliente_id": cliente_id})
+        preferencias = {
+            "cliente_id": cliente_id,
+            "vista_activa": "catalogo",
+            "configuraciones": {},
+            "fecha_actualizacion": None
+        }
+        if preferencias_doc:
+            preferencias = {
+                "cliente_id": cliente_id,
+                "vista_activa": preferencias_doc.get("vista_activa", "catalogo"),
+                "configuraciones": preferencias_doc.get("configuraciones", {}),
+                "fecha_actualizacion": preferencias_doc.get("fecha_actualizacion")
+            }
+            if "_id" in preferencias_doc:
+                preferencias["_id"] = str(preferencias_doc["_id"])
+        
+        # Obtener tickets de soporte/reclamos
+        tickets = list(soporte_reclamos_clientes_collection.find({
+            "cliente_id": cliente_id
+        }).sort("fecha_creacion", -1))
+        for ticket in tickets:
+            ticket["_id"] = str(ticket["_id"])
+        
+        print(f"DEBUG DATOS DASHBOARD: Cliente {cliente_id}")
+        print(f"  - Carrito: {len(carrito.get('items', []))} items")
+        print(f"  - Borradores: reclamo={borradores.get('borradores', {}).get('reclamo') is not None}, soporte={borradores.get('borradores', {}).get('soporte') is not None}")
+        print(f"  - Preferencias: vista_activa={preferencias.get('vista_activa')}")
+        print(f"  - Tickets: {len(tickets)} tickets")
+        
+        return {
+            "cliente_id": cliente_id,
+            "carrito": carrito,
+            "borradores": borradores,
+            "preferencias": preferencias,
+            "tickets": tickets
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR GET DATOS DASHBOARD: {str(e)}")
+        import traceback
+        print(f"ERROR GET DATOS DASHBOARD TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener datos del dashboard: {str(e)}")
