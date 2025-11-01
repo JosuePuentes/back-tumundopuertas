@@ -518,3 +518,190 @@ async def save_preferencias_cliente(
         import traceback
         print(f"ERROR SAVE PREFERENCIAS TRACEBACK: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error al guardar preferencias: {str(e)}")
+
+# ----------------------------- SOPORTE Y RECLAMOS -----------------------------
+
+@router.post("/{cliente_id}/soporte")
+async def enviar_soporte_cliente(
+    cliente_id: str,
+    soporte_data: dict = Body(...),
+    cliente: dict = Depends(get_current_cliente)
+):
+    """
+    Enviar formulario de soporte del cliente autenticado.
+    Guarda el ticket de soporte en la BD y elimina el borrador si existe.
+    Solo puede enviar su propio soporte.
+    """
+    try:
+        # Verificar que el cliente_id coincida con el cliente autenticado
+        if cliente.get("id") != cliente_id:
+            raise HTTPException(status_code=403, detail="No puedes enviar soporte de otros clientes")
+        
+        try:
+            obj_id = ObjectId(cliente_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="ID de cliente inválido")
+        
+        # Validar datos requeridos
+        asunto = soporte_data.get("asunto", "").strip()
+        mensaje = soporte_data.get("mensaje", "").strip()
+        
+        if not asunto:
+            raise HTTPException(status_code=400, detail="El asunto es requerido")
+        if not mensaje:
+            raise HTTPException(status_code=400, detail="El mensaje es requerido")
+        
+        # Preparar documento del ticket de soporte
+        ticket = {
+            "cliente_id": cliente_id,
+            "cliente_nombre": cliente.get("nombre", ""),
+            "tipo": "soporte",
+            "asunto": asunto,
+            "mensaje": mensaje,
+            "archivos": soporte_data.get("archivos", []),  # URLs de archivos adjuntos
+            "estado": "pendiente",  # pendiente, en_proceso, resuelto
+            "fecha_creacion": datetime.utcnow().isoformat(),
+            "fecha_actualizacion": datetime.utcnow().isoformat(),
+            "datos_adicionales": soporte_data.get("datos_adicionales", {})
+        }
+        
+        # Guardar el ticket
+        result = soporte_reclamos_clientes_collection.insert_one(ticket)
+        ticket_creado = soporte_reclamos_clientes_collection.find_one({"_id": result.inserted_id})
+        ticket_creado["_id"] = str(ticket_creado["_id"])
+        
+        # Eliminar el borrador después de enviarlo
+        try:
+            borradores_clientes_collection.update_one(
+                {"cliente_id": cliente_id},
+                {
+                    "$unset": {"borradores.soporte": ""},
+                    "$set": {"fecha_actualizacion": datetime.utcnow().isoformat()}
+                }
+            )
+        except Exception as e:
+            print(f"WARNING: Error al eliminar borrador de soporte: {e}")
+        
+        return {
+            "message": "Soporte enviado correctamente",
+            "ticket": ticket_creado
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR ENVIAR SOPORTE: {str(e)}")
+        import traceback
+        print(f"ERROR ENVIAR SOPORTE TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al enviar soporte: {str(e)}")
+
+@router.post("/{cliente_id}/reclamo")
+async def enviar_reclamo_cliente(
+    cliente_id: str,
+    reclamo_data: dict = Body(...),
+    cliente: dict = Depends(get_current_cliente)
+):
+    """
+    Enviar formulario de reclamo del cliente autenticado.
+    Guarda el ticket de reclamo en la BD y elimina el borrador si existe.
+    Solo puede enviar su propio reclamo.
+    """
+    try:
+        # Verificar que el cliente_id coincida con el cliente autenticado
+        if cliente.get("id") != cliente_id:
+            raise HTTPException(status_code=403, detail="No puedes enviar reclamos de otros clientes")
+        
+        try:
+            obj_id = ObjectId(cliente_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="ID de cliente inválido")
+        
+        # Validar datos requeridos
+        asunto = reclamo_data.get("asunto", "").strip()
+        mensaje = reclamo_data.get("mensaje", "").strip()
+        pedido_id = reclamo_data.get("pedido_id", "").strip()  # Opcional
+        
+        if not asunto:
+            raise HTTPException(status_code=400, detail="El asunto es requerido")
+        if not mensaje:
+            raise HTTPException(status_code=400, detail="El mensaje es requerido")
+        
+        # Preparar documento del ticket de reclamo
+        ticket = {
+            "cliente_id": cliente_id,
+            "cliente_nombre": cliente.get("nombre", ""),
+            "tipo": "reclamo",
+            "asunto": asunto,
+            "mensaje": mensaje,
+            "pedido_id": pedido_id if pedido_id else None,
+            "archivos": reclamo_data.get("archivos", []),  # URLs de archivos adjuntos
+            "estado": "pendiente",  # pendiente, en_proceso, resuelto
+            "fecha_creacion": datetime.utcnow().isoformat(),
+            "fecha_actualizacion": datetime.utcnow().isoformat(),
+            "datos_adicionales": reclamo_data.get("datos_adicionales", {})
+        }
+        
+        # Guardar el ticket
+        result = soporte_reclamos_clientes_collection.insert_one(ticket)
+        ticket_creado = soporte_reclamos_clientes_collection.find_one({"_id": result.inserted_id})
+        ticket_creado["_id"] = str(ticket_creado["_id"])
+        
+        # Eliminar el borrador después de enviarlo
+        try:
+            borradores_clientes_collection.update_one(
+                {"cliente_id": cliente_id},
+                {
+                    "$unset": {"borradores.reclamo": ""},
+                    "$set": {"fecha_actualizacion": datetime.utcnow().isoformat()}
+                }
+            )
+        except Exception as e:
+            print(f"WARNING: Error al eliminar borrador de reclamo: {e}")
+        
+        return {
+            "message": "Reclamo enviado correctamente",
+            "ticket": ticket_creado
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR ENVIAR RECLAMO: {str(e)}")
+        import traceback
+        print(f"ERROR ENVIAR RECLAMO TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al enviar reclamo: {str(e)}")
+
+@router.get("/{cliente_id}/soporte-reclamos")
+async def get_soporte_reclamos_cliente(cliente_id: str, cliente: dict = Depends(get_current_cliente)):
+    """
+    Obtener todos los tickets de soporte y reclamos del cliente autenticado.
+    Solo puede ver sus propios tickets.
+    """
+    try:
+        # Verificar que el cliente_id coincida con el cliente autenticado
+        if cliente.get("id") != cliente_id:
+            raise HTTPException(status_code=403, detail="No puedes ver tickets de otros clientes")
+        
+        try:
+            obj_id = ObjectId(cliente_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="ID de cliente inválido")
+        
+        # Buscar todos los tickets del cliente
+        tickets = list(soporte_reclamos_clientes_collection.find({
+            "cliente_id": cliente_id
+        }).sort("fecha_creacion", -1))
+        
+        # Convertir ObjectId a string
+        for ticket in tickets:
+            ticket["_id"] = str(ticket["_id"])
+        
+        return tickets
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR GET SOPORTE RECLAMOS: {str(e)}")
+        import traceback
+        print(f"ERROR GET SOPORTE RECLAMOS TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener tickets: {str(e)}")

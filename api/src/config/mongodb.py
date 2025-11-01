@@ -21,6 +21,7 @@ items_collection = db["INVENTARIO"]
 carritos_clientes_collection = db["carritos_clientes"]
 borradores_clientes_collection = db["borradores_clientes"]
 preferencias_clientes_collection = db["preferencias_clientes"]
+soporte_reclamos_clientes_collection = db["soporte_reclamos_clientes"]
 
 def init_clientes_indexes():
     """
