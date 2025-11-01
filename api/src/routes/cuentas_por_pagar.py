@@ -83,7 +83,7 @@ async def get_cuenta_por_pagar(
 
 @router.post("/", response_model=CuentaPorPagar)
 async def create_cuenta_por_pagar(
-    request_body: dict = Body(...),
+    request: CrearCuentaPorPagarRequest,
     user: dict = Depends(get_current_user)
 ):
     """
@@ -96,49 +96,10 @@ async def create_cuenta_por_pagar(
     - monto_total debe ser mayor a 0
     - Si hay items, el monto_total debe coincidir con la suma de subtotales
     - Proveedor_nombre es requerido
+    
+    Nota: Acepta tanto camelCase (proveedorNombre, montoTotal) como snake_case (proveedor_nombre, monto_total)
     """
     try:
-        # Log del body raw recibido
-        print(f"DEBUG CREATE CUENTA: Body raw recibido:")
-        print(f"  Body completo: {request_body}")
-        print(f"  Tipo: {type(request_body)}")
-        print(f"  Keys: {list(request_body.keys()) if isinstance(request_body, dict) else 'N/A'}")
-        
-        # Convertir camelCase a snake_case si es necesario
-        # El frontend puede estar enviando en camelCase
-        data = {}
-        for key, value in request_body.items():
-            # Convertir camelCase a snake_case
-            snake_key = ""
-            for char in key:
-                if char.isupper():
-                    snake_key += "_" + char.lower()
-                else:
-                    snake_key += char
-            
-            # Manejar casos especiales
-            if key == "proveedorNombre":
-                data["proveedor_nombre"] = value
-            elif key == "proveedorId":
-                data["proveedor_id"] = value
-            elif key == "proveedorRif":
-                data["proveedor_rif"] = value
-            elif key == "proveedorTelefono":
-                data["proveedor_telefono"] = value
-            elif key == "proveedorDireccion":
-                data["proveedor_direccion"] = value
-            elif key == "fechaVencimiento":
-                data["fecha_vencimiento"] = value
-            elif key == "montoTotal":
-                data["monto_total"] = value
-            else:
-                data[snake_key] = value
-        
-        print(f"DEBUG CREATE CUENTA: Datos convertidos:")
-        print(f"  {data}")
-        
-        # Crear el objeto de request con los datos convertidos
-        request = CrearCuentaPorPagarRequest(**data)
         
         # Log de debug para ver qué datos se están recibiendo
         print(f"DEBUG CREATE CUENTA: Request parseado:")

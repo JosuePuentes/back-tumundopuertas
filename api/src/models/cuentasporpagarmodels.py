@@ -12,16 +12,17 @@ class ProveedorItem(BaseModel):
 
 class CuentaPorPagarItem(BaseModel):
     """Item de inventario asociado a una cuenta"""
-    item_id: Optional[str] = None
+    item_id: Optional[str] = Field(None, alias="itemId")
     codigo: Optional[str] = None
     nombre: str
     cantidad: float
-    costo_unitario: float
+    costo_unitario: float = Field(..., alias="costoUnitario")
     subtotal: float
     
     class Config:
         extra = "ignore"
         arbitrary_types_allowed = True
+        populate_by_name = True
 
 class AbonoCuenta(BaseModel):
     """Abono realizado a una cuenta"""
@@ -56,15 +57,15 @@ class CuentaPorPagar(BaseModel):
 
 class CrearCuentaPorPagarRequest(BaseModel):
     """Request para crear una nueva cuenta por pagar"""
-    proveedor_id: Optional[str] = None
-    proveedor_nombre: str
-    proveedor_rif: Optional[str] = None
-    proveedor_telefono: Optional[str] = None
-    proveedor_direccion: Optional[str] = None
-    fecha_vencimiento: Optional[str] = None
+    proveedor_id: Optional[str] = Field(None, alias="proveedorId")
+    proveedor_nombre: str = Field(..., alias="proveedorNombre")
+    proveedor_rif: Optional[str] = Field(None, alias="proveedorRif")
+    proveedor_telefono: Optional[str] = Field(None, alias="proveedorTelefono")
+    proveedor_direccion: Optional[str] = Field(None, alias="proveedorDireccion")
+    fecha_vencimiento: Optional[str] = Field(None, alias="fechaVencimiento")
     descripcion: Optional[str] = None
     items: Optional[List[CuentaPorPagarItem]] = []
-    monto_total: float
+    monto_total: float = Field(..., alias="montoTotal")
     notas: Optional[str] = None
     
     class Config:
@@ -72,6 +73,8 @@ class CrearCuentaPorPagarRequest(BaseModel):
         extra = "ignore"
         # Permitir tipos arbitrarios por si acaso
         arbitrary_types_allowed = True
+        # Permitir usar tanto alias como nombre de campo
+        populate_by_name = True
 
 class AbonarCuentaRequest(BaseModel):
     """Request para abonar a una cuenta"""
