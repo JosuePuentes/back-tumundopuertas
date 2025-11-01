@@ -160,3 +160,12 @@ app.include_router(facturas_y_pedidos_router, prefix="", tags=["Facturas y Pedid
 async def asignaciones_directo():
     """Endpoint directo para /asignaciones sin prefijo /dashboard"""
     return await get_dashboard_asignaciones()
+
+# Inicializar índices de MongoDB al arrancar la aplicación
+@app.on_event("startup")
+async def startup_event():
+    """Inicializar índices únicos en las colecciones de clientes"""
+    from .config.mongodb import init_clientes_indexes
+    print("🔧 Inicializando índices de MongoDB para datos de clientes...")
+    init_clientes_indexes()
+    print("✅ Inicialización de índices completada")
