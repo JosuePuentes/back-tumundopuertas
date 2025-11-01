@@ -204,9 +204,22 @@ async def create_cuenta_por_pagar(
             "notas": request.notas.strip() if request.notas else None
         }
         
+        # Validar que los campos requeridos no estén vacíos antes de guardar
+        if not cuenta_dict["proveedor_nombre"]:
+            raise HTTPException(status_code=400, detail="El nombre del proveedor es requerido")
+        
         # Insertar la cuenta
         result = cuentas_por_pagar_collection.insert_one(cuenta_dict)
         cuenta_creada = cuentas_por_pagar_collection.find_one({"_id": result.inserted_id})
+        
+        print(f"DEBUG CREAR CUENTA: Cuenta creada en BD:")
+        print(f"  - _id: {cuenta_creada.get('_id')}")
+        print(f"  - proveedor_nombre: '{cuenta_creada.get('proveedor_nombre')}'")
+        print(f"  - proveedor_rif: '{cuenta_creada.get('proveedor_rif')}'")
+        print(f"  - monto_total: {cuenta_creada.get('monto_total')}")
+        print(f"  - saldo_pendiente: {cuenta_creada.get('saldo_pendiente')}")
+        print(f"  - estado: '{cuenta_creada.get('estado')}'")
+        print(f"  - items count: {len(cuenta_creada.get('items', []))}")
         
         # Si hay items del inventario, actualizar las cantidades
         if request.items and len(request.items) > 0:
@@ -244,7 +257,36 @@ async def create_cuenta_por_pagar(
                         print(f"ERROR CREAR CUENTA: Error al actualizar item {item.codigo}: {str(e)}")
                         # No interrumpimos el flujo, solo logueamos el error
         
-        return object_id_to_str(cuenta_creada)
+        # Convertir a formato de respuesta asegurando que todos los campos estén presentes
+        cuenta_response = object_id_to_str(cuenta_creada)
+        
+        # Asegurar que los campos requeridos tengan valores por defecto si están None o vacíos
+        if not cuenta_response.get("proveedor_nombre") or cuenta_response.get("proveedor_nombre") == "":
+            cuenta_response["proveedor_nombre"] = "Sin nombre"
+        if not cuenta_response.get("proveedor_rif"):
+            cuenta_response["proveedor_rif"] = None
+        if cuenta_response.get("monto_total") is None:
+            cuenta_response["monto_total"] = 0.0
+        if cuenta_response.get("saldo_pendiente") is None:
+            cuenta_response["saldo_pendiente"] = cuenta_response.get("monto_total", 0.0)
+        if not cuenta_response.get("estado"):
+            cuenta_response["estado"] = "pendiente"
+        if not cuenta_response.get("historial_abonos"):
+            cuenta_response["historial_abonos"] = []
+        if not cuenta_response.get("items"):
+            cuenta_response["items"] = []
+        
+        print(f"DEBUG CREAR CUENTA: Respuesta final:")
+        print(f"  {cuenta_response}")
+        
+        # Crear instancia del modelo para validación
+        try:
+            cuenta_validada = CuentaPorPagar(**cuenta_response)
+            return cuenta_validada.dict(by_alias=True)
+        except Exception as e:
+            print(f"ERROR CREAR CUENTA: Error al validar modelo: {str(e)}")
+            # Si falla la validación, retornar el diccionario directamente
+            return cuenta_response
         
     except HTTPException:
         raise
