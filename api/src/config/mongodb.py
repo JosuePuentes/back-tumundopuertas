@@ -16,3 +16,8 @@ clientes_usuarios_collection = db["clientes_usuarios"]  # Usuarios clientes aute
 empleados_collection = db["EMPLEADOS"]
 pedidos_collection = db["PEDIDOS"]
 items_collection = db["INVENTARIO"]
+
+# Colecciones para datos del dashboard de clientes
+carritos_clientes_collection = db["carritos_clientes"]
+borradores_clientes_collection = db["borradores_clientes"]
+preferencias_clientes_collection = db["preferencias_clientes"]
