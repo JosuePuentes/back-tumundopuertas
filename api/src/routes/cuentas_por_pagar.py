@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Body, Depends
+from fastapi import APIRouter, HTTPException, Body, Depends, Request
 from typing import List, Optional
 from bson import ObjectId
 from datetime import datetime
@@ -83,7 +83,7 @@ async def get_cuenta_por_pagar(
 
 @router.post("/", response_model=CuentaPorPagar)
 async def create_cuenta_por_pagar(
-    request: CrearCuentaPorPagarRequest,
+    request_body: dict = Body(...),
     user: dict = Depends(get_current_user)
 ):
     """
@@ -98,6 +98,56 @@ async def create_cuenta_por_pagar(
     - Proveedor_nombre es requerido
     """
     try:
+        # Log del body raw recibido
+        print(f"DEBUG CREATE CUENTA: Body raw recibido:")
+        print(f"  Body completo: {request_body}")
+        print(f"  Tipo: {type(request_body)}")
+        print(f"  Keys: {list(request_body.keys()) if isinstance(request_body, dict) else 'N/A'}")
+        
+        # Convertir camelCase a snake_case si es necesario
+        # El frontend puede estar enviando en camelCase
+        data = {}
+        for key, value in request_body.items():
+            # Convertir camelCase a snake_case
+            snake_key = ""
+            for char in key:
+                if char.isupper():
+                    snake_key += "_" + char.lower()
+                else:
+                    snake_key += char
+            
+            # Manejar casos especiales
+            if key == "proveedorNombre":
+                data["proveedor_nombre"] = value
+            elif key == "proveedorId":
+                data["proveedor_id"] = value
+            elif key == "proveedorRif":
+                data["proveedor_rif"] = value
+            elif key == "proveedorTelefono":
+                data["proveedor_telefono"] = value
+            elif key == "proveedorDireccion":
+                data["proveedor_direccion"] = value
+            elif key == "fechaVencimiento":
+                data["fecha_vencimiento"] = value
+            elif key == "montoTotal":
+                data["monto_total"] = value
+            else:
+                data[snake_key] = value
+        
+        print(f"DEBUG CREATE CUENTA: Datos convertidos:")
+        print(f"  {data}")
+        
+        # Crear el objeto de request con los datos convertidos
+        request = CrearCuentaPorPagarRequest(**data)
+        
+        # Log de debug para ver qué datos se están recibiendo
+        print(f"DEBUG CREATE CUENTA: Request parseado:")
+        print(f"  - proveedor_nombre: {request.proveedor_nombre}")
+        print(f"  - proveedor_id: {request.proveedor_id}")
+        print(f"  - monto_total: {request.monto_total}")
+        print(f"  - items count: {len(request.items) if request.items else 0}")
+        print(f"  - fecha_vencimiento: {request.fecha_vencimiento}")
+        print(f"  - descripcion: {request.descripcion}")
         # Validaciones básicas
         if not request.proveedor_nombre or not request.proveedor_nombre.strip():
             raise HTTPException(status_code=400, detail="El nombre del proveedor es requerido")

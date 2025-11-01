@@ -18,6 +18,10 @@ class CuentaPorPagarItem(BaseModel):
     cantidad: float
     costo_unitario: float
     subtotal: float
+    
+    class Config:
+        extra = "ignore"
+        arbitrary_types_allowed = True
 
 class AbonoCuenta(BaseModel):
     """Abono realizado a una cuenta"""
@@ -62,6 +66,12 @@ class CrearCuentaPorPagarRequest(BaseModel):
     items: Optional[List[CuentaPorPagarItem]] = []
     monto_total: float
     notas: Optional[str] = None
+    
+    class Config:
+        # Permitir campos adicionales que puedan venir del frontend
+        extra = "ignore"
+        # Permitir tipos arbitrarios por si acaso
+        arbitrary_types_allowed = True
 
 class AbonarCuentaRequest(BaseModel):
     """Request para abonar a una cuenta"""

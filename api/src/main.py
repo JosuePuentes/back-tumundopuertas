@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from .routes.auth import router as auth_router
@@ -78,12 +79,32 @@ app.add_middleware(
     ],
 )
 
+# Manejador de errores de validación
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Manejador personalizado para errores de validación (422)"""
+    print(f"ERROR VALIDACION 422:")
+    print(f"  URL: {request.url}")
+    print(f"  Method: {request.method}")
+    print(f"  Errors: {exc.errors()}")
+    print(f"  Body: {await request.body()}")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": exc.errors(),
+            "body": str(await request.body()) if hasattr(request, 'body') else None
+        }
+    )
+
 # Middleware para manejo de errores
 @app.middleware("http")
 async def catch_exceptions_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
         return response
+    except RequestValidationError as e:
+        # Esto será manejado por el exception_handler
+        raise
     except Exception as e:
         print(f"ERROR MIDDLEWARE: {str(e)}")
         print(f"ERROR MIDDLEWARE TRACEBACK: {traceback.format_exc()}")
