@@ -203,6 +203,60 @@ async def create_item(item: Item):
     result = items_collection.insert_one(item.dict(by_alias=True, exclude_unset=True))
     return {"message": "Item creado correctamente", "id": str(result.inserted_id)}
 
+@router.patch("/id/{item_id}/")
+async def patch_item(item_id: str, update_data: dict = Body(...)):
+    """
+    Actualizar parcialmente un item del inventario.
+    Permite actualizar solo los campos especificados en el body.
+    
+    Ejemplo:
+    {
+        "cantidad": 10.5,
+        "precio": 150.0
+    }
+    """
+    try:
+        # Validar ObjectId
+        try:
+            item_obj_id = ObjectId(item_id)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"item_id no es un ObjectId válido: {str(e)}")
+
+        # Verificar que el item existe
+        item = items_collection.find_one({"_id": item_obj_id})
+        if not item:
+            raise HTTPException(status_code=404, detail="Item no encontrado")
+
+        # Filtrar campos que no deben actualizarse
+        excluded_fields = {"_id", "id"}
+        update_data_clean = {k: v for k, v in update_data.items() if k not in excluded_fields}
+        
+        # Verificar que hay datos para actualizar
+        if not update_data_clean:
+            raise HTTPException(status_code=400, detail="No hay datos para actualizar")
+
+        # Realizar la actualización
+        result = items_collection.update_one(
+            {"_id": item_obj_id},
+            {"$set": update_data_clean}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Item no encontrado")
+        
+        # Obtener el item actualizado
+        item_actualizado = items_collection.find_one({"_id": item_obj_id})
+        item_actualizado["_id"] = str(item_actualizado["_id"])
+            
+        return {"message": "Item actualizado correctamente", "id": item_id, "item": item_actualizado}
+        
+    except HTTPException:
+        # Re-lanzar HTTPExceptions (errores conocidos)
+        raise
+    except Exception as e:
+        # Capturar cualquier otro error inesperado
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+
 @router.put("/id/{item_id}/")
 async def update_item(item_id: str, item: Item):
     try:
