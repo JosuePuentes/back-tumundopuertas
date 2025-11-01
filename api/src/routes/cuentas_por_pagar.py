@@ -83,7 +83,7 @@ async def get_cuenta_por_pagar(
 
 @router.post("/", response_model=CuentaPorPagar)
 async def create_cuenta_por_pagar(
-    request: CrearCuentaPorPagarRequest,
+    request_body: dict = Body(...),
     user: dict = Depends(get_current_user)
 ):
     """
@@ -97,9 +97,68 @@ async def create_cuenta_por_pagar(
     - Si hay items, el monto_total debe coincidir con la suma de subtotales
     - Proveedor_nombre es requerido
     
-    Nota: Acepta tanto camelCase (proveedorNombre, montoTotal) como snake_case (proveedor_nombre, monto_total)
+    Acepta dos formatos:
+    1. Formato plano: { "proveedorNombre": "...", "montoTotal": ..., "items": [...] }
+    2. Formato anidado: { "proveedor": { "nombre": "...", "rif": "...", ... }, "total": ..., "items": [...] }
     """
     try:
+        print(f"DEBUG CREATE CUENTA: Body recibido: {request_body}")
+        
+        # Normalizar el request body a la estructura esperada
+        normalized_data = {}
+        
+        # Manejar proveedor (puede venir como objeto anidado o campos planos)
+        if "proveedor" in request_body and isinstance(request_body["proveedor"], dict):
+            # Formato anidado: { "proveedor": { "nombre": "...", ... } }
+            proveedor = request_body["proveedor"]
+            normalized_data["proveedorNombre"] = proveedor.get("nombre") or proveedor.get("nombreCompleto") or ""
+            normalized_data["proveedorRif"] = proveedor.get("rif")
+            normalized_data["proveedorTelefono"] = proveedor.get("telefono")
+            normalized_data["proveedorDireccion"] = proveedor.get("direccion")
+            normalized_data["proveedorId"] = proveedor.get("id") or proveedor.get("_id")
+        else:
+            # Formato plano: campos directos
+            normalized_data["proveedorNombre"] = request_body.get("proveedorNombre") or request_body.get("proveedor_nombre") or ""
+            normalized_data["proveedorRif"] = request_body.get("proveedorRif") or request_body.get("proveedor_rif")
+            normalized_data["proveedorTelefono"] = request_body.get("proveedorTelefono") or request_body.get("proveedor_telefono")
+            normalized_data["proveedorDireccion"] = request_body.get("proveedorDireccion") or request_body.get("proveedor_direccion")
+            normalized_data["proveedorId"] = request_body.get("proveedorId") or request_body.get("proveedor_id")
+        
+        # Manejar montoTotal (puede venir como "total" o "montoTotal")
+        normalized_data["montoTotal"] = (
+            request_body.get("montoTotal") or 
+            request_body.get("monto_total") or 
+            request_body.get("total") or 
+            0
+        )
+        
+        # Manejar items (normalizar estructura)
+        items_raw = request_body.get("items", [])
+        normalized_items = []
+        for item in items_raw:
+            normalized_item = {
+                "itemId": item.get("itemId") or item.get("item_id") or item.get("_id"),
+                "codigo": item.get("codigo"),
+                "nombre": item.get("nombre") or item.get("descripcion", ""),
+                "cantidad": float(item.get("cantidad", 0)),
+                # costoUnitario puede venir como "costo" o "costoUnitario"
+                "costoUnitario": float(item.get("costoUnitario") or item.get("costo_unitario") or item.get("costo", 0)),
+                # subtotal se calcula si no viene
+                "subtotal": float(item.get("subtotal") or (float(item.get("cantidad", 0)) * float(item.get("costoUnitario") or item.get("costo") or item.get("costo_unitario") or 0)))
+            }
+            normalized_items.append(normalized_item)
+        
+        normalized_data["items"] = normalized_items
+        
+        # Otros campos
+        normalized_data["fechaVencimiento"] = request_body.get("fechaVencimiento") or request_body.get("fecha_vencimiento")
+        normalized_data["descripcion"] = request_body.get("descripcion")
+        normalized_data["notas"] = request_body.get("notas")
+        
+        print(f"DEBUG CREATE CUENTA: Datos normalizados: {normalized_data}")
+        
+        # Crear el objeto de request con los datos normalizados
+        request = CrearCuentaPorPagarRequest(**normalized_data)
         
         # Log de debug para ver qué datos se están recibiendo
         print(f"DEBUG CREATE CUENTA: Request parseado:")
