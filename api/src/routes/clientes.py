@@ -4,7 +4,8 @@ from ..config.mongodb import (
     clientes_usuarios_collection,
     carritos_clientes_collection,
     borradores_clientes_collection,
-    preferencias_clientes_collection
+    preferencias_clientes_collection,
+    soporte_reclamos_clientes_collection
 )
 from ..models.authmodels import Cliente
 from ..auth.auth import get_current_cliente
