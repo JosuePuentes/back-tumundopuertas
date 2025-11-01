@@ -22,6 +22,10 @@ import TerminarAsignacion from "@/organism/teminarasignacion/TerminarAsignacion"
 import MonitorPedidos from "@/organism/monitorped/MonitorPedidos";
 import  Pedidos  from "@/organism/pagosFacturacion/Pedidos";
 import MisPagos from "@/organism/pagosFacturacion/MisPagos";
+// Importar CuentasPorPagar - El componente debe existir en: frontend/src/organism/cuentasPorPagar/CuentasPorPagar.tsx
+// @ts-ignore - Permitir importación aunque el archivo pueda no existir aún
+import CuentasPorPagar from "@/organism/cuentasPorPagar/CuentasPorPagar";
+
 function AppRouter() {
   // Función para verificar token y permisos
   const getPermisos = (): string[] => {
@@ -217,6 +221,14 @@ function AppRouter() {
           element={
             <ProtectedRoute permiso="admin">
               <Register />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="cuentas-por-pagar"
+          element={
+            <ProtectedRoute permiso="cuentas_por_pagar">
+              <CuentasPorPagar />
             </ProtectedRoute>
           }
         />

@@ -36,7 +36,8 @@ interface RegisterResponse {
     "dashboard",
     "monitorpedidos",
     "terminarasignacion",
-    "pagos"
+    "pagos",
+    "cuentas_por_pagar"
 ];
 
   const Register: React.FC = () => {

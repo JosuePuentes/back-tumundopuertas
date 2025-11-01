@@ -29,6 +29,7 @@ const defaultLinks = [
   { label: "Modificar Empleado", href: "/modificarempleado" },
   { label: "Crear Usuario", href: "/register" },
   { label: "Modificar Usuario", href: "/modificarusuario" },
+  { label: "Cuentas por Pagar", href: "/cuentas-por-pagar" },
   { label: "Reportes Comision", href: "/reportes/comisiones/produccion" },
 ];
 
@@ -52,6 +53,7 @@ const permisosRuta: Record<string, string | null> = {
   "/monitorpedidos": "monitorpedidos",
   "/pagos": "pagos",
   "/mispagos": "pagos",
+  "/cuentas-por-pagar": "cuentas_por_pagar",
   "/home": null,
   "/": null,
 };

@@ -33,7 +33,8 @@ interface Usuario {
     "monitorpedidos",
     "terminarasignacion",
     "dashboard",
-    "pagos"
+    "pagos",
+    "cuentas_por_pagar"
 ];
 
 const ModificarUsuario: React.FC = () => {
@@ -151,6 +152,14 @@ const ModificarUsuario: React.FC = () => {
       if (!res.ok) throw new Error("Error al modificar usuario");
       const updated = await res.json();
       setUsuarios((prev) => prev.map((u) => (u._id === updated._id ? updated : u)));
+      
+      // Si el usuario modificado es el mismo que está logueado, actualizar sus permisos en localStorage
+      const usuarioActual = localStorage.getItem("usuario");
+      if (updated.usuario === usuarioActual && updated.permisos) {
+        localStorage.setItem("permisos", JSON.stringify(updated.permisos));
+        console.log("✅ Permisos actualizados en localStorage:", updated.permisos);
+      }
+      
       setMensaje("Usuario modificado correctamente ✅");
       setUsuarioSeleccionado(updated);
       navigate(`/modificarusuario`);
