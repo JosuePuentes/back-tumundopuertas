@@ -474,3 +474,53 @@ async def get_facturas_cliente(cliente_id: str, cliente: dict = Depends(get_curr
         print(f"ERROR GET FACTURAS CLIENTE TRACEBACK: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error al obtener facturas: {str(e)}")
 
+@router.get("/facturas/pedido/{pedido_id}")
+async def get_factura_por_pedido(pedido_id: str, cliente: dict = Depends(get_current_cliente)):
+    """
+    Obtener factura de cliente por pedido_id.
+    Busca en la colección facturas_cliente.
+    Solo puede ver facturas de sus propios pedidos.
+    """
+    try:
+        # Buscar factura por pedido_id
+        factura = facturas_cliente_collection.find_one({"pedido_id": pedido_id})
+        
+        if not factura:
+            raise HTTPException(status_code=404, detail="Factura no encontrada para este pedido")
+        
+        # Verificar que la factura pertenezca al cliente autenticado
+        cliente_id = cliente.get("id")
+        if factura.get("cliente_id") != cliente_id:
+            raise HTTPException(status_code=403, detail="No puedes ver facturas de otros clientes")
+        
+        # Convertir ObjectId a string
+        factura["_id"] = str(factura["_id"])
+        
+        # Transformar a camelCase para el frontend
+        factura_response = {
+            "id": factura.get("_id"),
+            "pedido_id": factura.get("pedido_id"),
+            "numero_factura": factura.get("numero_factura"),
+            "cliente_id": factura.get("cliente_id"),
+            "cliente_nombre": factura.get("cliente_nombre"),
+            "fecha_creacion": factura.get("fecha_creacion"),
+            "fecha_facturacion": factura.get("fecha_facturacion"),
+            "items": factura.get("items", []),
+            "monto_total": float(factura.get("monto_total", 0)),
+            "monto_abonado": float(factura.get("monto_abonado", 0)),
+            "saldo_pendiente": float(factura.get("saldo_pendiente", 0)),
+            "estado": factura.get("estado", "pendiente"),
+            "historial_abonos": factura.get("historial_abonos", []),
+            "datos_completos": factura.get("datos_completos", {})
+        }
+        
+        return factura_response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR GET FACTURA POR PEDIDO: {str(e)}")
+        import traceback
+        print(f"ERROR GET FACTURA POR PEDIDO TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener factura: {str(e)}")
+

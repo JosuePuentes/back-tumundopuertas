@@ -2,7 +2,7 @@ from typing import List, Optional, Union
 from fastapi import APIRouter, HTTPException, Body, Depends, Query
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
-from ..config.mongodb import pedidos_collection, db, items_collection, clientes_collection, clientes_usuarios_collection
+from ..config.mongodb import pedidos_collection, db, items_collection, clientes_collection, clientes_usuarios_collection, facturas_cliente_collection
 from ..models.authmodels import Pedido
 from ..auth.auth import get_current_user, get_current_cliente
 from pydantic import BaseModel
