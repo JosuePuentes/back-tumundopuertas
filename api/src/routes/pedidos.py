@@ -4287,6 +4287,59 @@ async def actualizar_pago(
             update
         )
 
+        # Si es un pedido de cliente (tipo "cliente"), actualizar también la factura en facturas_cliente
+        if pedido.get("tipo") == "cliente" and monto is not None and monto > 0:
+            try:
+                # Buscar la factura asociada al pedido
+                factura = facturas_cliente_collection.find_one({"pedido_id": pedido_id})
+                
+                if factura:
+                    # Crear registro de abono para la factura
+                    abono_factura = {
+                        "fecha": datetime.utcnow().isoformat(),
+                        "monto": float(monto),
+                        "metodo_pago_id": str(metodo) if metodo else None,
+                        "metodo_pago_nombre": metodo if isinstance(metodo, str) else None,
+                        "numero_referencia": data.get("numero_referencia"),
+                        "comprobante": data.get("comprobante")
+                    }
+                    
+                    # Calcular nuevos valores
+                    monto_abonado_actual = float(factura.get("monto_abonado", 0))
+                    nuevo_monto_abonado = monto_abonado_actual + monto
+                    saldo_pendiente_actual = float(factura.get("saldo_pendiente", factura.get("monto_total", 0)))
+                    nuevo_saldo_pendiente = saldo_pendiente_actual - monto
+                    
+                    # Actualizar la factura
+                    update_factura = {
+                        "$inc": {
+                            "monto_abonado": monto,
+                            "saldo_pendiente": -monto
+                        },
+                        "$push": {"historial_abonos": abono_factura}
+                    }
+                    
+                    # Si el saldo pendiente queda en 0, cambiar estado a "pagada"
+                    if nuevo_saldo_pendiente <= 0.01:
+                        if "$set" not in update_factura:
+                            update_factura["$set"] = {}
+                        update_factura["$set"]["estado"] = "pagada"
+                    
+                    facturas_cliente_collection.update_one(
+                        {"pedido_id": pedido_id},
+                        update_factura
+                    )
+                    
+                    print(f"DEBUG PAGO: Factura actualizada para pedido {pedido_id}")
+                    print(f"  - Monto abonado: {monto_abonado_actual} -> {nuevo_monto_abonado}")
+                    print(f"  - Saldo pendiente: {saldo_pendiente_actual} -> {nuevo_saldo_pendiente}")
+                    
+            except Exception as e:
+                print(f"ERROR PAGO: Error al actualizar factura del cliente: {e}")
+                import traceback
+                print(f"TRACEBACK: {traceback.format_exc()}")
+                # No interrumpimos el flujo principal, solo logueamos
+
         # Si hay un método de pago y un monto, incrementar el saldo del método
         if metodo and monto is not None and monto > 0:
             print(f"DEBUG PAGO: Incrementando saldo del método '{metodo}' en {monto}")
@@ -6258,6 +6311,71 @@ async def create_pedido_cliente(pedido: Pedido, cliente: dict = Depends(get_curr
             )
         except Exception as e:
             print(f"ERROR CREAR PEDIDO CLIENTE - asignaciones herreria: {e}")
+        
+        # Crear factura automáticamente para el pedido del cliente
+        try:
+            # Calcular monto total del pedido
+            monto_total = sum(
+                float(item.get("precio", 0)) * float(item.get("cantidad", 0))
+                for item in pedido_dict.get("items", [])
+            )
+            
+            # Obtener total_abonado inicial del pedido (si viene con historial_pagos)
+            total_abonado_inicial = 0.0
+            historial_abonos_inicial = []
+            if pedido_dict.get("historial_pagos"):
+                for pago in pedido_dict.get("historial_pagos", []):
+                    monto_pago = float(pago.get("monto", 0))
+                    total_abonado_inicial += monto_pago
+                    # Crear registro de abono inicial
+                    abono_inicial = {
+                        "fecha": pago.get("fecha") or datetime.utcnow().isoformat(),
+                        "monto": monto_pago,
+                        "metodo_pago_id": pago.get("metodo"),
+                        "metodo_pago_nombre": pago.get("metodo"),  # Se puede mejorar buscando el nombre real
+                        "numero_referencia": pago.get("numero_referencia"),
+                        "comprobante": pago.get("comprobante")
+                    }
+                    historial_abonos_inicial.append(abono_inicial)
+            
+            saldo_pendiente_inicial = monto_total - total_abonado_inicial
+            
+            # Generar número de factura (puede ser auto-incremental o basado en fecha)
+            # Por ahora usar un formato simple: FACT-YYYYMMDD-{pedido_id[-6:]}
+            fecha_actual = datetime.utcnow()
+            numero_factura = f"FACT-{fecha_actual.strftime('%Y%m%d')}-{pedido_id[-6:]}"
+            
+            # Crear documento de factura
+            factura_dict = {
+                "pedido_id": pedido_id,
+                "numero_factura": numero_factura,
+                "cliente_id": cliente_id,
+                "cliente_nombre": cliente_nombre,
+                "fecha_creacion": datetime.utcnow().isoformat(),
+                "fecha_facturacion": pedido_dict.get("fecha_creacion"),
+                "items": pedido_dict.get("items", []),
+                "monto_total": monto_total,
+                "monto_abonado": total_abonado_inicial,
+                "saldo_pendiente": saldo_pendiente_inicial,
+                "estado": "pendiente" if saldo_pendiente_inicial > 0.01 else "pagada",
+                "historial_abonos": historial_abonos_inicial,
+                "datos_completos": {
+                    "pedido": pedido_dict
+                }
+            }
+            
+            # Insertar la factura
+            factura_result = facturas_cliente_collection.insert_one(factura_dict)
+            print(f"DEBUG CREAR PEDIDO CLIENTE: Factura creada automáticamente para pedido {pedido_id}")
+            print(f"  - Numero factura: {numero_factura}")
+            print(f"  - Monto total: {monto_total}")
+            print(f"  - Saldo pendiente: {saldo_pendiente_inicial}")
+            
+        except Exception as e:
+            print(f"ERROR CREAR PEDIDO CLIENTE - crear factura: {e}")
+            import traceback
+            print(f"TRACEBACK: {traceback.format_exc()}")
+            # No interrumpimos el flujo, solo logueamos el error
         
         return {
             "message": "Pedido creado exitosamente",
