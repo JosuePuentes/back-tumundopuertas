@@ -198,6 +198,7 @@ async def create_cuenta_por_pagar(
             "descripcion": request.descripcion.strip() if request.descripcion else None,
             "items": [item.dict() for item in (request.items or [])],
             "monto_total": float(request.monto_total),
+            "monto_abonado": 0.0,  # Inicializar en 0
             "saldo_pendiente": float(request.monto_total),
             "estado": "pendiente",
             "historial_abonos": [],
@@ -221,9 +222,9 @@ async def create_cuenta_por_pagar(
         print(f"  - estado: '{cuenta_creada.get('estado')}'")
         print(f"  - items count: {len(cuenta_creada.get('items', []))}")
         
-        # Si hay items del inventario, actualizar las cantidades
+        # Si hay items del inventario, SUMAR cantidades y costos
         if request.items and len(request.items) > 0:
-            print(f"DEBUG CREAR CUENTA: Actualizando inventario para {len(request.items)} items")
+            print(f"DEBUG CREAR CUENTA: Actualizando inventario para {len(request.items)} items (SUMA cantidad y costo)")
             for item in request.items:
                 if item.item_id or item.codigo:
                     try:
@@ -239,22 +240,36 @@ async def create_cuenta_por_pagar(
                             item_inventario = items_collection.find_one({"codigo": item.codigo.strip()})
                         
                         if item_inventario:
-                            cantidad_a_restar = float(item.cantidad)
-                            cantidad_actual = float(item_inventario.get("cantidad", 0))
+                            cantidad_a_sumar = float(item.cantidad)
+                            costo_unitario = float(item.costo_unitario)
+                            costo_total_item = costo_unitario * cantidad_a_sumar
                             
-                            if cantidad_actual >= cantidad_a_restar:
-                                nueva_cantidad = cantidad_actual - cantidad_a_restar
-                                items_collection.update_one(
-                                    {"_id": item_inventario["_id"]},
-                                    {"$set": {"cantidad": nueva_cantidad}}
-                                )
-                                print(f"DEBUG CREAR CUENTA: Item {item_inventario.get('codigo', 'N/A')} actualizado: {cantidad_actual} -> {nueva_cantidad}")
-                            else:
-                                print(f"WARNING CREAR CUENTA: Item {item_inventario.get('codigo', 'N/A')} tiene cantidad insuficiente ({cantidad_actual} < {cantidad_a_restar})")
+                            cantidad_actual = float(item_inventario.get("cantidad", 0))
+                            costo_actual = float(item_inventario.get("costo", 0))
+                            
+                            # SUMAR cantidad y costo usando $inc
+                            items_collection.update_one(
+                                {"_id": item_inventario["_id"]},
+                                {
+                                    "$inc": {
+                                        "cantidad": cantidad_a_sumar,  # Sumar cantidad
+                                        "costo": costo_total_item  # Sumar costo total (costo_unitario * cantidad)
+                                    }
+                                }
+                            )
+                            
+                            nueva_cantidad = cantidad_actual + cantidad_a_sumar
+                            nuevo_costo = costo_actual + costo_total_item
+                            
+                            print(f"DEBUG CREAR CUENTA: Item {item_inventario.get('codigo', 'N/A')} actualizado:")
+                            print(f"  - Cantidad: {cantidad_actual} + {cantidad_a_sumar} = {nueva_cantidad}")
+                            print(f"  - Costo: {costo_actual} + {costo_total_item} = {nuevo_costo}")
                         else:
                             print(f"WARNING CREAR CUENTA: Item no encontrado en inventario - codigo: {item.codigo}, item_id: {item.item_id}")
                     except Exception as e:
                         print(f"ERROR CREAR CUENTA: Error al actualizar item {item.codigo}: {str(e)}")
+                        import traceback
+                        print(f"TRACEBACK: {traceback.format_exc()}")
                         # No interrumpimos el flujo, solo logueamos el error
         
         # Convertir a formato de respuesta asegurando que todos los campos estén presentes
@@ -275,6 +290,8 @@ async def create_cuenta_por_pagar(
             cuenta_response["historial_abonos"] = []
         if not cuenta_response.get("items"):
             cuenta_response["items"] = []
+        if cuenta_response.get("monto_abonado") is None:
+            cuenta_response["monto_abonado"] = 0.0
         
         print(f"DEBUG CREAR CUENTA: Respuesta final:")
         print(f"  {cuenta_response}")
@@ -381,6 +398,10 @@ async def abonar_cuenta_por_pagar(
         # Calcular nuevo saldo pendiente
         nuevo_saldo_pendiente = saldo_pendiente - request.monto
         
+        # Obtener monto abonado actual
+        monto_abonado_actual = float(cuenta.get("monto_abonado", 0))
+        nuevo_monto_abonado = monto_abonado_actual + request.monto
+        
         # Crear registro de abono
         abono = {
             "fecha": datetime.utcnow().isoformat(),
@@ -390,15 +411,20 @@ async def abonar_cuenta_por_pagar(
             "concepto": request.concepto
         }
         
-        # Actualizar la cuenta
+        # Actualizar la cuenta usando $inc para monto_abonado y saldo_pendiente
         update_data = {
-            "$inc": {"saldo_pendiente": -request.monto},
+            "$inc": {
+                "saldo_pendiente": -request.monto,  # Restar del saldo pendiente
+                "monto_abonado": request.monto  # SUMAR al monto abonado
+            },
             "$push": {"historial_abonos": abono}
         }
         
         # Si el saldo pendiente queda en 0, cambiar estado a "pagada"
         if nuevo_saldo_pendiente <= 0.01:  # Tolerancia para floats
-            update_data["$set"] = {"estado": "pagada"}
+            if "$set" not in update_data:
+                update_data["$set"] = {}
+            update_data["$set"]["estado"] = "pagada"
             print(f"DEBUG ABONAR: Cuenta completamente pagada, cambiando estado")
         
         cuenta_actualizada = cuentas_por_pagar_collection.find_one_and_update(
@@ -410,7 +436,28 @@ async def abonar_cuenta_por_pagar(
         if not cuenta_actualizada:
             raise HTTPException(status_code=500, detail="Error al actualizar la cuenta")
         
-        print(f"DEBUG ABONAR: Cuenta actualizada exitosamente. Nuevo saldo pendiente: {cuenta_actualizada.get('saldo_pendiente', 0)}")
+        # Validar que monto_abonado coincida con la suma de abonos
+        monto_abonado_bd = float(cuenta_actualizada.get("monto_abonado", 0))
+        suma_abonos = sum(float(ab.get("monto", 0)) for ab in cuenta_actualizada.get("historial_abonos", []))
+        
+        if abs(monto_abonado_bd - suma_abonos) > 0.01:  # Tolerancia para floats
+            print(f"WARNING ABONAR: Discrepancia en monto_abonado!")
+            print(f"  - monto_abonado en BD: {monto_abonado_bd}")
+            print(f"  - Suma de abonos: {suma_abonos}")
+            print(f"  - Diferencia: {abs(monto_abonado_bd - suma_abonos)}")
+            # Corregir el monto_abonado para que coincida con la suma
+            cuentas_por_pagar_collection.update_one(
+                {"_id": cuenta_obj_id},
+                {"$set": {"monto_abonado": suma_abonos}}
+            )
+            # Re-leer la cuenta actualizada
+            cuenta_actualizada = cuentas_por_pagar_collection.find_one({"_id": cuenta_obj_id})
+            print(f"DEBUG ABONAR: monto_abonado corregido a {suma_abonos}")
+        
+        print(f"DEBUG ABONAR: Cuenta actualizada exitosamente:")
+        print(f"  - Saldo pendiente: {saldo_pendiente} -> {cuenta_actualizada.get('saldo_pendiente', 0)}")
+        print(f"  - Monto abonado: {monto_abonado_actual} -> {cuenta_actualizada.get('monto_abonado', 0)}")
+        print(f"  - Suma de abonos en historial: {suma_abonos}")
         
         return object_id_to_str(cuenta_actualizada)
         

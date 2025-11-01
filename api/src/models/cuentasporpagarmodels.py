@@ -45,6 +45,7 @@ class CuentaPorPagar(BaseModel):
     descripcion: Optional[str] = None
     items: Optional[List[CuentaPorPagarItem]] = []
     monto_total: float
+    monto_abonado: float = 0.0  # Monto total abonado (suma de todos los abonos)
     saldo_pendiente: float
     estado: str = "pendiente"  # pendiente, pagada
     historial_abonos: List[AbonoCuenta] = []
