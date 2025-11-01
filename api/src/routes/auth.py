@@ -1,7 +1,11 @@
 from fastapi import APIRouter, HTTPException, status
 from ..config.mongodb import usuarios_collection, clientes_usuarios_collection
 from ..auth.auth import get_password_hash, verify_password, create_admin_access_token, create_cliente_access_token
-from ..models.authmodels import UserAdmin, AdminLogin, ForgotPasswordRequest, ResetPasswordRequest, ClienteRegister, ClienteLogin
+from ..models.authmodels import (
+    UserAdmin, AdminLogin, ForgotPasswordRequest, ResetPasswordRequest,
+    ClienteRegister, ClienteLogin, ClienteForgotPasswordRequest,
+    ClienteVerifyCodeRequest, ClienteResetPasswordRequest
+)
 from datetime import datetime, timedelta
 import secrets
 
@@ -181,4 +185,175 @@ async def cliente_login(cliente: ClienteLogin):
         "nombre": db_cliente["nombre"],
         "rol": "cliente"
     }
+
+# ============================================================================
+# ENDPOINTS PARA RECUPERACIÓN DE CONTRASEÑA DE CLIENTES
+# ============================================================================
+
+@router.post("/clientes/forgot-password/")
+async def cliente_forgot_password(request: ClienteForgotPasswordRequest):
+    """
+    Envía un código de recuperación de contraseña por email al cliente.
+    Genera un código numérico de 6 dígitos y lo almacena en la BD con expiración.
+    """
+    try:
+        cliente = clientes_usuarios_collection.find_one({"usuario": request.usuario})
+        if not cliente:
+            # Por seguridad, no revelar si el usuario existe o no
+            return {
+                "message": "Si el usuario existe, se ha enviado un código de recuperación de contraseña."
+            }
+        
+        # Generar código numérico de 6 dígitos
+        codigo = secrets.randbelow(900000) + 100000  # Genera un número entre 100000 y 999999
+        codigo_str = str(codigo)
+        
+        # Establecer expiración del código (15 minutos)
+        expires_at = datetime.utcnow() + timedelta(minutes=15)
+        
+        # Guardar código y expiración en la BD
+        clientes_usuarios_collection.update_one(
+            {"_id": cliente["_id"]},
+            {
+                "$set": {
+                    "reset_codigo": codigo_str,
+                    "reset_codigo_expires": expires_at
+                }
+            }
+        )
+        
+        # En un entorno real, aquí se enviaría un correo electrónico al cliente con el código.
+        # Por ahora, solo lo imprimimos en consola para propósitos de prueba/desarrollo.
+        print(f"DEBUG CLIENTE FORGOT PASSWORD: Código de recuperación para {request.usuario}: {codigo_str}")
+        print(f"DEBUG CLIENTE FORGOT PASSWORD: El código expira en: {expires_at}")
+        
+        # TODO: En producción, enviar email con el código
+        # Ejemplo: send_email(cliente.get("email"), "Código de recuperación", f"Tu código es: {codigo_str}")
+        
+        return {
+            "message": "Si el usuario existe, se ha enviado un código de recuperación de contraseña.",
+            "codigo": codigo_str  # DEBUG: Remover en producción
+        }
+        
+    except Exception as e:
+        print(f"ERROR CLIENTE FORGOT PASSWORD: {str(e)}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al procesar solicitud: {str(e)}")
+
+@router.post("/clientes/verify-code/")
+async def cliente_verify_code(request: ClienteVerifyCodeRequest):
+    """
+    Verifica que el código de recuperación de contraseña sea correcto y no esté expirado.
+    """
+    try:
+        cliente = clientes_usuarios_collection.find_one({"usuario": request.usuario})
+        if not cliente:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        
+        # Verificar que existe un código de recuperación
+        codigo_guardado = cliente.get("reset_codigo")
+        if not codigo_guardado:
+            raise HTTPException(status_code=400, detail="No hay código de recuperación pendiente. Solicita uno nuevo.")
+        
+        # Verificar expiración
+        expires_at = cliente.get("reset_codigo_expires")
+        if not expires_at or expires_at < datetime.utcnow():
+            # Limpiar código expirado
+            clientes_usuarios_collection.update_one(
+                {"_id": cliente["_id"]},
+                {"$unset": {"reset_codigo": "", "reset_codigo_expires": ""}}
+            )
+            raise HTTPException(status_code=400, detail="El código ha expirado. Solicita uno nuevo.")
+        
+        # Verificar que el código coincida
+        if codigo_guardado != request.codigo:
+            raise HTTPException(status_code=400, detail="Código incorrecto")
+        
+        # Código válido - marcar como verificado
+        clientes_usuarios_collection.update_one(
+            {"_id": cliente["_id"]},
+            {"$set": {"reset_codigo_verified": True}}
+        )
+        
+        return {
+            "message": "Código verificado correctamente",
+            "verified": True
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR CLIENTE VERIFY CODE: {str(e)}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al verificar código: {str(e)}")
+
+@router.post("/clientes/reset-password/")
+async def cliente_reset_password(request: ClienteResetPasswordRequest):
+    """
+    Restablece la contraseña del cliente usando el código de recuperación verificado.
+    """
+    try:
+        cliente = clientes_usuarios_collection.find_one({"usuario": request.usuario})
+        if not cliente:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        
+        # Verificar que existe un código de recuperación
+        codigo_guardado = cliente.get("reset_codigo")
+        if not codigo_guardado:
+            raise HTTPException(status_code=400, detail="No hay código de recuperación pendiente. Solicita uno nuevo.")
+        
+        # Verificar expiración
+        expires_at = cliente.get("reset_codigo_expires")
+        if not expires_at or expires_at < datetime.utcnow():
+            # Limpiar código expirado
+            clientes_usuarios_collection.update_one(
+                {"_id": cliente["_id"]},
+                {"$unset": {"reset_codigo": "", "reset_codigo_expires": "", "reset_codigo_verified": ""}}
+            )
+            raise HTTPException(status_code=400, detail="El código ha expirado. Solicita uno nuevo.")
+        
+        # Verificar que el código coincida
+        if codigo_guardado != request.codigo:
+            raise HTTPException(status_code=400, detail="Código incorrecto")
+        
+        # Verificar que el código haya sido verificado previamente (opcional pero recomendado)
+        # Esto asegura que el usuario pasó por el endpoint verify-code primero
+        if not cliente.get("reset_codigo_verified"):
+            raise HTTPException(status_code=400, detail="Debes verificar el código primero usando /auth/clientes/verify-code/")
+        
+        # Validar nueva contraseña (mínimo 6 caracteres)
+        if len(request.new_password) < 6:
+            raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres")
+        
+        # Hashear nueva contraseña
+        hashed_password = get_password_hash(request.new_password)
+        
+        # Actualizar contraseña y limpiar códigos de recuperación
+        clientes_usuarios_collection.update_one(
+            {"_id": cliente["_id"]},
+            {
+                "$set": {"password": hashed_password},
+                "$unset": {
+                    "reset_codigo": "",
+                    "reset_codigo_expires": "",
+                    "reset_codigo_verified": ""
+                }
+            }
+        )
+        
+        print(f"DEBUG CLIENTE RESET PASSWORD: Contraseña restablecida para {request.usuario}")
+        
+        return {
+            "message": "Contraseña restablecida exitosamente"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR CLIENTE RESET PASSWORD: {str(e)}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al restablecer contraseña: {str(e)}")
 

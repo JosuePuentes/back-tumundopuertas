@@ -155,6 +155,18 @@ class ClienteResponse(BaseModel):
     fecha_creacion: str
     activo: bool
 
+class ClienteForgotPasswordRequest(BaseModel):
+    usuario: str
+
+class ClienteVerifyCodeRequest(BaseModel):
+    usuario: str
+    codigo: str
+
+class ClienteResetPasswordRequest(BaseModel):
+    usuario: str
+    codigo: str
+    new_password: str
+
 class PedidoItem(BaseModel):
     id: str
     codigo: str
