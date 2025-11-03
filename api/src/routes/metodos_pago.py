@@ -387,13 +387,49 @@ async def get_historial_completo():
 
 @router.get("/{id}/historial", response_model=List[Transaccion])
 async def get_historial_transacciones(id: str):
-    """Obtener el historial completo de transacciones de un método de pago"""
+    """Obtener el historial completo de transacciones de un método de pago con saldo después de cada movimiento"""
     print(f"DEBUG HISTORIAL: Buscando historial para método {id}")
     try:
+        # Obtener el saldo actual del método de pago
+        metodo = metodos_pago_collection.find_one({"_id": ObjectId(id)})
+        if not metodo:
+            raise HTTPException(status_code=404, detail="Método de pago no encontrado")
+        
+        saldo_actual = metodo.get("saldo", 0.0)
+        print(f"DEBUG HISTORIAL: Saldo actual del método: {saldo_actual}")
+        
+        # Obtener todas las transacciones ordenadas de más nueva a más antigua
         transacciones = list(transacciones_collection.find({"metodo_pago_id": id}).sort("fecha", -1))
         print(f"DEBUG HISTORIAL: Encontradas {len(transacciones)} transacciones")
-        result = [object_id_to_str(t) for t in transacciones]
-        print(f"DEBUG HISTORIAL: Resultado procesado: {len(result)} elementos")
+        
+        # Calcular el saldo después de cada transacción
+        # Empezamos con el saldo actual y vamos hacia atrás en el tiempo
+        saldo_despues = saldo_actual
+        result = []
+        
+        for transaccion in transacciones:
+            transaccion_dict = object_id_to_str(transaccion)
+            
+            # El saldo después de esta transacción es el saldo actual antes de la siguiente
+            # (que ya calculamos)
+            transaccion_dict["saldo_despues"] = saldo_despues
+            
+            # Para calcular el saldo antes de esta transacción, necesitamos revertir el efecto
+            # Si es un depósito, restamos el monto; si es transferencia, sumamos
+            monto = transaccion.get("monto", 0.0)
+            tipo = transaccion.get("tipo", "deposito")
+            
+            if tipo == "deposito":
+                saldo_antes = saldo_despues - monto
+            else:  # transferencia
+                saldo_antes = saldo_despues + monto
+            
+            # Actualizar saldo_despues para la siguiente iteración (transacción anterior)
+            saldo_despues = saldo_antes
+            
+            result.append(transaccion_dict)
+        
+        print(f"DEBUG HISTORIAL: Resultado procesado: {len(result)} elementos con saldos calculados")
         return result
     except Exception as e:
         print(f"DEBUG HISTORIAL: Error: {e}")
