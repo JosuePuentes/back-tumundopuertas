@@ -17,6 +17,7 @@ from .routes.dashboard import router as dashboard_router
 from .routes.dashboard import get_dashboard_asignaciones
 from .routes.cuentas_por_pagar import router as cuentas_por_pagar_router
 from .routes.facturas_y_pedidos import router as facturas_y_pedidos_router
+from .routes.mensajes import router as mensajes_router
 
 from dotenv import load_dotenv
 from passlib.context import CryptContext
@@ -154,6 +155,7 @@ app.include_router(formatos_impresion_router, prefix="/api", tags=["Formatos de 
 app.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(cuentas_por_pagar_router, prefix="/cuentas-por-pagar", tags=["Cuentas por Pagar"])
 app.include_router(facturas_y_pedidos_router, prefix="", tags=["Facturas y Pedidos"])  # Sin prefijo para rutas directas
+app.include_router(mensajes_router, prefix="/mensajes", tags=["Mensajes"])
 
 # Endpoint directo para /asignaciones (sin prefijo)
 @app.get("/asignaciones")
