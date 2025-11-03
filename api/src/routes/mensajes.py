@@ -76,17 +76,18 @@ async def get_conversaciones_soporte(current_user: dict = Depends(get_current_us
                 if not mensaje.get("leido", False):
                     conversaciones_por_cliente[cliente_id]["mensajes_no_leidos"] += 1
                 
-                # Actualizar último mensaje
-                fecha_creacion = mensaje.get("fecha_creacion")
-                if fecha_creacion:
-                    if not conversaciones_por_cliente[cliente_id]["ultimo_mensaje"] or \
-                       fecha_creacion > conversaciones_por_cliente[cliente_id]["ultimo_mensaje"].get("fecha_creacion", ""):
+                # Actualizar último mensaje (usar fecha si existe, sino fecha_creacion)
+                fecha = mensaje.get("fecha") or mensaje.get("fecha_creacion", "")
+                if fecha:
+                    ultimo_mensaje_actual = conversaciones_por_cliente[cliente_id]["ultimo_mensaje"]
+                    fecha_ultimo = ultimo_mensaje_actual.get("fecha") or ultimo_mensaje_actual.get("fecha_creacion", "") if ultimo_mensaje_actual else ""
+                    if not ultimo_mensaje_actual or fecha > fecha_ultimo:
                         conversaciones_por_cliente[cliente_id]["ultimo_mensaje"] = mensaje
         
         # Convertir a lista y ordenar por último mensaje (más reciente primero)
         conversaciones = list(conversaciones_por_cliente.values())
         conversaciones.sort(
-            key=lambda x: x["ultimo_mensaje"]["fecha_creacion"] if x["ultimo_mensaje"] else "",
+            key=lambda x: (x["ultimo_mensaje"].get("fecha") or x["ultimo_mensaje"].get("fecha_creacion", "")) if x["ultimo_mensaje"] else "",
             reverse=True
         )
         
@@ -129,7 +130,6 @@ async def crear_mensaje(
         
         # Intentar validar token como admin primero
         try:
-            from ..config.mongodb import usuarios_collection
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             
             if payload.get("rol") == "admin":
@@ -171,6 +171,7 @@ async def crear_mensaje(
             raise HTTPException(status_code=400, detail="pedido_id es requerido")
         
         # Crear documento del mensaje
+        fecha_iso = datetime.now().isoformat()
         mensaje_doc = {
             "pedido_id": pedido_id,
             "mensaje": mensaje_texto,
@@ -178,7 +179,8 @@ async def crear_mensaje(
             "remitente_nombre": remitente_nombre,
             "remitente_tipo": remitente_tipo,
             "leido": data.get("leido", False),
-            "fecha_creacion": datetime.now().isoformat()
+            "fecha": fecha_iso,  # Campo fecha para compatibilidad
+            "fecha_creacion": fecha_iso  # Mantener para ordenamiento
         }
         
         # Insertar mensaje
@@ -258,19 +260,34 @@ async def get_mensajes_conversacion(
                 raise HTTPException(status_code=403, detail="No puedes ver conversaciones de otros clientes")
         
         # Buscar mensajes de la conversación
+        # Ordenar por fecha_creacion (más antiguos primero), o por fecha si existe
         mensajes = list(mensajes_collection.find({
             "pedido_id": pedido_id
         }).sort("fecha_creacion", 1))
         
-        # Convertir ObjectId a string
+        # Normalizar estructura de respuesta
+        mensajes_normalizados = []
         for mensaje in mensajes:
-            mensaje["_id"] = str(mensaje["_id"])
+            # Convertir ObjectId a string
+            mensaje_id = str(mensaje.get("_id", ""))
+            
+            # Normalizar campos: usar fecha si existe, sino fecha_creacion
+            fecha = mensaje.get("fecha") or mensaje.get("fecha_creacion", datetime.now().isoformat())
+            
+            mensaje_normalizado = {
+                "_id": mensaje_id,
+                "pedido_id": mensaje.get("pedido_id", pedido_id),
+                "remitente_id": mensaje.get("remitente_id", ""),
+                "remitente_tipo": mensaje.get("remitente_tipo", ""),
+                "remitente_nombre": mensaje.get("remitente_nombre", ""),
+                "mensaje": mensaje.get("mensaje", ""),
+                "fecha": fecha,
+                "leido": mensaje.get("leido", False)
+            }
+            mensajes_normalizados.append(mensaje_normalizado)
         
-        return {
-            "pedido_id": pedido_id,
-            "mensajes": mensajes,
-            "total_mensajes": len(mensajes)
-        }
+        # Si no hay mensajes, retornar array vacío (no 404)
+        return mensajes_normalizados
         
     except HTTPException:
         raise
