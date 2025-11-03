@@ -400,11 +400,29 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                         nuevo_saldo = saldo_actual + pago.monto
                         print(f"DEBUG CREAR PEDIDO: Incrementando saldo de {saldo_actual} a {nuevo_saldo} para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
                         
+                        # Actualizar saldo usando $inc (operación atómica)
                         result_update = metodos_pago_collection.update_one(
                             {"_id": metodo_pago["_id"]},
-                            {"$set": {"saldo": nuevo_saldo}}
+                            {"$inc": {"saldo": pago.monto}}
                         )
                         print(f"DEBUG CREAR PEDIDO: Resultado de actualización: {result_update.modified_count} documentos modificados")
+                        
+                        # Registrar transacción automáticamente (depósito)
+                        try:
+                            transaccion_deposito = {
+                                "metodo_pago_id": str(metodo_pago["_id"]),
+                                "tipo": "deposito",
+                                "monto": float(pago.monto),
+                                "concepto": pago.get("concepto") or f"Pago inicial de pedido {pedido_id}",
+                                "pedido_id": pedido_id,
+                                "fecha": datetime.utcnow().isoformat()
+                            }
+                            transacciones_collection.insert_one(transaccion_deposito)
+                            print(f"DEBUG CREAR PEDIDO: Transacción de depósito registrada automáticamente para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
+                        except Exception as trans_error:
+                            print(f"ERROR CREAR PEDIDO: Error al registrar transacción de depósito: {trans_error}")
+                            # No interrumpimos el flujo si falla el registro de transacción
+                            # pero logueamos el error para debugging
                     else:
                         print(f"DEBUG CREAR PEDIDO: Método de pago '{pago.metodo}' no encontrado ni por ID ni por nombre")
                 except Exception as e:
@@ -4367,14 +4385,35 @@ async def actualizar_pago(
                     nuevo_saldo = saldo_actual + monto
                     print(f"DEBUG PAGO: Saldo actual: {saldo_actual}, Nuevo saldo: {nuevo_saldo} para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
                     
+                    # Actualizar saldo usando $inc (operación atómica)
                     result_update = metodos_pago_collection.update_one(
                         {"_id": metodo_pago["_id"]},
-                        {"$set": {"saldo": nuevo_saldo}}
+                        {"$inc": {"saldo": monto}}
                     )
                     print(f"DEBUG PAGO: Resultado de actualización: {result_update.modified_count} documentos modificados")
                     
+                    # Registrar transacción automáticamente (depósito)
+                    try:
+                        transaccion_deposito = {
+                            "metodo_pago_id": str(metodo_pago["_id"]),
+                            "tipo": "deposito",
+                            "monto": float(monto),
+                            "concepto": data.get("concepto") or f"Abono a pedido {pedido_id}",
+                            "pedido_id": pedido_id,
+                            "numero_referencia": data.get("numero_referencia"),
+                            "comprobante": data.get("comprobante"),
+                            "fecha": datetime.utcnow().isoformat()
+                        }
+                        transacciones_collection.insert_one(transaccion_deposito)
+                        print(f"DEBUG PAGO: Transacción de depósito registrada automáticamente para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
+                    except Exception as trans_error:
+                        print(f"ERROR PAGO: Error al registrar transacción de depósito: {trans_error}")
+                        import traceback
+                        print(f"TRACEBACK: {traceback.format_exc()}")
+                        # No interrumpimos el flujo si falla el registro de transacción
+                    
                     # Verificar que se actualizó correctamente
-                    metodo_verificado = metodos_pago_collection.find_one({"_id": ObjectId(metodo)})
+                    metodo_verificado = metodos_pago_collection.find_one({"_id": metodo_pago["_id"]})
                     print(f"DEBUG PAGO: Saldo verificado después de actualizar: {metodo_verificado.get('saldo', 'ERROR')}")
                 else:
                     print(f"DEBUG PAGO: Método de pago '{metodo}' no encontrado")
