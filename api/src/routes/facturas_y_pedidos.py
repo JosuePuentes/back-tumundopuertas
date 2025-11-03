@@ -522,6 +522,7 @@ async def get_factura_por_pedido(pedido_id: str, current_user: dict = Depends(ge
     Obtener factura(s) por ID de pedido.
     Requiere autenticación de administrador.
     Busca en la colección facturas_confirmadas.
+    Maneja tanto pedidoId como string y como ObjectId.
     """
     try:
         # Verificar que el usuario sea admin o tenga permisos
@@ -531,8 +532,30 @@ async def get_factura_por_pedido(pedido_id: str, current_user: dict = Depends(ge
         # Validar formato de pedido_id
         pedido_id_clean = pedido_id.strip()
         
-        # Buscar facturas en facturas_confirmadas (usa pedidoId como campo)
-        facturas = list(facturas_confirmadas_collection.find({"pedidoId": pedido_id_clean}))
+        # Construir query que busque en múltiples formatos posibles
+        # El pedidoId puede estar almacenado como string o como ObjectId, y también puede ser pedido_id
+        query_conditions = [
+            {"pedidoId": pedido_id_clean},
+            {"pedido_id": pedido_id_clean}  # También buscar por snake_case
+        ]
+        
+        # Intentar agregar búsqueda como ObjectId si es válido
+        try:
+            pedido_obj_id = ObjectId(pedido_id_clean)
+            query_conditions.extend([
+                {"pedidoId": pedido_obj_id},
+                {"pedidoId": str(pedido_obj_id)},
+                {"pedido_id": pedido_obj_id},
+                {"pedido_id": str(pedido_obj_id)}
+            ])
+        except Exception:
+            # Si no es un ObjectId válido, solo buscar como string
+            pass
+        
+        # Buscar facturas con query $or para cubrir todos los formatos
+        facturas = list(facturas_confirmadas_collection.find({
+            "$or": query_conditions
+        }))
         
         if not facturas:
             raise HTTPException(status_code=404, detail="No se encontraron facturas para este pedido")
