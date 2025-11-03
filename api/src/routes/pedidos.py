@@ -212,6 +212,11 @@ async def get_all_pedidos_por_orden(orden: str):
 
 @router.get("/id/{pedido_id}/")
 async def get_pedido(pedido_id: str):
+    """
+    Obtener un pedido por ID.
+    Si es un pedido web (tipo_pedido: "web"), solo se puede acceder desde el módulo de pedidos-web.
+    Para otros módulos, los pedidos web están bloqueados.
+    """
     try:
         pedido_obj_id = ObjectId(pedido_id)
     except Exception as e:
@@ -222,6 +227,17 @@ async def get_pedido(pedido_id: str):
         raise HTTPException(status_code=500, detail=f"Error consultando la base de datos: {str(e)}")
     if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    
+    # Verificar si es un pedido web - si lo es, bloquear el acceso desde módulos internos
+    tipo_pedido = pedido.get("tipo_pedido")
+    if tipo_pedido == "web":
+        # Los pedidos web solo se pueden ver desde GET /pedidos/cliente/{cliente_id}
+        # Este endpoint está bloqueado para pedidos web
+        raise HTTPException(
+            status_code=403, 
+            detail="Los pedidos web solo pueden ser vistos desde el módulo de pedidos-web"
+        )
+    
     pedido["_id"] = str(pedido["_id"])
     # Normalizar adicionales: None o no existe → []
     if "adicionales" not in pedido or pedido.get("adicionales") is None:
@@ -2135,18 +2151,28 @@ async def get_comisiones_produccion_general():
 
 @router.get("/produccion/enproceso")
 async def get_produccion_enproceso():
-    """Endpoint para producción en proceso"""
+    """Endpoint para producción en proceso (excluyendo pedidos web)"""
     try:
         collections = get_collections()
         
         pipeline = [
             {
                 "$match": {
-                    "seguimiento": {
-                        "$elemMatch": {
-                            "asignaciones_articulos": {"$exists": True, "$ne": []}
+                    "$and": [
+                        {
+                            "seguimiento": {
+                                "$elemMatch": {
+                                    "asignaciones_articulos": {"$exists": True, "$ne": []}
+                                }
+                            }
+                        },
+                        {
+                            "$or": [
+                                {"tipo_pedido": {"$ne": "web"}},
+                                {"tipo_pedido": {"$exists": False}}
+                            ]
                         }
-                    }
+                    ]
                 }
             },
             {
@@ -2217,11 +2243,11 @@ async def get_produccion_enproceso():
 
 @router.get("/enproceso")
 async def get_pedidos_enproceso():
-    """Endpoint para pedidos en proceso"""
+    """Endpoint para pedidos en proceso (excluyendo pedidos web)"""
     try:
-        pedidos = list(pedidos_collection.find({
-            "estado_general": {"$in": ["en_proceso", "pendiente"]}
-        }))
+        filtro = {"estado_general": {"$in": ["en_proceso", "pendiente"]}}
+        filtro = excluir_pedidos_web(filtro)
+        pedidos = list(pedidos_collection.find(filtro))
         
         # Convertir ObjectId a string
         for pedido in pedidos:
@@ -6899,6 +6925,65 @@ async def create_pedido_cliente(pedido: Pedido, cliente: dict = Depends(get_curr
         import traceback
         print(f"ERROR CREAR PEDIDO CLIENTE TRACEBACK: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error al crear pedido: {str(e)}")
+
+@router.get("/web/")
+async def get_pedidos_web():
+    """
+    Endpoint específico para obtener todos los pedidos web.
+    Optimizado para mejorar el rendimiento en el módulo pedidos-web.
+    Solo retorna pedidos con tipo_pedido: "web" o tipo: "cliente".
+    """
+    try:
+        # Proyección optimizada: solo campos necesarios para la lista de pedidos
+        projection = {
+            "_id": 1,
+            "numero_orden": 1,
+            "cliente_id": 1,
+            "cliente_nombre": 1,
+            "fecha_creacion": 1,
+            "fecha_actualizacion": 1,
+            "estado_general": 1,
+            "items": 1,
+            "adicionales": 1,
+            "pago": 1,
+            "historial_pagos": 1,
+            "total_abonado": 1,
+            "tipo": 1,
+            "tipo_pedido": 1,
+            "creado_por": 1
+        }
+        
+        # Buscar solo pedidos web
+        pedidos = list(pedidos_collection.find(
+            {
+                "$or": [
+                    {"tipo_pedido": "web"},
+                    {"tipo": "cliente"}  # Retrocompatibilidad con pedidos antiguos
+                ]
+            },
+            projection
+        ).sort("fecha_creacion", -1).limit(1000))  # Limitar a 1000 pedidos más recientes
+        
+        # Normalizar y convertir ObjectId a string
+        for pedido in pedidos:
+            pedido["_id"] = str(pedido["_id"])
+            # Normalizar adicionales: None o no existe → []
+            if "adicionales" not in pedido or pedido.get("adicionales") is None:
+                pedido["adicionales"] = []
+            # Enriquecer con datos del cliente (cédula y teléfono)
+            enriquecer_pedido_con_datos_cliente(pedido)
+        
+        return {
+            "pedidos": pedidos,
+            "total": len(pedidos),
+            "success": True
+        }
+        
+    except Exception as e:
+        print(f"ERROR GET PEDIDOS WEB: {str(e)}")
+        import traceback
+        print(f"ERROR GET PEDIDOS WEB TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener pedidos web: {str(e)}")
 
 @router.get("/cliente/{cliente_id}")
 async def get_pedidos_cliente(cliente_id: str, cliente: dict = Depends(get_current_cliente)):
