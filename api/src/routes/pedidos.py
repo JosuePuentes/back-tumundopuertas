@@ -30,6 +30,40 @@ def obtener_siguiente_modulo(orden_actual: int) -> str:
     }
     return flujo.get(orden_actual, "completado")
 
+def enriquecer_pedido_con_datos_cliente(pedido: dict):
+    """
+    Enriquece un pedido con datos del cliente (cédula y teléfono) desde la colección de clientes.
+    Si el cliente no existe, mantiene los valores por defecto.
+    """
+    cliente_id = pedido.get("cliente_id")
+    if not cliente_id:
+        return
+    
+    try:
+        # Intentar buscar en clientes_collection primero
+        cliente_obj_id = ObjectId(cliente_id)
+        cliente = clientes_collection.find_one({"_id": cliente_obj_id})
+        
+        # Si no se encuentra, buscar en clientes_usuarios_collection
+        if not cliente:
+            cliente = clientes_usuarios_collection.find_one({"_id": cliente_obj_id})
+        
+        if cliente:
+            # Obtener cédula/RIF
+            cedula = cliente.get("cedula") or cliente.get("rif", "")
+            # Obtener teléfono
+            telefono = cliente.get("telefono") or cliente.get("telefono_contacto", "")
+            
+            # Agregar datos del cliente al pedido si no están presentes
+            if cedula:
+                pedido["cliente_cedula"] = cedula
+            if telefono:
+                pedido["cliente_telefono"] = telefono
+    except Exception as e:
+        # Si hay error al convertir ObjectId o buscar, simplemente no agregar datos
+        print(f"Advertencia: No se pudo obtener datos del cliente {cliente_id}: {str(e)}")
+        pass
+
 @router.get("/all/")
 async def get_all_pedidos():
     # Obtener todos los campos, incluyendo "adicionales"
@@ -39,6 +73,8 @@ async def get_all_pedidos():
         # Normalizar adicionales: None o no existe → []
         if "adicionales" not in pedido or pedido["adicionales"] is None:
             pedido["adicionales"] = []
+        # Enriquecer con datos del cliente (cédula y teléfono)
+        enriquecer_pedido_con_datos_cliente(pedido)
     return pedidos
 
 @router.get("/test-terminar")
@@ -152,6 +188,8 @@ async def get_pedido(pedido_id: str):
     # Normalizar adicionales: None o no existe → []
     if "adicionales" not in pedido or pedido.get("adicionales") is None:
         pedido["adicionales"] = []
+    # Enriquecer con datos del cliente (cédula y teléfono)
+    enriquecer_pedido_con_datos_cliente(pedido)
     return pedido
 
 @router.post("/")
@@ -1208,34 +1246,12 @@ async def get_item_estado(pedido_id: str, item_id: str):
         print(f"Error obteniendo estado del item: {e}")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
-@router.get("/all/")
-async def get_all_pedidos():
-    """Obtener todos los pedidos para el monitor - Versión simplificada"""
-    try:
-        # Método más simple y eficiente
-        # Incluir "adicionales" en el projection para que se devuelva al frontend
-        pedidos = list(pedidos_collection.find({}, {
-            "_id": 1,
-            "numero_orden": 1,
-            "cliente_nombre": 1,
-            "fecha_creacion": 1,
-            "estado_general": 1,
-            "items": 1,
-            "adicionales": 1  # Incluir adicionales
-        }).limit(1000))  # Aumentar el límite para incluir más pedidos
-        
-        # Convertir ObjectId a string y normalizar adicionales
-        for pedido in pedidos:
-            pedido["_id"] = str(pedido["_id"])
-            # Normalizar adicionales: None o no existe → []
-            if "adicionales" not in pedido or pedido.get("adicionales") is None:
-                pedido["adicionales"] = []
-        
-        return pedidos
-        
-    except Exception as e:
-        print(f"Error en get_all_pedidos: {e}")
-        return []
+# NOTA: Este endpoint duplicado será ignorado por FastAPI (usa el primero)
+# Se mantiene por compatibilidad pero no se ejecutará
+# @router.get("/all/")
+# async def get_all_pedidos():
+#     """Obtener todos los pedidos para el monitor - Versión simplificada"""
+#     ...
 
 @router.get("/asignaciones-disponibles/{pedido_id}/{modulo}")
 async def get_asignaciones_disponibles(pedido_id: str, modulo: str):
@@ -1645,6 +1661,8 @@ async def get_pedidos_por_estado(estado_general: list[str] = Query(..., descript
         # Normalizar adicionales: None o no existe → []
         if "adicionales" not in pedido or pedido["adicionales"] is None:
             pedido["adicionales"] = []
+        # Enriquecer con datos del cliente (cédula y teléfono)
+        enriquecer_pedido_con_datos_cliente(pedido)
     return pedidos
 
 @router.post("/{pedido_id}/facturar")
@@ -3867,6 +3885,8 @@ async def get_pedidos_por_estados(
         # Normalizar adicionales: None o no existe → []
         if "adicionales" not in pedido or pedido["adicionales"] is None:
             pedido["adicionales"] = []
+        # Enriquecer con datos del cliente (cédula y teléfono)
+        enriquecer_pedido_con_datos_cliente(pedido)
     return pedidos
 
 
@@ -6856,6 +6876,8 @@ async def get_pedidos_cliente(cliente_id: str, cliente: dict = Depends(get_curre
             # Normalizar adicionales: None o no existe → []
             if "adicionales" not in pedido or pedido.get("adicionales") is None:
                 pedido["adicionales"] = []
+            # Enriquecer con datos del cliente (cédula y teléfono)
+            enriquecer_pedido_con_datos_cliente(pedido)
         
         return pedidos
         
