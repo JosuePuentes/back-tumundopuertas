@@ -66,8 +66,15 @@ def enriquecer_pedido_con_datos_cliente(pedido: dict):
 
 @router.get("/all/")
 async def get_all_pedidos():
-    # Obtener todos los campos, incluyendo "adicionales"
-    pedidos = list(pedidos_collection.find())
+    # Obtener todos los pedidos, excluyendo los pedidos web (tipo_pedido: "web")
+    # Incluir pedidos internos (tipo_pedido: "interno") y pedidos sin tipo_pedido (retrocompatibilidad)
+    query = {
+        "$or": [
+            {"tipo_pedido": {"$ne": "web"}},  # No es web
+            {"tipo_pedido": {"$exists": False}}  # No tiene tipo_pedido (pedidos antiguos)
+        ]
+    }
+    pedidos = list(pedidos_collection.find(query))
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
         # Normalizar adicionales: None o no existe → []
@@ -229,13 +236,17 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
     
     print("Creando pedido:", pedido)
     
+    # Marcar el pedido como tipo "interno" (desde /crearpedido)
+    pedido_dict = pedido.dict()
+    pedido_dict["tipo_pedido"] = "interno"
+    
     # Insertar el pedido
-    result = pedidos_collection.insert_one(pedido.dict())
+    result = pedidos_collection.insert_one(pedido_dict)
     pedido_id = str(result.inserted_id)
 
     # Generar asignaciones unitarias para herrería (orden 1) por cada unidad pendiente (estado_item == 0)
     try:
-        pedido_db = pedidos_collection.find_one({"_id": ObjectId(pedido_id)}) or pedido.dict()
+        pedido_db = pedidos_collection.find_one({"_id": ObjectId(pedido_id)}) or pedido_dict
         seguimiento = pedido_db.get("seguimiento") or []
 
         # Ubicar proceso de herrería por orden 1 o por nombre
@@ -561,21 +572,33 @@ async def get_pedidos_herreria(
 ):
     """Obtener ITEMS individuales para producción - Items pendientes (0) y en proceso (1-3)"""
     try:
-        # Buscar todos los pedidos (sin límite en MongoDB)
-        pedidos = list(pedidos_collection.find({}, {
+        # Buscar solo pedidos internos (excluir pedidos web)
+        # Incluir pedidos internos (tipo_pedido: "interno") y pedidos sin tipo_pedido (retrocompatibilidad)
+        query = {
+            "$or": [
+                {"tipo_pedido": {"$ne": "web"}},  # No es web
+                {"tipo_pedido": {"$exists": False}}  # No tiene tipo_pedido (pedidos antiguos)
+            ]
+        }
+        pedidos = list(pedidos_collection.find(query, {
             "_id": 1,
             "numero_orden": 1,
             "cliente_nombre": 1,
             "fecha_creacion": 1,
             "estado_general": 1,
             "items": 1,
-            "seguimiento": 1
+            "seguimiento": 1,
+            "tipo_pedido": 1
         }))
         
         # Convertir a items individuales
         items_individuales = []
         
         for pedido in pedidos:
+            # Verificación adicional: saltar pedidos web por si acaso
+            tipo_pedido = pedido.get("tipo_pedido")
+            if tipo_pedido == "web":
+                continue
             pedido_id = str(pedido["_id"])
             
             # Filtrar items pendientes (0) y en proceso (1-3)
@@ -6670,8 +6693,10 @@ async def create_pedido_cliente(pedido: Pedido, cliente: dict = Depends(get_curr
         pedido.cliente_nombre = cliente_nombre
         pedido.creado_por = cliente.get("usuario")
         
-        # Marcar el pedido como tipo "cliente"
+        # Marcar el pedido como tipo "web" (desde /clientes)
         pedido_dict = pedido.dict()
+        pedido_dict["tipo_pedido"] = "web"
+        # Mantener compatibilidad con campo "tipo" por si acaso
         pedido_dict["tipo"] = "cliente"
         pedido_dict["fecha_creacion"] = datetime.now().isoformat()
         pedido_dict["fecha_actualizacion"] = datetime.now().isoformat()
@@ -6857,15 +6882,19 @@ async def get_pedidos_cliente(cliente_id: str, cliente: dict = Depends(get_curre
             "historial_pagos": 1,
             "total_abonado": 1,
             "tipo": 1,
+            "tipo_pedido": 1,
             "creado_por": 1
             # Excluir campos pesados como seguimiento, datos_completos, etc.
         }
         
-        # Buscar pedidos del cliente con tipo "cliente" usando proyección
+        # Buscar pedidos del cliente con tipo_pedido "web" o tipo "cliente" (retrocompatibilidad)
         pedidos = list(pedidos_collection.find(
             {
                 "cliente_id": cliente_id,
-                "tipo": "cliente"
+                "$or": [
+                    {"tipo_pedido": "web"},
+                    {"tipo": "cliente"}  # Retrocompatibilidad con pedidos antiguos
+                ]
             },
             projection
         ).sort("fecha_creacion", -1).limit(500))  # Limitar a 500 pedidos más recientes

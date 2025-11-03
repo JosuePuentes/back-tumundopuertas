@@ -224,6 +224,7 @@ class Pedido(BaseModel):
     historial_pagos: Optional[List[RegistroPago]] = []
     total_abonado: float = 0.0
     adicionales: Optional[List[Adicional]] = []  # Campo para adicionales del pedido
+    tipo_pedido: Optional[str] = None  # "interno" para /crearpedido, "web" para /clientes
     
     class Config:
         extra = "allow"  # Permitir campos adicionales no definidos en el modelo
