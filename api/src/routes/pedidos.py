@@ -32,9 +32,13 @@ def obtener_siguiente_modulo(orden_actual: int) -> str:
 
 @router.get("/all/")
 async def get_all_pedidos():
+    # Obtener todos los campos, incluyendo "adicionales"
     pedidos = list(pedidos_collection.find())
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
+        # Asegurar que "adicionales" exista (puede ser None si no se guardó)
+        if "adicionales" not in pedido:
+            pedido["adicionales"] = None
     return pedidos
 
 @router.get("/test-terminar")
@@ -1628,9 +1632,13 @@ from fastapi import Query
 async def get_pedidos_por_estado(estado_general: list[str] = Query(..., description="Uno o varios estados separados por coma")):
     # Si solo se pasa uno, FastAPI lo convierte en lista de un elemento
     filtro = {"estado_general": {"$in": estado_general}}
+    # Obtener todos los campos, incluyendo "adicionales"
     pedidos = list(pedidos_collection.find(filtro))
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
+        # Asegurar que "adicionales" exista (puede ser None si no se guardó)
+        if "adicionales" not in pedido:
+            pedido["adicionales"] = None
     return pedidos
 
 @router.post("/{pedido_id}/facturar")
