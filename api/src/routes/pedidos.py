@@ -5262,6 +5262,106 @@ async def agregar_abono_pedido(
         raise HTTPException(status_code=500, detail=f"Error al agregar abono: {str(e)}")
 
 # ========================================
+# ENDPOINT PARA ELIMINAR PEDIDOS
+# ========================================
+
+@router.delete("/{pedido_id}")
+async def eliminar_pedido(
+    pedido_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Eliminar un pedido y todos sus datos asociados.
+    Solo administradores pueden eliminar pedidos.
+    Elimina:
+    - El pedido de la base de datos
+    - Facturas asociadas (confirmadas y de cliente)
+    - Mensajes del chat asociados
+    """
+    try:
+        # Verificar que el usuario sea administrador
+        if current_user.get("rol") != "admin":
+            raise HTTPException(status_code=403, detail="Solo los administradores pueden eliminar pedidos")
+        
+        # Validar pedido_id
+        try:
+            pedido_obj_id = ObjectId(pedido_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
+        # Buscar el pedido para verificar que existe
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Obtener información del pedido antes de eliminar
+        pedido_info = {
+            "pedido_id": pedido_id,
+            "numero_orden": pedido.get("numero_orden", ""),
+            "cliente_nombre": pedido.get("cliente_nombre", ""),
+            "cliente_id": pedido.get("cliente_id", "")
+        }
+        
+        # Eliminar facturas asociadas
+        facturas_eliminadas = 0
+        
+        # Eliminar facturas confirmadas (usa pedidoId como campo)
+        facturas_confirmadas_collection = db["facturas_confirmadas"]
+        result_facturas_confirmadas = facturas_confirmadas_collection.delete_many({"pedidoId": pedido_id})
+        facturas_eliminadas += result_facturas_confirmadas.deleted_count
+        
+        # También intentar eliminar con ObjectId por si acaso
+        try:
+            result_facturas_confirmadas_obj = facturas_confirmadas_collection.delete_many({"pedidoId": str(pedido_obj_id)})
+            facturas_eliminadas += result_facturas_confirmadas_obj.deleted_count
+        except:
+            pass
+        
+        # Eliminar facturas de cliente (usa pedido_id como campo)
+        result_facturas_cliente = facturas_cliente_collection.delete_many({"pedido_id": pedido_id})
+        facturas_eliminadas += result_facturas_cliente.deleted_count
+        
+        # También intentar eliminar con ObjectId convertido a string
+        try:
+            result_facturas_cliente_obj = facturas_cliente_collection.delete_many({"pedido_id": str(pedido_obj_id)})
+            facturas_eliminadas += result_facturas_cliente_obj.deleted_count
+        except:
+            pass
+        
+        # Eliminar mensajes asociados al pedido
+        mensajes_eliminados = 0
+        try:
+            mensajes_collection = db["mensajes"]
+            result_mensajes = mensajes_collection.delete_many({"pedido_id": pedido_id})
+            mensajes_eliminados = result_mensajes.deleted_count
+        except Exception as e:
+            print(f"ADVERTENCIA: No se pudo eliminar mensajes (puede que la colección no exista aún): {str(e)}")
+        
+        # Eliminar el pedido
+        result_pedido = pedidos_collection.delete_one({"_id": pedido_obj_id})
+        
+        if result_pedido.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="No se pudo eliminar el pedido")
+        
+        return {
+            "message": "Pedido eliminado exitosamente",
+            "success": True,
+            "pedido_id": pedido_id,
+            "numero_orden": pedido_info["numero_orden"],
+            "cliente_nombre": pedido_info["cliente_nombre"],
+            "facturas_eliminadas": facturas_eliminadas,
+            "mensajes_eliminados": mensajes_eliminados
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR ELIMINAR PEDIDO: {str(e)}")
+        import traceback
+        print(f"ERROR ELIMINAR PEDIDO TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al eliminar pedido: {str(e)}")
+
+# ========================================
 # ENDPOINT PARA DEBUGGING DE PEDIDOS
 # ========================================
 
