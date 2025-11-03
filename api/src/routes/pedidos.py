@@ -36,9 +36,9 @@ async def get_all_pedidos():
     pedidos = list(pedidos_collection.find())
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
-        # Asegurar que "adicionales" exista (puede ser None si no se guardó)
-        if "adicionales" not in pedido:
-            pedido["adicionales"] = None
+        # Normalizar adicionales: None o no existe → []
+        if "adicionales" not in pedido or pedido["adicionales"] is None:
+            pedido["adicionales"] = []
     return pedidos
 
 @router.get("/test-terminar")
@@ -149,6 +149,9 @@ async def get_pedido(pedido_id: str):
     if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     pedido["_id"] = str(pedido["_id"])
+    # Normalizar adicionales: None o no existe → []
+    if "adicionales" not in pedido or pedido.get("adicionales") is None:
+        pedido["adicionales"] = []
     return pedido
 
 @router.post("/")
@@ -1221,9 +1224,12 @@ async def get_all_pedidos():
             "adicionales": 1  # Incluir adicionales
         }).limit(1000))  # Aumentar el límite para incluir más pedidos
         
-        # Convertir ObjectId a string
+        # Convertir ObjectId a string y normalizar adicionales
         for pedido in pedidos:
             pedido["_id"] = str(pedido["_id"])
+            # Normalizar adicionales: None o no existe → []
+            if "adicionales" not in pedido or pedido.get("adicionales") is None:
+                pedido["adicionales"] = []
         
         return pedidos
         
@@ -1636,9 +1642,9 @@ async def get_pedidos_por_estado(estado_general: list[str] = Query(..., descript
     pedidos = list(pedidos_collection.find(filtro))
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
-        # Asegurar que "adicionales" exista (puede ser None si no se guardó)
-        if "adicionales" not in pedido:
-            pedido["adicionales"] = None
+        # Normalizar adicionales: None o no existe → []
+        if "adicionales" not in pedido or pedido["adicionales"] is None:
+            pedido["adicionales"] = []
     return pedidos
 
 @router.post("/{pedido_id}/facturar")
@@ -3858,9 +3864,9 @@ async def get_pedidos_por_estados(
 
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
-        # Asegurar que "adicionales" exista (puede ser None si no se guardó)
-        if "adicionales" not in pedido:
-            pedido["adicionales"] = None
+        # Normalizar adicionales: None o no existe → []
+        if "adicionales" not in pedido or pedido["adicionales"] is None:
+            pedido["adicionales"] = []
     return pedidos
 
 

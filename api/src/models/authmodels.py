@@ -205,6 +205,11 @@ class RegistroPago(BaseModel):
     estado: str  # "abonado", "pagado", "sin pago"
     metodo: Optional[str] = None  # ID del método de pago
 
+class Adicional(BaseModel):
+    """Modelo para adicionales en pedidos"""
+    descripcion: Optional[str] = None
+    precio: float
+    cantidad: Optional[int] = 1
 
 class Pedido(BaseModel):
     cliente_id: str
@@ -218,6 +223,13 @@ class Pedido(BaseModel):
     pago: Optional[str] = "sin pago"   # "sin pago" | "abonado" | "pagado"
     historial_pagos: Optional[List[RegistroPago]] = []
     total_abonado: float = 0.0
+    adicionales: Optional[List[Adicional]] = []  # Campo para adicionales del pedido
+    
+    class Config:
+        extra = "allow"  # Permitir campos adicionales no definidos en el modelo
+        populate_by_name = True
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str}
 
 class Company(BaseModel):
     nombre: str
