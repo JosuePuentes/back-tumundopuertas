@@ -30,10 +30,34 @@ async def get_all_clientes():
 
 @router.get("/id/{cliente_id}/")
 async def get_cliente(cliente_id: str):
-    cliente = clientes_collection.find_one({"_id": cliente_id})
+    """
+    Obtener un cliente por ID.
+    Retorna los campos normalizados para compatibilidad con frontend.
+    """
+    try:
+        # Convertir string a ObjectId
+        object_id = ObjectId(cliente_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID de cliente inválido")
+    
+    cliente = clientes_collection.find_one({"_id": object_id})
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    return cliente
+    
+    # Convertir _id a string para JSON
+    if "_id" in cliente:
+        cliente["_id"] = str(cliente["_id"])
+    
+    # Normalizar campos para compatibilidad con frontend
+    cliente_normalizado = {
+        "_id": cliente.get("_id"),
+        "nombre": cliente.get("nombre") or cliente.get("nombres", ""),
+        "cedula": cliente.get("cedula") or cliente.get("rif", ""),  # Priorizar cedula, usar rif como fallback
+        "direccion": cliente.get("direccion", ""),
+        "telefono": cliente.get("telefono") or cliente.get("telefono_contacto", ""),
+    }
+    
+    return cliente_normalizado
 
 @router.post("/")
 async def create_cliente(cliente: Cliente):
