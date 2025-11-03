@@ -517,47 +517,31 @@ async def get_facturas_cliente(cliente_id: str, cliente: dict = Depends(get_curr
         raise HTTPException(status_code=500, detail=f"Error al obtener facturas: {str(e)}")
 
 @router.get("/facturas/pedido/{pedido_id}")
-async def get_factura_por_pedido(pedido_id: str, cliente: dict = Depends(get_current_cliente)):
+async def get_factura_por_pedido(pedido_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Obtener factura de cliente por pedido_id.
-    Busca en la colección facturas_cliente.
-    Solo puede ver facturas de sus propios pedidos.
+    Obtener factura(s) por ID de pedido.
+    Requiere autenticación de administrador.
+    Busca en la colección facturas_confirmadas.
     """
     try:
-        # Buscar factura por pedido_id
-        factura = facturas_cliente_collection.find_one({"pedido_id": pedido_id})
+        # Verificar que el usuario sea admin o tenga permisos
+        if current_user.get("rol") != "admin":
+            raise HTTPException(status_code=403, detail="No tienes permisos para acceder a este recurso")
         
-        if not factura:
-            raise HTTPException(status_code=404, detail="Factura no encontrada para este pedido")
+        # Validar formato de pedido_id
+        pedido_id_clean = pedido_id.strip()
         
-        # Verificar que la factura pertenezca al cliente autenticado
-        cliente_id = cliente.get("id")
-        if factura.get("cliente_id") != cliente_id:
-            raise HTTPException(status_code=403, detail="No puedes ver facturas de otros clientes")
+        # Buscar facturas en facturas_confirmadas (usa pedidoId como campo)
+        facturas = list(facturas_confirmadas_collection.find({"pedidoId": pedido_id_clean}))
         
-        # Convertir ObjectId a string
-        factura["_id"] = str(factura["_id"])
+        if not facturas:
+            raise HTTPException(status_code=404, detail="No se encontraron facturas para este pedido")
         
-        # Transformar a camelCase para el frontend
-        factura_response = {
-            "id": factura.get("_id"),
-            "pedido_id": factura.get("pedido_id"),
-            "numero_factura": factura.get("numero_factura"),
-            "cliente_id": factura.get("cliente_id"),
-            "cliente_nombre": factura.get("cliente_nombre"),
-            "fecha_creacion": factura.get("fecha_creacion"),
-            "fecha_facturacion": factura.get("fecha_facturacion"),
-            "items": factura.get("items", []),
-            "adicionales": factura.get("adicionales", []),  # Incluir adicionales en la respuesta
-            "monto_total": float(factura.get("monto_total", 0)),
-            "monto_abonado": float(factura.get("monto_abonado", 0)),
-            "saldo_pendiente": float(factura.get("saldo_pendiente", 0)),
-            "estado": factura.get("estado", "pendiente"),
-            "historial_abonos": factura.get("historial_abonos", []),
-            "datos_completos": factura.get("datos_completos", {})
-        }
+        # Convertir ObjectId a string y transformar a camelCase
+        facturas_transformed = [transform_factura_to_camelcase(factura) for factura in facturas]
         
-        return factura_response
+        # Si hay solo una factura, retornarla directamente; si hay varias, retornar lista
+        return facturas_transformed[0] if len(facturas_transformed) == 1 else facturas_transformed
         
     except HTTPException:
         raise
