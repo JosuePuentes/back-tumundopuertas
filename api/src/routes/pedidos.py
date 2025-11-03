@@ -6369,11 +6369,25 @@ async def create_pedido_cliente(pedido: Pedido, cliente: dict = Depends(get_curr
         
         # Crear factura automáticamente para el pedido del cliente
         try:
-            # Calcular monto total del pedido
-            monto_total = sum(
+            # Calcular monto total del pedido (items + adicionales)
+            monto_total_items = sum(
                 float(item.get("precio", 0)) * float(item.get("cantidad", 0))
                 for item in pedido_dict.get("items", [])
             )
+            
+            # Sumar adicionales si existen
+            monto_total_adicionales = 0.0
+            adicionales = pedido_dict.get("adicionales", [])
+            if adicionales and isinstance(adicionales, list):
+                # Los adicionales pueden tener estructura: [{"descripcion": "...", "precio": 100, "cantidad": 1}]
+                # O simplemente: [{"precio": 100}] si cantidad es siempre 1
+                for adicional in adicionales:
+                    if isinstance(adicional, dict):
+                        precio = float(adicional.get("precio", 0))
+                        cantidad = float(adicional.get("cantidad", 1))  # Default cantidad = 1
+                        monto_total_adicionales += precio * cantidad
+            
+            monto_total = monto_total_items + monto_total_adicionales
             
             # Obtener total_abonado inicial del pedido (si viene con historial_pagos)
             total_abonado_inicial = 0.0
@@ -6409,6 +6423,7 @@ async def create_pedido_cliente(pedido: Pedido, cliente: dict = Depends(get_curr
                 "fecha_creacion": datetime.utcnow().isoformat(),
                 "fecha_facturacion": pedido_dict.get("fecha_creacion"),
                 "items": pedido_dict.get("items", []),
+                "adicionales": pedido_dict.get("adicionales", []),  # Incluir adicionales en la factura
                 "monto_total": monto_total,
                 "monto_abonado": total_abonado_inicial,
                 "saldo_pendiente": saldo_pendiente_inicial,

@@ -74,6 +74,14 @@ def transform_factura_to_camelcase(data):
     if monto_total_final is None and isinstance(pedido_completo, dict):
         monto_total_final = pedido_completo.get("monto_total") or pedido_completo.get("montoTotal")
     
+    # Obtener adicionales desde múltiples fuentes
+    adicionales_final = (
+        data.get("adicionales") or 
+        datos_completos.get("adicionales") or
+        (pedido_completo.get("adicionales") if isinstance(pedido_completo, dict) else None) or
+        []
+    )
+    
     # Transformar a camelCase - SIEMPRE incluir todos los campos necesarios
     result = {
         "id": str(data.get("_id", "")) if data.get("_id") else None,
@@ -84,6 +92,7 @@ def transform_factura_to_camelcase(data):
         "fechaFacturacion": get_value("fechaFacturacion", "fecha_facturacion", default="") or None,
         "fechaCreacion": get_value("fechaCreacion", "fecha_creacion", "createdAt", default="") or None,
         "items": data.get("items", []) or datos_completos.get("items", []),  # Siempre incluir items
+        "adicionales": adicionales_final if isinstance(adicionales_final, list) else [],  # Incluir adicionales
         "montoTotal": float(monto_total_final) if monto_total_final is not None else None,
         "estadoGeneral": get_value("estadoGeneral", "estado_general") or None,
         "datosCompletos": datos_completos
@@ -92,6 +101,10 @@ def transform_factura_to_camelcase(data):
     # Asegurar que items siempre sea una lista (nunca None)
     if result["items"] is None:
         result["items"] = []
+    
+    # Asegurar que adicionales siempre sea una lista (nunca None)
+    if result["adicionales"] is None:
+        result["adicionales"] = []
     
     # Asegurar que datosCompletos siempre sea un objeto (nunca None)
     if result["datosCompletos"] is None:
@@ -159,6 +172,33 @@ async def crear_factura_confirmada(
                 (datos_completos.get("pedido") or {}).get("items") if isinstance(datos_completos.get("pedido"), dict) else []
             )
         
+        # Obtener adicionales si existen
+        adicionales = None
+        if datos_completos:
+            adicionales = (
+                datos_completos.get("adicionales") or
+                (datos_completos.get("pedido") or {}).get("adicionales") if isinstance(datos_completos.get("pedido"), dict) else None
+            )
+        
+        # Si el monto_total no viene, calcularlo incluyendo adicionales
+        if monto_total is None:
+            # Calcular monto de items
+            monto_items = sum(
+                float(item.get("precio", 0)) * float(item.get("cantidad", 0))
+                for item in items
+            ) if items else 0.0
+            
+            # Calcular monto de adicionales
+            monto_adicionales = 0.0
+            if adicionales and isinstance(adicionales, list):
+                for adicional in adicionales:
+                    if isinstance(adicional, dict):
+                        precio = float(adicional.get("precio", 0))
+                        cantidad = float(adicional.get("cantidad", 1))  # Default cantidad = 1
+                        monto_adicionales += precio * cantidad
+            
+            monto_total = monto_items + monto_adicionales
+        
         # Preparar datos de la factura (guardar en snake_case en BD para consistencia)
         factura_dict = {
             "pedidoId": pedido_id,
@@ -167,6 +207,7 @@ async def crear_factura_confirmada(
             "cliente_id": cliente_id.strip() if cliente_id else None,
             "fecha_facturacion": fecha_facturacion,
             "items": items,
+            "adicionales": adicionales if adicionales else [],  # Incluir adicionales
             "monto_total": float(monto_total) if monto_total is not None else None,
             "estado_general": estado_general.strip() if estado_general else None,
             "datos_completos": datos_completos
@@ -182,6 +223,7 @@ async def crear_factura_confirmada(
                 "cliente_id": cliente_id.strip() if cliente_id else factura_existente.get("cliente_id"),
                 "fecha_facturacion": fecha_facturacion,
                 "items": items if items else factura_existente.get("items", []),
+                "adicionales": adicionales if adicionales is not None else factura_existente.get("adicionales", []),  # Incluir adicionales
                 "monto_total": float(monto_total) if monto_total is not None else factura_existente.get("monto_total"),
                 "estado_general": estado_general.strip() if estado_general else factura_existente.get("estado_general"),
                 "datos_completos": datos_completos if datos_completos else factura_existente.get("datos_completos", {}),
@@ -506,6 +548,7 @@ async def get_factura_por_pedido(pedido_id: str, cliente: dict = Depends(get_cur
             "fecha_creacion": factura.get("fecha_creacion"),
             "fecha_facturacion": factura.get("fecha_facturacion"),
             "items": factura.get("items", []),
+            "adicionales": factura.get("adicionales", []),  # Incluir adicionales en la respuesta
             "monto_total": float(factura.get("monto_total", 0)),
             "monto_abonado": float(factura.get("monto_abonado", 0)),
             "saldo_pendiente": float(factura.get("saldo_pendiente", 0)),
