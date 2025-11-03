@@ -254,35 +254,54 @@ async def get_mensajes_conversacion(
             cliente_id_conversacion = pedido_id.replace("soporte_", "")
             
             # Si es cliente, solo puede ver sus propias conversaciones
-            if es_cliente and current_cliente and current_cliente.get("id") != cliente_id_conversacion:
-                raise HTTPException(status_code=403, detail="No puedes ver conversaciones de otros clientes")
+            if es_cliente and current_cliente:
+                # Comparar IDs como strings para evitar problemas de tipo
+                cliente_id_actual = str(current_cliente.get("id", ""))
+                cliente_id_conv = str(cliente_id_conversacion)
+                if cliente_id_actual != cliente_id_conv:
+                    raise HTTPException(status_code=403, detail="No puedes ver conversaciones de otros clientes")
         
         # Buscar mensajes de la conversación
         # Ordenar por fecha_creacion (más antiguos primero), o por fecha si existe
-        mensajes = list(mensajes_collection.find({
-            "pedido_id": pedido_id
-        }).sort("fecha_creacion", 1))
+        try:
+            mensajes = list(mensajes_collection.find({
+                "pedido_id": pedido_id
+            }).sort("fecha_creacion", 1))
+        except Exception as e:
+            print(f"ERROR BUSCANDO MENSAJES: {str(e)}")
+            # Si hay error en la búsqueda, retornar array vacío en lugar de fallar
+            return []
         
         # Normalizar estructura de respuesta
         mensajes_normalizados = []
-        for mensaje in mensajes:
-            # Convertir ObjectId a string
-            mensaje_id = str(mensaje.get("_id", ""))
-            
-            # Normalizar campos: usar fecha si existe, sino fecha_creacion
-            fecha = mensaje.get("fecha") or mensaje.get("fecha_creacion", datetime.now().isoformat())
-            
-            mensaje_normalizado = {
-                "_id": mensaje_id,
-                "pedido_id": mensaje.get("pedido_id", pedido_id),
-                "remitente_id": mensaje.get("remitente_id", ""),
-                "remitente_tipo": mensaje.get("remitente_tipo", ""),
-                "remitente_nombre": mensaje.get("remitente_nombre", ""),
-                "mensaje": mensaje.get("mensaje", ""),
-                "fecha": fecha,
-                "leido": mensaje.get("leido", False)
-            }
-            mensajes_normalizados.append(mensaje_normalizado)
+        try:
+            for mensaje in mensajes:
+                # Convertir ObjectId a string de forma segura
+                try:
+                    mensaje_id = str(mensaje.get("_id", ""))
+                except Exception:
+                    mensaje_id = ""
+                
+                # Normalizar campos: usar fecha si existe, sino fecha_creacion
+                fecha = mensaje.get("fecha") or mensaje.get("fecha_creacion")
+                if not fecha:
+                    fecha = datetime.now().isoformat()
+                
+                mensaje_normalizado = {
+                    "_id": mensaje_id,
+                    "pedido_id": str(mensaje.get("pedido_id", pedido_id)),
+                    "remitente_id": str(mensaje.get("remitente_id", "")),
+                    "remitente_tipo": str(mensaje.get("remitente_tipo", "")),
+                    "remitente_nombre": str(mensaje.get("remitente_nombre", "")),
+                    "mensaje": str(mensaje.get("mensaje", "")),
+                    "fecha": str(fecha),
+                    "leido": bool(mensaje.get("leido", False))
+                }
+                mensajes_normalizados.append(mensaje_normalizado)
+        except Exception as e:
+            print(f"ERROR NORMALIZANDO MENSAJES: {str(e)}")
+            # Si hay error normalizando, retornar array vacío
+            return []
         
         # Si no hay mensajes, retornar array vacío (no 404)
         return mensajes_normalizados
