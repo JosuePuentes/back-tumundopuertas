@@ -1206,13 +1206,15 @@ async def get_all_pedidos():
     """Obtener todos los pedidos para el monitor - Versión simplificada"""
     try:
         # Método más simple y eficiente
+        # Incluir "adicionales" en el projection para que se devuelva al frontend
         pedidos = list(pedidos_collection.find({}, {
             "_id": 1,
             "numero_orden": 1,
             "cliente_nombre": 1,
             "fecha_creacion": 1,
             "estado_general": 1,
-            "items": 1
+            "items": 1,
+            "adicionales": 1  # Incluir adicionales
         }).limit(1000))  # Aumentar el límite para incluir más pedidos
         
         # Convertir ObjectId a string
@@ -3840,12 +3842,17 @@ async def get_pedidos_por_estados(
         final_query = {"$and": [base_filter, {"$or": [cond_date, cond_string]}]}
 
     try:
+        # Obtener todos los campos, incluyendo "adicionales"
+        # No usar projection para asegurar que se devuelvan todos los campos
         pedidos = list(pedidos_collection.find(final_query))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en la consulta a la DB: {e}")
 
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
+        # Asegurar que "adicionales" exista (puede ser None si no se guardó)
+        if "adicionales" not in pedido:
+            pedido["adicionales"] = None
     return pedidos
 
 
