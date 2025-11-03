@@ -5017,6 +5017,250 @@ async def get_pagos_pedido(pedido_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener pagos: {str(e)}")
 
+@router.post("/{pedido_id}/abono/{index}/aprobar")
+async def aprobar_abono_pendiente(
+    pedido_id: str,
+    index: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Aprobar un abono pendiente en el historial de pagos de un pedido.
+    Cambia el estado del abono de "pendiente" a "abonado" o "pagado".
+    """
+    try:
+        # Verificar permisos de administrador
+        if current_user.get("rol") != "admin":
+            raise HTTPException(status_code=403, detail="No tienes permisos para aprobar abonos")
+        
+        # Validar pedido_id
+        try:
+            pedido_obj_id = ObjectId(pedido_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
+        # Buscar el pedido
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Obtener historial de pagos
+        historial_pagos = pedido.get("historial_pagos", [])
+        
+        # Validar índice
+        if index < 0 or index >= len(historial_pagos):
+            raise HTTPException(status_code=400, detail=f"Índice de abono inválido. Debe estar entre 0 y {len(historial_pagos) - 1}")
+        
+        # Obtener el abono a aprobar
+        abono = historial_pagos[index]
+        
+        # Verificar que el abono esté pendiente
+        estado_actual = abono.get("estado", "sin pago")
+        if estado_actual not in ["pendiente", "sin pago"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"El abono ya está aprobado o procesado. Estado actual: {estado_actual}"
+            )
+        
+        # Calcular el total del pedido (items + adicionales)
+        monto_total_items = sum(
+            float(item.get("precio", 0)) * float(item.get("cantidad", 0))
+            for item in pedido.get("items", [])
+        )
+        
+        # Sumar adicionales si existen
+        monto_total_adicionales = 0.0
+        adicionales = pedido.get("adicionales", [])
+        if adicionales and isinstance(adicionales, list):
+            for adicional in adicionales:
+                if isinstance(adicional, dict):
+                    precio = float(adicional.get("precio", 0))
+                    cantidad = float(adicional.get("cantidad", 1))
+                    monto_total_adicionales += precio * cantidad
+        
+        total_pedido = monto_total_items + monto_total_adicionales
+        total_abonado_actual = float(pedido.get("total_abonado", 0))
+        monto_abono = float(abono.get("monto", 0))
+        
+        # Si el abono estaba pendiente, ahora se suma al total_abonado
+        nuevo_total_abonado = total_abonado_actual + monto_abono
+        
+        # Determinar el nuevo estado del pedido
+        if nuevo_total_abonado >= total_pedido - 0.01:  # Tolerancia para floats
+            nuevo_estado_pago = "pagado"
+            nuevo_estado_abono = "pagado"
+        else:
+            nuevo_estado_pago = "abonado"
+            nuevo_estado_abono = "abonado"
+        
+        # Actualizar el abono en el historial usando la sintaxis de MongoDB para actualizar array
+        update_query = {
+            "$set": {
+                f"historial_pagos.{index}.estado": nuevo_estado_abono,
+                "total_abonado": nuevo_total_abonado,
+                "pago": nuevo_estado_pago,
+                "fecha_actualizacion": datetime.now().isoformat()
+            }
+        }
+        
+        result = pedidos_collection.update_one(
+            {"_id": pedido_obj_id},
+            update_query
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=500, detail="Error al actualizar el abono")
+        
+        # Obtener el pedido actualizado
+        pedido_actualizado = pedidos_collection.find_one({"_id": pedido_obj_id})
+        historial_actualizado = pedido_actualizado.get("historial_pagos", [])
+        
+        return {
+            "message": f"Abono aprobado exitosamente",
+            "pedido_id": pedido_id,
+            "abono_index": index,
+            "abono_aprobado": historial_actualizado[index] if index < len(historial_actualizado) else None,
+            "total_abonado": nuevo_total_abonado,
+            "estado_pago": nuevo_estado_pago,
+            "historial_pagos": historial_actualizado
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR APROBAR ABONO: {str(e)}")
+        import traceback
+        print(f"ERROR APROBAR ABONO TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al aprobar abono: {str(e)}")
+
+@router.post("/{pedido_id}/abono")
+async def agregar_abono_pedido(
+    pedido_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Agregar un nuevo abono a un pedido.
+    El abono puede ser pendiente o aprobado automáticamente según el parámetro.
+    """
+    try:
+        # Verificar permisos de administrador
+        if current_user.get("rol") != "admin":
+            raise HTTPException(status_code=403, detail="No tienes permisos para agregar abonos")
+        
+        # Validar pedido_id
+        try:
+            pedido_obj_id = ObjectId(pedido_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="ID de pedido inválido")
+        
+        # Buscar el pedido
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Obtener datos del request
+        data = await request.json()
+        monto = float(data.get("monto", 0))
+        metodo = data.get("metodo")  # ID del método de pago
+        estado = data.get("estado", "pendiente")  # "pendiente", "abonado", "pagado"
+        numero_referencia = data.get("numero_referencia")
+        comprobante_url = data.get("comprobante_url")
+        concepto = data.get("concepto")
+        
+        if monto <= 0:
+            raise HTTPException(status_code=400, detail="El monto debe ser mayor que 0")
+        
+        # Calcular el total del pedido (items + adicionales)
+        monto_total_items = sum(
+            float(item.get("precio", 0)) * float(item.get("cantidad", 0))
+            for item in pedido.get("items", [])
+        )
+        
+        # Sumar adicionales si existen
+        monto_total_adicionales = 0.0
+        adicionales = pedido.get("adicionales", [])
+        if adicionales and isinstance(adicionales, list):
+            for adicional in adicionales:
+                if isinstance(adicional, dict):
+                    precio = float(adicional.get("precio", 0))
+                    cantidad = float(adicional.get("cantidad", 1))
+                    monto_total_adicionales += precio * cantidad
+        
+        total_pedido = monto_total_items + monto_total_adicionales
+        total_abonado_actual = float(pedido.get("total_abonado", 0))
+        
+        # Crear registro de abono
+        nuevo_abono = {
+            "fecha": datetime.now().isoformat(),
+            "monto": monto,
+            "estado": estado,
+        }
+        
+        if metodo:
+            nuevo_abono["metodo"] = str(metodo)
+        if numero_referencia:
+            nuevo_abono["numero_referencia"] = numero_referencia
+        if comprobante_url:
+            nuevo_abono["comprobante_url"] = comprobante_url
+        if concepto:
+            nuevo_abono["concepto"] = concepto
+        
+        # Si el abono se aprueba automáticamente, actualizar total_abonado
+        if estado in ["abonado", "pagado"]:
+            nuevo_total_abonado = total_abonado_actual + monto
+            
+            # Determinar el nuevo estado del pedido
+            if nuevo_total_abonado >= total_pedido - 0.01:  # Tolerancia para floats
+                nuevo_estado_pago = "pagado"
+                nuevo_abono["estado"] = "pagado"
+            else:
+                nuevo_estado_pago = "abonado"
+        else:
+            # Si es pendiente, no se suma al total_abonado
+            nuevo_total_abonado = total_abonado_actual
+            nuevo_estado_pago = pedido.get("pago", "sin pago")
+            if nuevo_total_abonado > 0:
+                nuevo_estado_pago = "abonado"
+        
+        # Preparar actualización
+        update_query = {
+            "$push": {"historial_pagos": nuevo_abono},
+            "$set": {
+                "total_abonado": nuevo_total_abonado,
+                "pago": nuevo_estado_pago,
+                "fecha_actualizacion": datetime.now().isoformat()
+            }
+        }
+        
+        result = pedidos_collection.update_one(
+            {"_id": pedido_obj_id},
+            update_query
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=500, detail="Error al agregar el abono")
+        
+        # Obtener el pedido actualizado
+        pedido_actualizado = pedidos_collection.find_one({"_id": pedido_obj_id})
+        historial_actualizado = pedido_actualizado.get("historial_pagos", [])
+        
+        return {
+            "message": "Abono agregado exitosamente",
+            "pedido_id": pedido_id,
+            "abono": nuevo_abono,
+            "total_abonado": nuevo_total_abonado,
+            "estado_pago": nuevo_estado_pago,
+            "historial_pagos": historial_actualizado
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR AGREGAR ABONO: {str(e)}")
+        import traceback
+        print(f"ERROR AGREGAR ABONO TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al agregar abono: {str(e)}")
+
 # ========================================
 # ENDPOINT PARA DEBUGGING DE PEDIDOS
 # ========================================
