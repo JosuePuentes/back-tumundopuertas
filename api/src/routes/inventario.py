@@ -546,7 +546,8 @@ async def actualizar_existencia(item_id: str, request: ActualizarExistenciaReque
             raise HTTPException(status_code=404, detail="Item no encontrado")
         
         # Determinar qué campo de existencia actualizar según la sucursal
-        campo_existencia = "existencia" if request.sucursal == "sucursal1" else "existencia2"
+        # Sucursal 1 usa el campo "cantidad", Sucursal 2 usa "existencia2"
+        campo_existencia = "cantidad" if request.sucursal == "sucursal1" else "existencia2"
         cantidad_actual = item.get(campo_existencia, 0.0)
         
         # Calcular nueva cantidad
@@ -577,13 +578,14 @@ async def actualizar_existencia(item_id: str, request: ActualizarExistenciaReque
         
         return {
             "message": f"Existencia {request.tipo}da exitosamente en {request.sucursal}",
-            "cantidad": item_actualizado.get(campo_existencia, nueva_cantidad),
+            "cantidad_actualizada": item_actualizado.get(campo_existencia, nueva_cantidad),
             "cantidad_anterior": cantidad_actual,
             "cantidad_operacion": request.cantidad,
             "tipo": request.tipo,
             "sucursal": request.sucursal,
+            "cantidad": item_actualizado.get("cantidad", 0),  # Sucursal 1
             "existencia": item_actualizado.get("existencia", 0),
-            "existencia2": item_actualizado.get("existencia2", 0)
+            "existencia2": item_actualizado.get("existencia2", 0)  # Sucursal 2
         }
         
     except HTTPException:
