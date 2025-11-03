@@ -251,7 +251,8 @@ class Item(BaseModel):
     costo: float
     costoProduccion: float = 0.0  # Keeping my default value
     cantidad: int
-    existencia: int = 0 # New field for stock
+    existencia: int = 0 # Sucursal 1 - New field for stock
+    existencia2: int = 0 # Sucursal 2 - Nueva sucursal
     activo: bool = True
     imagenes: Optional[List[str]] = []
 
@@ -267,4 +268,10 @@ class InventarioExcelItem(BaseModel): # Keeping my new model
     marca: Optional[str] = None
     precio: float
     costo: float
-    existencia: int = 0
+    existencia: int = 0  # Sucursal 1
+    existencia2: Optional[int] = 0  # Sucursal 2 (opcional, puede venir como "Sucursal 2" del Excel)
+    
+    class Config:
+        # Permitir mapeo de nombres alternativos del Excel
+        extra = "allow"
+        populate_by_name = True

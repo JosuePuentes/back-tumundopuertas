@@ -3,7 +3,7 @@ from ..config.mongodb import items_collection, pedidos_collection
 from ..models.authmodels import Item, InventarioExcelItem
 from bson import ObjectId
 from pydantic import BaseModel
-from typing import List, Literal # Keep this import as it's used in the /bulk endpoint
+from typing import List, Literal, Optional  # Keep this import as it's used in the /bulk endpoint
 import openpyxl
 import io
 
@@ -12,6 +12,7 @@ router = APIRouter()
 class ActualizarExistenciaRequest(BaseModel):
     cantidad: float
     tipo: Literal['cargar', 'descargar']
+    sucursal: Optional[Literal['sucursal1', 'sucursal2']] = 'sucursal1'  # Por defecto sucursal1
 
 @router.post("/cargar-existencias-desde-pedido")
 async def cargar_existencias_desde_pedido(pedido_id: str = Body(..., embed=True)):
@@ -304,15 +305,27 @@ async def preview_inventory_excel(file: UploadFile = File(...)):
 
         # Asumiendo que la primera fila son los encabezados
         headers = [cell.value for cell in sheet[1]]
-        expected_headers = ["codigo", "descripcion", "departamento", "marca", "precio", "costo", "existencia"]
-
-        # Validar que los encabezados esperados estén presentes
-        if not all(header in headers for header in expected_headers):
-            raise HTTPException(status_code=400, detail=f"Faltan encabezados en el archivo Excel. Se esperan: {', '.join(expected_headers)}")
+        
+        # Validar encabezados requeridos (acepta variaciones)
+        headers_lower = {str(h).strip().lower() if h else "" for h in headers}
+        if "codigo" not in headers_lower or "descripcion" not in headers_lower or "precio" not in headers_lower or "costo" not in headers_lower:
+            raise HTTPException(status_code=400, detail="Faltan encabezados requeridos: codigo, descripcion, precio, costo")
 
         preview_data = []
         for row_index in range(2, sheet.max_row + 1):
-            row_data = {headers[i]: cell.value for i, cell in enumerate(sheet[row_index])}
+            row_data_raw = {headers[i]: cell.value for i, cell in enumerate(sheet[row_index])}
+            
+            # Normalizar nombres de columnas para mapear a existencia/existencia2
+            row_data = {}
+            for key, value in row_data_raw.items():
+                key_lower = str(key).strip().lower() if key else ""
+                # Mapear variaciones de nombres de columnas
+                if key_lower in ["existencia", "sucursal 1", "sucursal1"]:
+                    row_data["existencia"] = value
+                elif key_lower in ["sucursal 2", "sucursal2", "existencia2"]:
+                    row_data["existencia2"] = value
+                else:
+                    row_data[key] = value
             
             # Solo incluir datos si hay información en la fila
             if any(value is not None for value in row_data.values()):
@@ -341,15 +354,33 @@ async def upload_inventory_excel(file: UploadFile = File(...)):
 
         # Asumiendo que la primera fila son los encabezados
         headers = [cell.value for cell in sheet[1]]
-        expected_headers = ["codigo", "descripcion", "departamento", "marca", "precio", "costo", "existencia"]
-
-        # Validar que los encabezados esperados estén presentes
-        if not all(header in headers for header in expected_headers):
-            raise HTTPException(status_code=400, detail=f"Faltan encabezados en el archivo Excel. Se esperan: {', '.join(expected_headers)}")
+        
+        # Validar encabezados requeridos
+        headers_lower = {str(h).strip().lower() if h else "" for h in headers}
+        if "codigo" not in headers_lower or "descripcion" not in headers_lower or "precio" not in headers_lower or "costo" not in headers_lower:
+            raise HTTPException(status_code=400, detail="Faltan encabezados requeridos: codigo, descripcion, precio, costo")
 
         items_to_insert = []
         for row_index in range(2, sheet.max_row + 1):
-            row_data = {headers[i]: cell.value for i, cell in enumerate(sheet[row_index])}
+            row_data_raw = {headers[i]: cell.value for i, cell in enumerate(sheet[row_index])}
+            
+            # Normalizar nombres de columnas para mapear a existencia/existencia2
+            row_data = {}
+            for key, value in row_data_raw.items():
+                key_lower = str(key).strip().lower() if key else ""
+                # Mapear variaciones de nombres de columnas
+                if key_lower in ["existencia", "sucursal 1", "sucursal1"]:
+                    row_data["existencia"] = value if value is not None else 0
+                elif key_lower in ["sucursal 2", "sucursal2", "existencia2"]:
+                    row_data["existencia2"] = value if value is not None else 0
+                else:
+                    row_data[key] = value
+            
+            # Si no hay existencia mapeada, establecer default
+            if "existencia" not in row_data:
+                row_data["existencia"] = 0
+            if "existencia2" not in row_data:
+                row_data["existencia2"] = 0
             
             # Validate with InventarioExcelItem model
             try:
@@ -370,6 +401,7 @@ async def upload_inventory_excel(file: UploadFile = File(...)):
                 # costoProduccion will use its default value from the Item model
                 cantidad=0, # Defaulting quantity, as it's not in Excel input
                 existencia=excel_item.existencia,
+                existencia2=excel_item.existencia2 if excel_item.existencia2 is not None else 0,
                 activo=True,
                 imagenes=[]
             )
@@ -461,6 +493,12 @@ async def bulk_upsert_items(items: List[Item]):
                 # Set cantidad if provided
                 if "cantidad" in item_dict:
                     update_operation["$set"]["cantidad"] = item_dict["cantidad"]
+                
+                # Set existencia and existencia2 if provided
+                if "existencia" in item_dict:
+                    update_operation["$set"]["existencia"] = item_dict["existencia"]
+                if "existencia2" in item_dict:
+                    update_operation["$set"]["existencia2"] = item_dict["existencia2"]
 
                 items_collection.update_one(
                     {"_id": existing_item["_id"]},
@@ -487,11 +525,12 @@ async def bulk_upsert_items(items: List[Item]):
 @router.post("/{item_id}/existencia")
 async def actualizar_existencia(item_id: str, request: ActualizarExistenciaRequest):
     """
-    Cargar o descargar existencia de un item
+    Cargar o descargar existencia de un item en la sucursal especificada
     Body esperado:
     {
         "cantidad": 10.0,
-        "tipo": "cargar" o "descargar"
+        "tipo": "cargar" o "descargar",
+        "sucursal": "sucursal1" o "sucursal2" (opcional, por defecto "sucursal1")
     }
     """
     try:
@@ -506,7 +545,9 @@ async def actualizar_existencia(item_id: str, request: ActualizarExistenciaReque
         if not item:
             raise HTTPException(status_code=404, detail="Item no encontrado")
         
-        cantidad_actual = item.get("cantidad", 0.0)
+        # Determinar qué campo de existencia actualizar según la sucursal
+        campo_existencia = "existencia" if request.sucursal == "sucursal1" else "existencia2"
+        cantidad_actual = item.get(campo_existencia, 0.0)
         
         # Calcular nueva cantidad
         if request.tipo == "cargar":
@@ -517,15 +558,15 @@ async def actualizar_existencia(item_id: str, request: ActualizarExistenciaReque
             if nueva_cantidad < 0:
                 raise HTTPException(
                     status_code=400, 
-                    detail=f"No se puede descargar más de lo disponible. Existencia actual: {cantidad_actual}"
+                    detail=f"No se puede descargar más de lo disponible. Existencia actual en {request.sucursal}: {cantidad_actual}"
                 )
         else:
             raise HTTPException(status_code=400, detail="Tipo debe ser 'cargar' o 'descargar'")
         
-        # Actualizar la cantidad
+        # Actualizar la existencia según la sucursal
         result = items_collection.update_one(
             {"_id": item_obj_id},
-            {"$set": {"cantidad": nueva_cantidad}}
+            {"$set": {campo_existencia: nueva_cantidad}}
         )
         
         if result.matched_count == 0:
@@ -535,11 +576,14 @@ async def actualizar_existencia(item_id: str, request: ActualizarExistenciaReque
         item_actualizado = items_collection.find_one({"_id": item_obj_id})
         
         return {
-            "message": f"Existencia {request.tipo}da exitosamente",
-            "cantidad": item_actualizado.get("cantidad", nueva_cantidad),
+            "message": f"Existencia {request.tipo}da exitosamente en {request.sucursal}",
+            "cantidad": item_actualizado.get(campo_existencia, nueva_cantidad),
             "cantidad_anterior": cantidad_actual,
             "cantidad_operacion": request.cantidad,
-            "tipo": request.tipo
+            "tipo": request.tipo,
+            "sucursal": request.sucursal,
+            "existencia": item_actualizado.get("existencia", 0),
+            "existencia2": item_actualizado.get("existencia2", 0)
         }
         
     except HTTPException:
