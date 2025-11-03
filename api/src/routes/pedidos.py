@@ -30,6 +30,34 @@ def obtener_siguiente_modulo(orden_actual: int) -> str:
     }
     return flujo.get(orden_actual, "completado")
 
+def excluir_pedidos_web(query: dict) -> dict:
+    """
+    Agrega filtro para excluir pedidos web (tipo_pedido: "web") de una consulta.
+    Incluye pedidos internos y pedidos sin tipo_pedido (retrocompatibilidad).
+    """
+    if "$and" in query:
+        # Si ya tiene $and, agregar el filtro de exclusión
+        query["$and"].append({
+            "$or": [
+                {"tipo_pedido": {"$ne": "web"}},
+                {"tipo_pedido": {"$exists": False}}
+            ]
+        })
+    else:
+        # Si no tiene $and, crear uno
+        query = {
+            "$and": [
+                query,
+                {
+                    "$or": [
+                        {"tipo_pedido": {"$ne": "web"}},
+                        {"tipo_pedido": {"$exists": False}}
+                    ]
+                }
+            ]
+        }
+    return query
+
 def enriquecer_pedido_con_datos_cliente(pedido: dict):
     """
     Enriquece un pedido con datos del cliente (cédula y teléfono) desde la colección de clientes.
@@ -174,7 +202,10 @@ async def test_terminar_simple():
 
 @router.get("/all/{orden}")
 async def get_all_pedidos_por_orden(orden: str):
-    pedidos = list(pedidos_collection.find({"orden": orden}))
+    # Filtrar para excluir pedidos web
+    filtro = {"orden": orden}
+    filtro = excluir_pedidos_web(filtro)
+    pedidos = list(pedidos_collection.find(filtro))
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
     return pedidos
@@ -1665,8 +1696,10 @@ async def finalizar_pedido(
 
 @router.get("/produccion/ruta")
 async def get_pedidos_ruta_produccion():
-    # Devuelve todos los pedidos en estado_general orden1, orden2, orden3
-    pedidos = list(pedidos_collection.find({"estado_general": {"$in": ["orden1", "orden2", "orden3","pendiente","orden4","orden5","orden6","entregado"]}}))
+    # Devuelve todos los pedidos en estado_general orden1, orden2, orden3 (excluyendo pedidos web)
+    filtro = {"estado_general": {"$in": ["orden1", "orden2", "orden3","pendiente","orden4","orden5","orden6","entregado"]}}
+    filtro = excluir_pedidos_web(filtro)
+    pedidos = list(pedidos_collection.find(filtro))
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
     return pedidos
@@ -1677,6 +1710,8 @@ from fastapi import Query
 async def get_pedidos_por_estado(estado_general: list[str] = Query(..., description="Uno o varios estados separados por coma")):
     # Si solo se pasa uno, FastAPI lo convierte en lista de un elemento
     filtro = {"estado_general": {"$in": estado_general}}
+    # Excluir pedidos web
+    filtro = excluir_pedidos_web(filtro)
     # Obtener todos los campos, incluyendo "adicionales"
     pedidos = list(pedidos_collection.find(filtro))
     for pedido in pedidos:
@@ -2322,9 +2357,15 @@ async def get_pedidos_por_fecha(fecha_inicio: str = None, fecha_fin: str = None)
             filtro_fecha = (fecha_inicio_dt, fecha_fin_dt)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Formato de fecha inválido: {str(e)}")
-    pedidos = list(pedidos_collection.find({}))
+    # Filtrar para excluir pedidos web
+    filtro = excluir_pedidos_web({})
+    pedidos = list(pedidos_collection.find(filtro))
     pedidos_filtrados = []
     for pedido in pedidos:
+        # Verificación adicional: saltar pedidos web por si acaso
+        tipo_pedido = pedido.get("tipo_pedido")
+        if tipo_pedido == "web":
+            continue
         fecha_creacion = pedido.get("fecha_creacion")
         if filtro_fecha and fecha_creacion:
             try:
@@ -3868,6 +3909,8 @@ async def get_pedidos_por_estados(
 ):
     # filtro base por estados
     base_filter = {"estado_general": {"$in": estado_general}}
+    # Excluir pedidos web del filtro base
+    base_filter = excluir_pedidos_web(base_filter)
 
     # Si no hay filtro de fecha, usamos solo el filtro base
     if not fecha_inicio:
@@ -3893,7 +3936,7 @@ async def get_pedidos_por_estados(
         cond_date = {"fecha_creacion": {"$gte": start_dt, "$lt": end_dt}}
         cond_string = {"fecha_creacion": {"$gte": start_str, "$lt": end_str}}
 
-        # combinamos: estado_general AND (cond_date OR cond_string)
+        # combinamos: estado_general AND (cond_date OR cond_string) (ya excluye pedidos web)
         final_query = {"$and": [base_filter, {"$or": [cond_date, cond_string]}]}
 
     try:
@@ -4112,14 +4155,16 @@ async def get_estado_items_produccion():
     try:
         print("DEBUG ESTADO ITEMS: Analizando estado de items en producción")
         
-        # Buscar pedidos con items en producción (estado_item 1-3)
-        pedidos = list(pedidos_collection.find({
+        # Buscar pedidos con items en producción (estado_item 1-3), excluyendo pedidos web
+        filtro = {
             "items": {
                 "$elemMatch": {
                     "estado_item": {"$gte": 1, "$lt": 4}  # Solo items activos (1-3)
                 }
             }
-        }, {
+        }
+        filtro = excluir_pedidos_web(filtro)
+        pedidos = list(pedidos_collection.find(filtro, {
             "_id": 1,
             "numero_orden": 1,
             "cliente_nombre": 1,
