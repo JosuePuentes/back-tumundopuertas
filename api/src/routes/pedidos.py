@@ -6815,21 +6815,47 @@ async def get_pedidos_cliente(cliente_id: str, cliente: dict = Depends(get_curre
     """
     Obtener todos los pedidos de un cliente autenticado.
     Solo puede ver sus propios pedidos.
+    Optimizado con proyección para mejorar rendimiento.
     """
     try:
         # Verificar que el cliente_id coincida con el cliente autenticado
         if cliente.get("id") != cliente_id:
             raise HTTPException(status_code=403, detail="No puedes ver pedidos de otros clientes")
         
-        # Buscar pedidos del cliente con tipo "cliente"
-        pedidos = list(pedidos_collection.find({
-            "cliente_id": cliente_id,
-            "tipo": "cliente"
-        }).sort("fecha_creacion", -1))
+        # Proyección optimizada: solo campos necesarios para la lista de pedidos
+        projection = {
+            "_id": 1,
+            "numero_orden": 1,
+            "cliente_id": 1,
+            "cliente_nombre": 1,
+            "fecha_creacion": 1,
+            "fecha_actualizacion": 1,
+            "estado_general": 1,
+            "items": 1,
+            "adicionales": 1,
+            "pago": 1,
+            "historial_pagos": 1,
+            "total_abonado": 1,
+            "tipo": 1,
+            "creado_por": 1
+            # Excluir campos pesados como seguimiento, datos_completos, etc.
+        }
         
-        # Convertir ObjectId a string
+        # Buscar pedidos del cliente con tipo "cliente" usando proyección
+        pedidos = list(pedidos_collection.find(
+            {
+                "cliente_id": cliente_id,
+                "tipo": "cliente"
+            },
+            projection
+        ).sort("fecha_creacion", -1).limit(500))  # Limitar a 500 pedidos más recientes
+        
+        # Normalizar y convertir ObjectId a string
         for pedido in pedidos:
             pedido["_id"] = str(pedido["_id"])
+            # Normalizar adicionales: None o no existe → []
+            if "adicionales" not in pedido or pedido.get("adicionales") is None:
+                pedido["adicionales"] = []
         
         return pedidos
         

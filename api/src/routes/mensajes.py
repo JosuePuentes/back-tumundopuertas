@@ -91,10 +91,8 @@ async def get_conversaciones_soporte(current_user: dict = Depends(get_current_us
             reverse=True
         )
         
-        return {
-            "conversaciones": conversaciones,
-            "total_conversaciones": len(conversaciones)
-        }
+        # Devolver directamente el array (el frontend espera un array, no un objeto)
+        return conversaciones
         
     except HTTPException:
         raise
