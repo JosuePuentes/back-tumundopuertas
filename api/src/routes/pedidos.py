@@ -4464,6 +4464,24 @@ async def actualizar_pago(
     if pago not in ["sin pago", "abonado", "pagado"]:
         raise HTTPException(status_code=400, detail="Valor de pago inválido")
 
+    # Obtener el pedido actual para calcular el total_abonado y verificar tipo
+    try:
+        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Verificar si es un pedido web - bloquear acceso desde módulos internos
+        tipo_pedido = pedido.get("tipo_pedido")
+        if tipo_pedido == "web":
+            raise HTTPException(
+                status_code=403,
+                detail="Los pagos de pedidos web solo pueden ser gestionados desde el módulo de pedidos-web"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener pedido: {str(e)}")
+
     update = {"$set": {"pago": pago}}
     registro = None
     if monto is not None:
@@ -4478,10 +4496,6 @@ async def actualizar_pago(
         update["$push"] = {"historial_pagos": registro}
 
     try:
-        # Obtener el pedido actual para calcular el total_abonado
-        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
-        if not pedido:
-            raise HTTPException(status_code=404, detail="Pedido no encontrado")
 
         current_total_abonado = pedido.get("total_abonado", 0.0)
         new_total_abonado = current_total_abonado + (monto if monto is not None else 0.0)
@@ -4630,7 +4644,8 @@ async def obtener_pagos(
     fecha_fin: Optional[str] = Query(None, description="Fecha fin en formato YYYY-MM-DD"),
 ):
     """
-    Retorna los pagos de los pedidos, filtrando por rango de fechas si se especifica.
+    Retorna los pagos de los pedidos internos, filtrando por rango de fechas si se especifica.
+    Excluye pedidos web (tipo_pedido: "web").
     """
 
     filtro = {}
@@ -4643,7 +4658,10 @@ async def obtener_pagos(
         except ValueError:
             raise HTTPException(status_code=400, detail="Formato de fecha inválido, use YYYY-MM-DD")
 
-    # Buscar pedidos
+    # Excluir pedidos web
+    filtro = excluir_pedidos_web(filtro)
+
+    # Buscar pedidos internos solamente
     pedidos = list(
         pedidos_collection.find(
             filtro,
@@ -5155,12 +5173,23 @@ async def get_datos_impresion(pedido_id: str, current_user = Depends(get_current
 
 @router.get("/{pedido_id}/pagos")
 async def get_pagos_pedido(pedido_id: str):
-    """Obtener todos los pagos de un pedido específico"""
+    """
+    Obtener todos los pagos de un pedido específico.
+    Bloquea el acceso a pedidos web desde módulos internos.
+    """
     try:
         # Buscar el pedido por ID
         pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
         if not pedido:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Verificar si es un pedido web - bloquear acceso desde módulos internos
+        tipo_pedido = pedido.get("tipo_pedido")
+        if tipo_pedido == "web":
+            raise HTTPException(
+                status_code=403,
+                detail="Los pagos de pedidos web solo pueden ser vistos desde el módulo de pedidos-web"
+            )
         
         # Obtener historial de pagos y total abonado
         historial_pagos = pedido.get("historial_pagos", [])
@@ -5179,6 +5208,8 @@ async def get_pagos_pedido(pedido_id: str):
             "estado_pago": pedido.get("pago", "")
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener pagos: {str(e)}")
 
@@ -5207,6 +5238,14 @@ async def aprobar_abono_pendiente(
         pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
         if not pedido:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        # Verificar si es un pedido web - bloquear acceso desde módulos internos
+        tipo_pedido = pedido.get("tipo_pedido")
+        if tipo_pedido == "web":
+            raise HTTPException(
+                status_code=403,
+                detail="Los abonos de pedidos web solo pueden ser gestionados desde el módulo de pedidos-web"
+            )
         
         # Obtener historial de pagos
         historial_pagos = pedido.get("historial_pagos", [])
