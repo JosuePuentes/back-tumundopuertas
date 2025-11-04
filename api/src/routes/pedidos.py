@@ -902,7 +902,8 @@ async def asignar_item(
                     # Buscar en otros órdenes del seguimiento para verificar que la unidad existe
                     unidad_existe_en_otro_modulo = False
                     for proceso in seguimiento:
-                        for asignacion_otra in proceso.get("asignaciones_articulos", []):
+                        asignaciones_otras = proceso.get("asignaciones_articulos") or []
+                        for asignacion_otra in asignaciones_otras:
                             if (
                                 asignacion_otra.get("itemId") == item_id and
                                 int(asignacion_otra.get("unidad_index", 0) or 0) == int(unidad_index)
