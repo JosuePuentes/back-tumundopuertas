@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, status, Query, Body
-from ..config.mongodb import items_collection, pedidos_collection
+from ..config.mongodb import items_collection, pedidos_collection, contadores_collection
 from ..models.authmodels import Item, InventarioExcelItem
 from bson import ObjectId
 from pydantic import BaseModel
@@ -8,6 +8,28 @@ import openpyxl
 import io
 
 router = APIRouter()
+
+def generar_codigo_automatico():
+    """
+    Genera un código automático para items siguiendo el formato ITEM-XXXX
+    Incrementa el contador y retorna el código formateado.
+    Si no existe el contador, lo inicializa directamente en 271.
+    """
+    # Verificar si el contador existe
+    contador_existente = contadores_collection.find_one({"tipo": "items"})
+    
+    if not contador_existente:
+        # Si no existe, crear con secuencia 270 para que el primer incremento resulte en 271
+        contadores_collection.insert_one({"tipo": "items", "secuencia": 270})
+    
+    # Incrementar y obtener el nuevo número
+    contador_doc = contadores_collection.find_one_and_update(
+        {"tipo": "items"},
+        {"$inc": {"secuencia": 1}},
+        return_document=True
+    )
+    numero = contador_doc.get("secuencia", 271)
+    return f"ITEM-{numero:04d}"
 
 class ActualizarExistenciaRequest(BaseModel):
     cantidad: float
@@ -207,11 +229,17 @@ async def get_item(item_id: str):
 
 @router.post("/")
 async def create_item(item: Item):
+    # Si no se proporciona código, generar uno automáticamente
+    if not item.codigo or (isinstance(item.codigo, str) and item.codigo.strip() == ""):
+        item.codigo = generar_codigo_automatico()
+    
+    # Verificar que el código no exista
     existing_item = items_collection.find_one({"codigo": item.codigo})
     if existing_item:
         raise HTTPException(status_code=400, detail="El item con este código ya existe")
+    
     result = items_collection.insert_one(item.dict(by_alias=True, exclude_unset=True))
-    return {"message": "Item creado correctamente", "id": str(result.inserted_id)}
+    return {"message": "Item creado correctamente", "id": str(result.inserted_id), "codigo": item.codigo}
 
 @router.patch("/id/{item_id}/")
 async def patch_item(item_id: str, update_data: dict = Body(...)):

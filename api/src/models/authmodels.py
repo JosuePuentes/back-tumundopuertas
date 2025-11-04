@@ -241,7 +241,7 @@ class Company(BaseModel):
 
 class Item(BaseModel):
     id: Optional[str] = Field(None, alias="_id")
-    codigo: str
+    codigo: Optional[str] = None  # Opcional: si no se proporciona, se genera automáticamente
     nombre: str
     descripcion: str
     departamento: Optional[str] = None
