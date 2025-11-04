@@ -2375,6 +2375,10 @@ async def debug_asignaciones_empleados():
 
 @router.get("/filtrar/por-fecha/")
 async def get_pedidos_por_fecha(fecha_inicio: str = None, fecha_fin: str = None):
+    """
+    Obtener pedidos filtrados por fecha (excluyendo pedidos web).
+    Si no se proporcionan fechas, retorna todos los pedidos internos.
+    """
     filtro_fecha = None
     if fecha_inicio and fecha_fin:
         try:
@@ -2383,27 +2387,74 @@ async def get_pedidos_por_fecha(fecha_inicio: str = None, fecha_fin: str = None)
             filtro_fecha = (fecha_inicio_dt, fecha_fin_dt)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Formato de fecha inválido: {str(e)}")
-    # Filtrar para excluir pedidos web
-    filtro = excluir_pedidos_web({})
+    
+    # Construir filtro base: excluir pedidos web
+    filtro_base = {
+        "$or": [
+            {"tipo_pedido": {"$ne": "web"}},
+            {"tipo_pedido": {"$exists": False}}
+        ]
+    }
+    
+    # Si hay filtro de fecha, combinarlo
+    if filtro_fecha:
+        # Convertir fechas a formato ISO string para comparación
+        fecha_inicio_str = fecha_inicio_dt.strftime("%Y-%m-%d")
+        fecha_fin_str = (fecha_fin_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        filtro = {
+            "$and": [
+                filtro_base,
+                {
+                    "fecha_creacion": {
+                        "$gte": fecha_inicio_str,
+                        "$lt": fecha_fin_str
+                    }
+                }
+            ]
+        }
+    else:
+        filtro = filtro_base
+    
+    # Obtener pedidos con el filtro
     pedidos = list(pedidos_collection.find(filtro))
+    
+    # Procesar y filtrar por fecha si es necesario (para casos donde fecha_creacion es datetime)
     pedidos_filtrados = []
     for pedido in pedidos:
         # Verificación adicional: saltar pedidos web por si acaso
         tipo_pedido = pedido.get("tipo_pedido")
         if tipo_pedido == "web":
             continue
+        
         fecha_creacion = pedido.get("fecha_creacion")
+        
+        # Si hay filtro de fecha, validar también parseando la fecha
         if filtro_fecha and fecha_creacion:
             try:
-                fecha_creacion_dt = datetime.strptime(fecha_creacion[:10], "%Y-%m-%d")
+                # Intentar parsear como string ISO
+                if isinstance(fecha_creacion, str):
+                    fecha_creacion_dt = datetime.strptime(fecha_creacion[:10], "%Y-%m-%d")
+                else:
+                    # Si es datetime, usar directamente
+                    fecha_creacion_dt = fecha_creacion
+                    if isinstance(fecha_creacion_dt, datetime):
+                        fecha_creacion_dt = fecha_creacion_dt.replace(tzinfo=None)
+                
+                if not (filtro_fecha[0] <= fecha_creacion_dt <= filtro_fecha[1]):
+                    continue
             except Exception:
-                continue
-            if filtro_fecha[0] <= fecha_creacion_dt <= filtro_fecha[1]:
-                pedido["_id"] = str(pedido["_id"])
-                pedidos_filtrados.append(pedido)
-        else:
-            pedido["_id"] = str(pedido["_id"])
-            pedidos_filtrados.append(pedido)
+                # Si no se puede parsear, incluir el pedido de todas formas
+                pass
+        
+        pedido["_id"] = str(pedido["_id"])
+        # Normalizar adicionales
+        if "adicionales" not in pedido or pedido.get("adicionales") is None:
+            pedido["adicionales"] = []
+        # Enriquecer con datos del cliente
+        enriquecer_pedido_con_datos_cliente(pedido)
+        pedidos_filtrados.append(pedido)
+    
     return pedidos_filtrados
 
 @router.put("/actualizar-estado-general/")
