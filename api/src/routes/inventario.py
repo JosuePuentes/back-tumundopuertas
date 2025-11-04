@@ -185,14 +185,23 @@ async def get_all_items():
 
 @router.get("/id/{item_id}/")
 async def get_item(item_id: str):
+    """
+    Obtener un item por ID o código.
+    Intenta primero con ObjectId, si falla busca por código.
+    """
+    item = None
+    
+    # Intentar primero con ObjectId
     try:
         item_obj_id = ObjectId(item_id)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"item_id no es un ObjectId válido: {str(e)}")
-
-    item = items_collection.find_one({"_id": item_obj_id})
+        item = items_collection.find_one({"_id": item_obj_id})
+    except Exception:
+        # Si no es un ObjectId válido, intentar buscar por código
+        item = items_collection.find_one({"codigo": item_id})
+    
     if not item:
-        raise HTTPException(status_code=404, detail="Item no encontrado")
+        raise HTTPException(status_code=404, detail=f"Item no encontrado con ID/código: {item_id}")
+    
     item["_id"] = str(item["_id"])
     return item
 
@@ -209,6 +218,7 @@ async def patch_item(item_id: str, update_data: dict = Body(...)):
     """
     Actualizar parcialmente un item del inventario.
     Permite actualizar solo los campos especificados en el body.
+    Acepta ObjectId o código como identificador.
     
     Ejemplo:
     {
@@ -217,16 +227,21 @@ async def patch_item(item_id: str, update_data: dict = Body(...)):
     }
     """
     try:
-        # Validar ObjectId
+        # Buscar item por ObjectId o código
+        item = None
+        item_obj_id = None
+        
         try:
             item_obj_id = ObjectId(item_id)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"item_id no es un ObjectId válido: {str(e)}")
+            item = items_collection.find_one({"_id": item_obj_id})
+        except Exception:
+            # Si no es un ObjectId válido, buscar por código
+            item = items_collection.find_one({"codigo": item_id})
+            if item:
+                item_obj_id = item["_id"]
 
-        # Verificar que el item existe
-        item = items_collection.find_one({"_id": item_obj_id})
         if not item:
-            raise HTTPException(status_code=404, detail="Item no encontrado")
+            raise HTTPException(status_code=404, detail=f"Item no encontrado con ID/código: {item_id}")
 
         # Filtrar campos que no deben actualizarse
         excluded_fields = {"_id", "id"}
@@ -261,11 +276,21 @@ async def patch_item(item_id: str, update_data: dict = Body(...)):
 @router.put("/id/{item_id}/")
 async def update_item(item_id: str, item: Item):
     try:
-        # Validar ObjectId
+        # Buscar item por ObjectId o código
+        existing_item = None
+        item_obj_id = None
+        
         try:
             item_obj_id = ObjectId(item_id)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"item_id no es un ObjectId válido: {str(e)}")
+            existing_item = items_collection.find_one({"_id": item_obj_id})
+        except Exception:
+            # Si no es un ObjectId válido, buscar por código
+            existing_item = items_collection.find_one({"codigo": item_id})
+            if existing_item:
+                item_obj_id = existing_item["_id"]
+        
+        if not existing_item:
+            raise HTTPException(status_code=404, detail=f"Item no encontrado con ID/código: {item_id}")
 
         # Preparar datos para actualización
         update_data = item.dict(exclude_unset=True, by_alias=True, exclude={"_id", "id"})
