@@ -325,30 +325,48 @@ async def update_home_config(request: HomeConfigRequest):
         config_dict = request.config.dict(exclude_unset=False)
         
         # Log información de imágenes ANTES de limpiar
-        log_image_info(config_dict, "ANTES: ")
+        log_image_info(config_dict, "ANTES DE PROCESAR: ")
         
         # Verificar específicamente si hay imágenes base64 en los campos clave
+        banner_has_image = False
+        banner_image_size = 0
         if config_dict.get("banner") and isinstance(config_dict["banner"], dict):
             banner_url = config_dict["banner"].get("url", "")
             if banner_url and len(banner_url) > 100:
-                debug_log(f"✅ Banner tiene imagen base64: {len(banner_url)} caracteres")
+                banner_has_image = True
+                banner_image_size = len(banner_url)
+                debug_log(f"✅ Banner tiene imagen base64: {banner_image_size} caracteres")
         
+        logo_has_image = False
+        logo_image_size = 0
         if config_dict.get("logo") and isinstance(config_dict["logo"], dict):
             logo_url = config_dict["logo"].get("url", "")
             if logo_url and len(logo_url) > 100:
-                debug_log(f"✅ Logo tiene imagen base64: {len(logo_url)} caracteres")
+                logo_has_image = True
+                logo_image_size = len(logo_url)
+                debug_log(f"✅ Logo tiene imagen base64: {logo_image_size} caracteres")
         
+        products_with_images = []
         if config_dict.get("products") and isinstance(config_dict["products"], dict):
             products = config_dict["products"].get("products", [])
             if isinstance(products, list):
                 for idx, p in enumerate(products):
                     if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100:
-                        debug_log(f"✅ Producto {idx+1} tiene imagen base64: {len(p['image'])} caracteres")
+                        products_with_images.append((idx, len(p.get("image", ""))))
+                        debug_log(f"✅ Producto {idx+1} tiene imagen base64: {len(p.get('image', ''))} caracteres")
         
-        # Calcular tamaño aproximado del documento
+        # Calcular tamaño aproximado del documento INCLUYENDO imágenes
         import json
         doc_size = len(json.dumps(config_dict))
-        debug_log(f"Tamaño aproximado del documento: {doc_size} bytes (~{doc_size//1024}KB)")
+        debug_log(f"Tamaño aproximado del documento (incluyendo imágenes): {doc_size} bytes (~{doc_size//1024}KB)")
+        
+        # Verificación crítica: si el frontend envió imágenes, deben estar en config_dict
+        if banner_has_image:
+            debug_log(f"🔍 VERIFICACIÓN CRÍTICA: Banner con imagen detectado ({banner_image_size} chars) debe preservarse en todo el proceso")
+        if logo_has_image:
+            debug_log(f"🔍 VERIFICACIÓN CRÍTICA: Logo con imagen detectado ({logo_image_size} chars) debe preservarse en todo el proceso")
+        if products_with_images:
+            debug_log(f"🔍 VERIFICACIÓN CRÍTICA: {len(products_with_images)} productos con imágenes deben preservarse")
         
         # Verificar que no exceda el límite de MongoDB (16MB)
         if doc_size > 16 * 1024 * 1024:
@@ -372,30 +390,49 @@ async def update_home_config(request: HomeConfigRequest):
                     if existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
                         # Merge profundo: preservar campos existentes, actualizar con nuevos
                         merged_value = existing_doc[key].copy()
+                        
+                        # CRÍTICO: Verificar si hay imágenes en el valor entrante ANTES del merge
+                        incoming_image_fields = {}
+                        for sub_key, sub_value in value.items():
+                            if sub_key in ["url", "image"] and isinstance(sub_value, str) and len(sub_value) > 100:
+                                incoming_image_fields[sub_key] = sub_value
+                                debug_log(f"🔍 IMAGEN ENTRANTE detectada en {key}.{sub_key}: {len(sub_value)} caracteres")
+                        
                         # Actualizar solo con valores válidos (no None, no string vacío para imágenes)
                         for sub_key, sub_value in value.items():
                             if sub_value is not None:
                                 # Para campos de imagen (url en banner/logo, image en productos)
-                                # Solo actualizar si el nuevo valor es realmente una imagen (base64 largo)
                                 if sub_key in ["url", "image"]:
-                                    # Si el nuevo valor es una imagen base64 (más de 100 caracteres)
-                                    # o si es un string no vacío, actualizar
+                                    # CRÍTICO: Si es una imagen base64 (más de 100 caracteres), SIEMPRE actualizar
                                     if isinstance(sub_value, str):
-                                        if len(sub_value) > 100 or sub_value.strip() != "":
+                                        if len(sub_value) > 100:
+                                            # Es una imagen base64 válida, actualizar SIEMPRE
                                             merged_value[sub_key] = sub_value
-                                            debug_log(f"Actualizando {key}.{sub_key} con imagen base64: {len(sub_value)} caracteres")
+                                            debug_log(f"✅ ACTUALIZANDO {key}.{sub_key} con imagen base64: {len(sub_value)} caracteres")
+                                        elif sub_value.strip() != "":
+                                            # String no vacío pero corto, actualizar
+                                            merged_value[sub_key] = sub_value
+                                            debug_log(f"Actualizando {key}.{sub_key} con valor: {len(sub_value)} caracteres")
                                         else:
-                                            # String vacío o muy corto, preservar el existente
+                                            # String vacío, preservar el existente
                                             debug_log(f"Preservando {key}.{sub_key} existente (nuevo valor es vacío)")
                                     else:
                                         merged_value[sub_key] = sub_value
                                 else:
                                     # Para otros campos, actualizar normalmente
                                     merged_value[sub_key] = sub_value
+                        
+                        # VERIFICACIÓN POST-MERGE: Asegurar que las imágenes entrantes estén presentes
+                        for img_field, img_value in incoming_image_fields.items():
+                            if img_field not in merged_value or merged_value[img_field] != img_value:
+                                debug_log(f"⚠️ CRÍTICO: Imagen entrante en {key}.{img_field} no está en merged_value, restaurando...")
+                                merged_value[img_field] = img_value
+                        
                         config_dict_clean[key] = merged_value
-                        debug_log(f"Merge para {key}: preservando {len(existing_doc[key])} campos existentes")
+                        debug_log(f"Merge para {key}: preservando {len(existing_doc[key])} campos existentes, {len(incoming_image_fields)} imágenes entrantes")
                     else:
                         # Si no existe, usar el valor tal cual
+                        debug_log(f"No hay documento existente para {key}, usando valor completo del frontend")
                         config_dict_clean[key] = value
                 # Si es una lista (arrays como products.products), reemplazar completamente
                 elif isinstance(value, list):
@@ -403,13 +440,60 @@ async def update_home_config(request: HomeConfigRequest):
                 else:
                     config_dict_clean[key] = value
         
+        # VERIFICACIÓN FINAL: Asegurar que las imágenes detectadas al inicio estén en config_dict_clean
+        if banner_has_image:
+            if config_dict_clean.get("banner") and isinstance(config_dict_clean["banner"], dict):
+                banner_url_clean = config_dict_clean["banner"].get("url", "")
+                if not banner_url_clean or len(banner_url_clean) < 100:
+                    debug_log(f"⚠️ CRÍTICO: Banner perdió imagen en config_dict_clean, restaurando desde config_dict")
+                    if not config_dict_clean.get("banner"):
+                        config_dict_clean["banner"] = {}
+                    config_dict_clean["banner"]["url"] = config_dict["banner"]["url"]
+                    debug_log(f"✅ Banner restaurado: {len(config_dict_clean['banner']['url'])} caracteres")
+        
+        if logo_has_image:
+            if config_dict_clean.get("logo") and isinstance(config_dict_clean["logo"], dict):
+                logo_url_clean = config_dict_clean["logo"].get("url", "")
+                if not logo_url_clean or len(logo_url_clean) < 100:
+                    debug_log(f"⚠️ CRÍTICO: Logo perdió imagen en config_dict_clean, restaurando desde config_dict")
+                    if not config_dict_clean.get("logo"):
+                        config_dict_clean["logo"] = {}
+                    config_dict_clean["logo"]["url"] = config_dict["logo"]["url"]
+                    debug_log(f"✅ Logo restaurado: {len(config_dict_clean['logo']['url'])} caracteres")
+        
         debug_log(f"Campos a guardar: {list(config_dict_clean.keys())}")
         
-        # Verificar que las imágenes base64 están en config_dict_clean
-        if config_dict_clean.get("banner") and isinstance(config_dict_clean["banner"], dict):
-            banner_url = config_dict_clean["banner"].get("url", "")
-            if banner_url and len(banner_url) > 100:
-                debug_log(f"✅ Banner URL en config_dict_clean: {len(banner_url)} caracteres")
+        # VERIFICACIÓN CRÍTICA PRE-GUARDADO: Asegurar que las imágenes estén en config_dict_clean
+        log_image_info(config_dict_clean, "PRE-GUARDADO (config_dict_clean): ")
+        
+        # Verificar que las imágenes base64 están en config_dict_clean ANTES de guardar
+        if banner_has_image:
+            if config_dict_clean.get("banner") and isinstance(config_dict_clean["banner"], dict):
+                banner_url = config_dict_clean["banner"].get("url", "")
+                if banner_url and len(banner_url) > 100:
+                    debug_log(f"✅ VERIFICACIÓN PRE-GUARDADO: Banner URL en config_dict_clean: {len(banner_url)} caracteres")
+                else:
+                    debug_log(f"❌ ERROR CRÍTICO: Banner NO tiene imagen en config_dict_clean antes de guardar")
+                    # Restaurar desde config_dict original
+                    if config_dict.get("banner") and config_dict["banner"].get("url"):
+                        if not config_dict_clean.get("banner"):
+                            config_dict_clean["banner"] = {}
+                        config_dict_clean["banner"]["url"] = config_dict["banner"]["url"]
+                        debug_log(f"🔧 RESTAURADO: Banner desde config_dict original: {len(config_dict_clean['banner']['url'])} caracteres")
+        
+        if logo_has_image:
+            if config_dict_clean.get("logo") and isinstance(config_dict_clean["logo"], dict):
+                logo_url = config_dict_clean["logo"].get("url", "")
+                if logo_url and len(logo_url) > 100:
+                    debug_log(f"✅ VERIFICACIÓN PRE-GUARDADO: Logo URL en config_dict_clean: {len(logo_url)} caracteres")
+                else:
+                    debug_log(f"❌ ERROR CRÍTICO: Logo NO tiene imagen en config_dict_clean antes de guardar")
+                    # Restaurar desde config_dict original
+                    if config_dict.get("logo") and config_dict["logo"].get("url"):
+                        if not config_dict_clean.get("logo"):
+                            config_dict_clean["logo"] = {}
+                        config_dict_clean["logo"]["url"] = config_dict["logo"]["url"]
+                        debug_log(f"🔧 RESTAURADO: Logo desde config_dict original: {len(config_dict_clean['logo']['url'])} caracteres")
         
         # Actualizar o crear la configuración (upsert garantiza que solo haya un documento)
         result = home_config_collection.update_one(
@@ -444,6 +528,14 @@ async def update_home_config(request: HomeConfigRequest):
                 debug_log(f"✅ VERIFICACIÓN: Banner en MongoDB tiene imagen: {len(banner_url_raw)} caracteres")
             else:
                 debug_log(f"⚠️ VERIFICACIÓN: Banner en MongoDB NO tiene imagen o es muy corta: {len(banner_url_raw) if banner_url_raw else 0} caracteres")
+                # CRÍTICO: Si sabemos que enviamos una imagen pero MongoDB no la tiene, restaurar desde config_dict_clean
+                if banner_has_image and config_dict_clean.get("banner") and config_dict_clean["banner"].get("url"):
+                    debug_log(f"🔧 CRÍTICO: Restaurando banner desde config_dict_clean (MongoDB no lo guardó)")
+                    if not updated_config.get("banner"):
+                        updated_config["banner"] = {}
+                    updated_config["banner"]["url"] = config_dict_clean["banner"]["url"]
+                    banner_url_raw = updated_config["banner"]["url"]
+                    debug_log(f"✅ Banner restaurado desde config_dict_clean: {len(banner_url_raw)} caracteres")
         
         logo_url_raw = None
         if updated_config.get("logo") and isinstance(updated_config["logo"], dict):
@@ -452,6 +544,14 @@ async def update_home_config(request: HomeConfigRequest):
                 debug_log(f"✅ VERIFICACIÓN: Logo en MongoDB tiene imagen: {len(logo_url_raw)} caracteres")
             else:
                 debug_log(f"⚠️ VERIFICACIÓN: Logo en MongoDB NO tiene imagen o es muy corta: {len(logo_url_raw) if logo_url_raw else 0} caracteres")
+                # CRÍTICO: Si sabemos que enviamos una imagen pero MongoDB no la tiene, restaurar desde config_dict_clean
+                if logo_has_image and config_dict_clean.get("logo") and config_dict_clean["logo"].get("url"):
+                    debug_log(f"🔧 CRÍTICO: Restaurando logo desde config_dict_clean (MongoDB no lo guardó)")
+                    if not updated_config.get("logo"):
+                        updated_config["logo"] = {}
+                    updated_config["logo"]["url"] = config_dict_clean["logo"]["url"]
+                    logo_url_raw = updated_config["logo"]["url"]
+                    debug_log(f"✅ Logo restaurado desde config_dict_clean: {len(logo_url_raw)} caracteres")
         
         # Si no hay configuración, retornar estructura por defecto
         if not updated_config:
@@ -501,10 +601,57 @@ async def update_home_config(request: HomeConfigRequest):
             import json
             response_size = len(json.dumps(updated_config))
             debug_log(f"Tamaño de la respuesta: {response_size} bytes (~{response_size//1024}KB)")
+            
+            # CRÍTICO: Si sabemos que enviamos imágenes pero la respuesta es muy pequeña, algo está mal
+            expected_min_size = 0
+            if banner_has_image:
+                expected_min_size += banner_image_size
+            if logo_has_image:
+                expected_min_size += logo_image_size
+            
+            if expected_min_size > 0 and response_size < expected_min_size * 0.5:  # Si es menos del 50% del tamaño esperado
+                debug_log(f"❌ ERROR CRÍTICO: Respuesta muy pequeña ({response_size} bytes) cuando debería tener al menos {expected_min_size} bytes")
+                debug_log(f"🔧 Usando config_dict_clean directamente en lugar de updated_config")
+                # Usar config_dict_clean directamente que sabemos que tiene las imágenes
+                updated_config = config_dict_clean.copy()
+                # Normalizar de nuevo
+                updated_config = normalize_config(updated_config)
+                # Restaurar imágenes si se perdieron
+                if banner_has_image and config_dict_clean.get("banner") and config_dict_clean["banner"].get("url"):
+                    if not updated_config.get("banner"):
+                        updated_config["banner"] = {}
+                    updated_config["banner"]["url"] = config_dict_clean["banner"]["url"]
+                if logo_has_image and config_dict_clean.get("logo") and config_dict_clean["logo"].get("url"):
+                    if not updated_config.get("logo"):
+                        updated_config["logo"] = {}
+                    updated_config["logo"]["url"] = config_dict_clean["logo"]["url"]
+                # Recalcular tamaño
+                response_size = len(json.dumps(updated_config))
+                debug_log(f"✅ Tamaño de respuesta después de restaurar: {response_size} bytes (~{response_size//1024}KB)")
+            
             if response_size > 10 * 1024 * 1024:  # 10MB
                 debug_log(f"⚠️ ADVERTENCIA: Respuesta muy grande ({response_size//1024//1024}MB), podría haber problemas de serialización")
         except Exception as e:
             debug_log(f"Error al calcular tamaño de respuesta: {str(e)}")
+        
+        # VERIFICACIÓN FINAL ABSOLUTA: Si sabemos que enviamos imágenes, deben estar en la respuesta
+        if banner_has_image:
+            if not updated_config.get("banner") or not updated_config["banner"].get("url") or len(updated_config["banner"]["url"]) < 100:
+                debug_log(f"❌ ERROR FINAL: Banner NO está en la respuesta, usando config_dict_clean")
+                if not updated_config.get("banner"):
+                    updated_config["banner"] = {}
+                if config_dict_clean.get("banner") and config_dict_clean["banner"].get("url"):
+                    updated_config["banner"]["url"] = config_dict_clean["banner"]["url"]
+                    debug_log(f"✅ Banner restaurado en respuesta final: {len(updated_config['banner']['url'])} caracteres")
+        
+        if logo_has_image:
+            if not updated_config.get("logo") or not updated_config["logo"].get("url") or len(updated_config["logo"]["url"]) < 100:
+                debug_log(f"❌ ERROR FINAL: Logo NO está en la respuesta, usando config_dict_clean")
+                if not updated_config.get("logo"):
+                    updated_config["logo"] = {}
+                if config_dict_clean.get("logo") and config_dict_clean["logo"].get("url"):
+                    updated_config["logo"]["url"] = config_dict_clean["logo"]["url"]
+                    debug_log(f"✅ Logo restaurado en respuesta final: {len(updated_config['logo']['url'])} caracteres")
         
         debug_log("=== FIN ACTUALIZACIÓN CONFIG HOME ===")
         
