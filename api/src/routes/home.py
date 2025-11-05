@@ -6,23 +6,58 @@ from bson import ObjectId
 
 router = APIRouter()
 
+def get_default_config():
+    """
+    Retorna una estructura de configuración por defecto con arrays vacíos
+    para evitar errores cuando el frontend intenta hacer .filter() en arrays undefined.
+    """
+    return {
+        "banner": None,
+        "logo": None,
+        "values": {
+            "title": None,
+            "subtitle": None,
+            "values": []
+        },
+        "products": {
+            "title": None,
+            "subtitle": None,
+            "products": []
+        },
+        "contact": None,
+        "colors": None
+    }
+
 @router.get("/config")
 async def get_home_config():
     """
     Obtener la configuración de la página de inicio.
-    Retorna la configuración completa o un objeto vacío si no existe.
+    Retorna la configuración completa o estructura por defecto con arrays vacíos si no existe.
     """
     try:
         # Buscar el único documento de configuración
         config_doc = home_config_collection.find_one({})
         
-        # Si no existe configuración, retornar objeto vacío en lugar de 404
+        # Si no existe configuración, retornar estructura por defecto
         if not config_doc:
-            return {"config": {}}
+            return {"config": get_default_config()}
         
-        # Remover el _id de MongoDB y retornar solo la configuración
+        # Remover el _id de MongoDB
         if "_id" in config_doc:
             del config_doc["_id"]
+        
+        # Asegurar que los arrays existan para evitar errores de .filter()
+        if "values" not in config_doc or config_doc["values"] is None:
+            config_doc["values"] = {"title": None, "subtitle": None, "values": []}
+        elif "values" in config_doc and isinstance(config_doc["values"], dict):
+            if "values" not in config_doc["values"] or config_doc["values"].get("values") is None:
+                config_doc["values"]["values"] = []
+        
+        if "products" not in config_doc or config_doc["products"] is None:
+            config_doc["products"] = {"title": None, "subtitle": None, "products": []}
+        elif "products" in config_doc and isinstance(config_doc["products"], dict):
+            if "products" not in config_doc["products"] or config_doc["products"].get("products") is None:
+                config_doc["products"]["products"] = []
         
         return {"config": config_doc}
     
