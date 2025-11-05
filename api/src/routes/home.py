@@ -93,32 +93,43 @@ def normalize_config(config_doc):
     """
     Normaliza la configuración para asegurar que todas las propiedades anidadas existan.
     Esto previene errores cuando el frontend intenta acceder a propiedades como .title en objetos undefined.
-    IMPORTANTE: Siempre reemplaza None o undefined con objetos completos.
+    IMPORTANTE: NUNCA sobrescribe campos existentes con valores, solo agrega campos faltantes.
+    CRÍTICO: Preserva imágenes base64 (strings largos) sin modificarlos.
     """
     default = get_default_config()
     
     # Normalizar banner - SIEMPRE debe ser un objeto, nunca None
-    # IMPORTANTE: NO sobrescribir campos existentes, solo agregar los que faltan
+    # CRÍTICO: NO sobrescribir campos existentes, especialmente imágenes (url con strings largos)
     if "banner" not in config_doc or config_doc["banner"] is None or not isinstance(config_doc["banner"], dict):
         config_doc["banner"] = default["banner"].copy()
     else:
         # Solo agregar campos que NO existen, preservar los existentes (incluyendo imágenes)
+        # CRÍTICO: Si url existe y es un string largo (>100 chars), es una imagen, NO tocarlo
         for key in ["url", "alt", "active", "width", "height"]:
             if key not in config_doc["banner"]:
                 config_doc["banner"][key] = default["banner"][key]
-            # Si existe pero es None y el default también es None, mantenerlo
+            # CRÍTICO: Si la key existe y es una imagen (url con string largo), NO sobrescribir
+            elif key == "url" and isinstance(config_doc["banner"][key], str) and len(config_doc["banner"][key]) > 100:
+                # Es una imagen base64, preservarla sin cambios
+                pass
+            # Si existe pero es None o string corto, mantenerlo (no sobrescribir con default)
             # Si existe y tiene valor (incluyendo string vacío), mantenerlo
     
     # Normalizar logo - SIEMPRE debe ser un objeto, nunca None
-    # IMPORTANTE: NO sobrescribir campos existentes, solo agregar los que faltan
+    # CRÍTICO: NO sobrescribir campos existentes, especialmente imágenes (url con strings largos)
     if "logo" not in config_doc or config_doc["logo"] is None or not isinstance(config_doc["logo"], dict):
         config_doc["logo"] = default["logo"].copy()
     else:
         # Solo agregar campos que NO existen, preservar los existentes (incluyendo imágenes)
+        # CRÍTICO: Si url existe y es un string largo (>100 chars), es una imagen, NO tocarlo
         for key in ["url", "alt", "width", "height"]:
             if key not in config_doc["logo"]:
                 config_doc["logo"][key] = default["logo"][key]
-            # Si existe pero es None y el default también es None, mantenerlo
+            # CRÍTICO: Si la key existe y es una imagen (url con string largo), NO sobrescribir
+            elif key == "url" and isinstance(config_doc["logo"][key], str) and len(config_doc["logo"][key]) > 100:
+                # Es una imagen base64, preservarla sin cambios
+                pass
+            # Si existe pero es None o string corto, mantenerlo (no sobrescribir con default)
             # Si existe y tiene valor (incluyendo string vacío), mantenerlo
     
     # Normalizar values - SIEMPRE debe ser un objeto con title y subtitle, nunca None
@@ -498,7 +509,35 @@ async def update_home_config(request: HomeConfigRequest):
                         config_dict_clean["logo"]["url"] = config_dict["logo"]["url"]
                         debug_log(f"🔧 RESTAURADO: Logo desde config_dict original: {len(config_dict_clean['logo']['url'])} caracteres")
         
+        # Verificación PRE-GUARDADO: Asegurar que las imágenes estén en config_dict_clean
+        if banner_has_image:
+            banner_in_clean = config_dict_clean.get("banner") and config_dict_clean["banner"].get("url") and len(config_dict_clean["banner"]["url"]) > 100
+            if not banner_in_clean:
+                debug_log(f"❌ ERROR CRÍTICO PRE-GUARDADO: Banner NO está en config_dict_clean antes de guardar en MongoDB")
+                # Restaurar desde config_dict
+                if config_dict.get("banner") and config_dict["banner"].get("url"):
+                    if not config_dict_clean.get("banner"):
+                        config_dict_clean["banner"] = {}
+                    config_dict_clean["banner"]["url"] = config_dict["banner"]["url"]
+                    debug_log(f"🔧 RESTAURADO: Banner en config_dict_clean: {len(config_dict_clean['banner']['url'])} caracteres")
+            else:
+                debug_log(f"✅ VERIFICACIÓN PRE-GUARDADO: Banner está en config_dict_clean: {len(config_dict_clean['banner']['url'])} caracteres")
+        
+        if logo_has_image:
+            logo_in_clean = config_dict_clean.get("logo") and config_dict_clean["logo"].get("url") and len(config_dict_clean["logo"]["url"]) > 100
+            if not logo_in_clean:
+                debug_log(f"❌ ERROR CRÍTICO PRE-GUARDADO: Logo NO está en config_dict_clean antes de guardar en MongoDB")
+                # Restaurar desde config_dict
+                if config_dict.get("logo") and config_dict["logo"].get("url"):
+                    if not config_dict_clean.get("logo"):
+                        config_dict_clean["logo"] = {}
+                    config_dict_clean["logo"]["url"] = config_dict["logo"]["url"]
+                    debug_log(f"🔧 RESTAURADO: Logo en config_dict_clean: {len(config_dict_clean['logo']['url'])} caracteres")
+            else:
+                debug_log(f"✅ VERIFICACIÓN PRE-GUARDADO: Logo está en config_dict_clean: {len(config_dict_clean['logo']['url'])} caracteres")
+        
         # Actualizar o crear la configuración (upsert garantiza que solo haya un documento)
+        # CRÍTICO: Usar $set para actualizar campos específicos, preservando otros campos existentes
         result = home_config_collection.update_one(
             {},
             {"$set": config_dict_clean},
@@ -560,9 +599,39 @@ async def update_home_config(request: HomeConfigRequest):
         if not updated_config:
             updated_config = get_default_config()
         else:
+            # CRÍTICO: Guardar imágenes ANTES de normalizar (por si normalize_config las elimina)
+            banner_url_before_normalize = None
+            if updated_config.get("banner") and isinstance(updated_config["banner"], dict):
+                banner_url_before_normalize = updated_config["banner"].get("url", "")
+                if banner_url_before_normalize and len(banner_url_before_normalize) > 100:
+                    debug_log(f"🔍 Banner URL ANTES de normalizar: {len(banner_url_before_normalize)} caracteres")
+            
+            logo_url_before_normalize = None
+            if updated_config.get("logo") and isinstance(updated_config["logo"], dict):
+                logo_url_before_normalize = updated_config["logo"].get("url", "")
+                if logo_url_before_normalize and len(logo_url_before_normalize) > 100:
+                    debug_log(f"🔍 Logo URL ANTES de normalizar: {len(logo_url_before_normalize)} caracteres")
+            
             # Normalizar la configuración antes de retornarla
             # IMPORTANTE: normalize_config solo agrega campos faltantes, NO debería eliminar imágenes
             updated_config = normalize_config(updated_config)
+            
+            # CRÍTICO: Verificar y restaurar imágenes DESPUÉS de normalizar
+            if banner_url_before_normalize and len(banner_url_before_normalize) > 100:
+                if not updated_config.get("banner") or not updated_config["banner"].get("url") or len(updated_config["banner"]["url"]) < 100:
+                    debug_log(f"⚠️ CRÍTICO: Banner perdió imagen durante normalize_config, restaurando...")
+                    if not updated_config.get("banner"):
+                        updated_config["banner"] = {}
+                    updated_config["banner"]["url"] = banner_url_before_normalize
+                    debug_log(f"✅ Banner restaurado después de normalize_config: {len(banner_url_before_normalize)} caracteres")
+            
+            if logo_url_before_normalize and len(logo_url_before_normalize) > 100:
+                if not updated_config.get("logo") or not updated_config["logo"].get("url") or len(updated_config["logo"]["url"]) < 100:
+                    debug_log(f"⚠️ CRÍTICO: Logo perdió imagen durante normalize_config, restaurando...")
+                    if not updated_config.get("logo"):
+                        updated_config["logo"] = {}
+                    updated_config["logo"]["url"] = logo_url_before_normalize
+                    debug_log(f"✅ Logo restaurado después de normalize_config: {len(logo_url_before_normalize)} caracteres")
         
         # Verificar que las imágenes base64 se mantuvieron después de normalizar
         if updated_config.get("banner") and isinstance(updated_config["banner"], dict):
