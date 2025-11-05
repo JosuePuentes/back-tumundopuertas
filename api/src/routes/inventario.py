@@ -229,17 +229,95 @@ async def get_item(item_id: str):
 
 @router.post("/")
 async def create_item(item: Item):
-    # Si no se proporciona código, generar uno automáticamente
-    if not item.codigo or (isinstance(item.codigo, str) and item.codigo.strip() == ""):
-        item.codigo = generar_codigo_automatico()
-    
-    # Verificar que el código no exista
-    existing_item = items_collection.find_one({"codigo": item.codigo})
-    if existing_item:
-        raise HTTPException(status_code=400, detail="El item con este código ya existe")
-    
-    result = items_collection.insert_one(item.dict(by_alias=True, exclude_unset=True))
-    return {"message": "Item creado correctamente", "id": str(result.inserted_id), "codigo": item.codigo}
+    try:
+        print(f"DEBUG CREATE ITEM: === INICIO CREACIÓN ===")
+        print(f"DEBUG CREATE ITEM: Item recibido - codigo={item.codigo}, nombre={item.nombre}")
+        
+        # Si no se proporciona código, generar uno automáticamente
+        if not item.codigo or (isinstance(item.codigo, str) and item.codigo.strip() == ""):
+            item.codigo = generar_codigo_automatico()
+            print(f"DEBUG CREATE ITEM: Código generado automáticamente: {item.codigo}")
+        
+        # Verificar que el código no exista
+        existing_item = items_collection.find_one({"codigo": item.codigo})
+        if existing_item:
+            print(f"DEBUG CREATE ITEM: ❌ Código ya existe: {item.codigo}")
+            raise HTTPException(status_code=400, detail="El item con este código ya existe")
+        
+        # Convertir a diccionario con todos los campos (exclude_unset=False)
+        item_dict = item.dict(by_alias=True, exclude_unset=False)
+        
+        # Limpiar campos None y asegurar valores por defecto
+        item_dict_clean = {}
+        for key, value in item_dict.items():
+            # Excluir _id si existe (para nuevos items)
+            if key == "_id" or key == "id":
+                continue
+            # Incluir el campo si tiene valor o si es un campo requerido
+            if value is not None:
+                item_dict_clean[key] = value
+        
+        # Asegurar campos requeridos con valores por defecto
+        item_dict_clean.setdefault("codigo", item.codigo)
+        item_dict_clean.setdefault("nombre", item.nombre)
+        item_dict_clean.setdefault("descripcion", item.descripcion or "")
+        item_dict_clean.setdefault("categoria", item.categoria)
+        item_dict_clean.setdefault("precio", float(item.precio))
+        item_dict_clean.setdefault("costo", float(item.costo))
+        item_dict_clean.setdefault("costoProduccion", float(item.costoProduccion) if item.costoProduccion else 0.0)
+        item_dict_clean.setdefault("cantidad", int(item.cantidad) if item.cantidad else 0)
+        item_dict_clean.setdefault("existencia", int(item.existencia) if hasattr(item, 'existencia') and item.existencia is not None else 0)
+        item_dict_clean.setdefault("existencia2", int(item.existencia2) if hasattr(item, 'existencia2') and item.existencia2 is not None else 0)
+        item_dict_clean.setdefault("activo", item.activo if item.activo is not None else True)
+        item_dict_clean.setdefault("imagenes", item.imagenes if item.imagenes else [])
+        
+        # Campos opcionales
+        if item.departamento:
+            item_dict_clean["departamento"] = item.departamento
+        if item.marca:
+            item_dict_clean["marca"] = item.marca
+        if item.modelo:
+            item_dict_clean["modelo"] = item.modelo
+        
+        print(f"DEBUG CREATE ITEM: Datos a insertar:")
+        print(f"  - codigo: {item_dict_clean.get('codigo')}")
+        print(f"  - nombre: {item_dict_clean.get('nombre')}")
+        print(f"  - categoria: {item_dict_clean.get('categoria')}")
+        print(f"  - precio: {item_dict_clean.get('precio')}")
+        print(f"  - cantidad: {item_dict_clean.get('cantidad')}")
+        print(f"  - activo: {item_dict_clean.get('activo')}")
+        
+        # Insertar en la base de datos
+        result = items_collection.insert_one(item_dict_clean)
+        
+        if not result.inserted_id:
+            print(f"DEBUG CREATE ITEM: ❌ ERROR: No se obtuvo inserted_id")
+            raise HTTPException(status_code=500, detail="Error al insertar el item en la base de datos")
+        
+        print(f"DEBUG CREATE ITEM: ✅ Item insertado con _id: {result.inserted_id}")
+        
+        # Verificar que realmente se guardó
+        item_verificado = items_collection.find_one({"_id": result.inserted_id})
+        if not item_verificado:
+            print(f"DEBUG CREATE ITEM: ❌ ERROR: Item no encontrado después de insertar")
+            raise HTTPException(status_code=500, detail="El item no se guardó correctamente en la base de datos")
+        
+        print(f"DEBUG CREATE ITEM: ✅ Verificación exitosa - Item guardado correctamente")
+        print(f"DEBUG CREATE ITEM: === FIN CREACIÓN ===")
+        
+        return {
+            "message": "Item creado correctamente",
+            "id": str(result.inserted_id),
+            "codigo": item.codigo
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"DEBUG CREATE ITEM: ❌ EXCEPCIÓN: {str(e)}")
+        print(f"DEBUG CREATE ITEM: Tipo: {type(e).__name__}")
+        import traceback
+        print(f"DEBUG CREATE ITEM: Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al crear el item: {str(e)}")
 
 @router.patch("/id/{item_id}/")
 async def patch_item(item_id: str, update_data: dict = Body(...)):
