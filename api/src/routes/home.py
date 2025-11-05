@@ -96,20 +96,28 @@ def normalize_config(config_doc):
     default = get_default_config()
     
     # Normalizar banner - SIEMPRE debe ser un objeto, nunca None
+    # IMPORTANTE: NO sobrescribir campos existentes, solo agregar los que faltan
     if "banner" not in config_doc or config_doc["banner"] is None or not isinstance(config_doc["banner"], dict):
         config_doc["banner"] = default["banner"].copy()
     else:
+        # Solo agregar campos que NO existen, preservar los existentes (incluyendo imágenes)
         for key in ["url", "alt", "active", "width", "height"]:
             if key not in config_doc["banner"]:
                 config_doc["banner"][key] = default["banner"][key]
+            # Si existe pero es None y el default también es None, mantenerlo
+            # Si existe y tiene valor (incluyendo string vacío), mantenerlo
     
     # Normalizar logo - SIEMPRE debe ser un objeto, nunca None
+    # IMPORTANTE: NO sobrescribir campos existentes, solo agregar los que faltan
     if "logo" not in config_doc or config_doc["logo"] is None or not isinstance(config_doc["logo"], dict):
         config_doc["logo"] = default["logo"].copy()
     else:
+        # Solo agregar campos que NO existen, preservar los existentes (incluyendo imágenes)
         for key in ["url", "alt", "width", "height"]:
             if key not in config_doc["logo"]:
                 config_doc["logo"][key] = default["logo"][key]
+            # Si existe pero es None y el default también es None, mantenerlo
+            # Si existe y tiene valor (incluyendo string vacío), mantenerlo
     
     # Normalizar values - SIEMPRE debe ser un objeto con title y subtitle, nunca None
     if "values" not in config_doc or config_doc["values"] is None or not isinstance(config_doc["values"], dict):
@@ -290,12 +298,20 @@ async def update_home_config(request: HomeConfigRequest):
                 detail=f"El documento es demasiado grande ({doc_size//1024//1024}MB). Límite de MongoDB: 16MB"
             )
         
-        # Remover campos None vacíos para mantener la estructura limpia
-        # PERO mantener todos los campos con valores (incluyendo strings vacíos de base64)
+        # Procesar campos preservando objetos anidados completos
+        # IMPORTANTE: Preservar objetos anidados aunque algunos campos sean None
+        # Esto asegura que las imágenes base64 no se pierdan
         config_dict_clean = {}
         for key, value in config_dict.items():
             if value is not None:
-                config_dict_clean[key] = value
+                # Si es un diccionario (objeto anidado), preservar TODO el objeto
+                if isinstance(value, dict):
+                    # Preservar el objeto completo, incluso si tiene campos None
+                    # Esto es crítico para banner, logo, etc. que pueden tener url=None
+                    # pero otros campos con valores
+                    config_dict_clean[key] = value
+                else:
+                    config_dict_clean[key] = value
         
         debug_log(f"Campos a guardar: {list(config_dict_clean.keys())}")
         
