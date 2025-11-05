@@ -4230,7 +4230,7 @@ async def cancelar_pedido(
         fecha_cancelacion = datetime.now().isoformat()
         usuario_cancelacion = user.get("username", "usuario_desconocido")
         
-        # Actualizar el estado_general del pedido
+        # Actualizar el estado_general del pedido y limpiar pagos
         result = pedidos_collection.update_one(
             {"_id": pedido_obj_id},
             {
@@ -4239,7 +4239,10 @@ async def cancelar_pedido(
                     "fecha_cancelacion": fecha_cancelacion,
                     "motivo_cancelacion": request.motivo_cancelacion,
                     "cancelado_por": usuario_cancelacion,
-                    "fecha_actualizacion": fecha_cancelacion
+                    "fecha_actualizacion": fecha_cancelacion,
+                    "pago": "sin pago",  # Limpiar estado de pago
+                    "total_abonado": 0,  # Limpiar total abonado
+                    "historial_pagos": []  # Limpiar historial de pagos
                 }
             }
         )
