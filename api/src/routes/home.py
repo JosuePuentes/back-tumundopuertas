@@ -146,6 +146,7 @@ def normalize_config(config_doc):
             config_doc["values"]["values"] = []
     
     # Normalizar products - SIEMPRE debe ser un objeto con title y subtitle, nunca None
+    # CRÍTICO: Preservar imágenes dentro del array products.products
     if "products" not in config_doc or config_doc["products"] is None or not isinstance(config_doc["products"], dict):
         config_doc["products"] = default["products"].copy()
     else:
@@ -157,6 +158,15 @@ def normalize_config(config_doc):
         # Asegurar que el array products existe
         if "products" not in config_doc["products"] or not isinstance(config_doc["products"].get("products"), list):
             config_doc["products"]["products"] = []
+        else:
+            # CRÍTICO: Preservar imágenes en los productos existentes
+            # Si hay productos con imágenes, NO reemplazar el array completo
+            # Solo normalizar productos individuales si es necesario
+            existing_products = config_doc["products"]["products"]
+            for product in existing_products:
+                if isinstance(product, dict) and product.get("image") and isinstance(product["image"], str) and len(product["image"]) > 100:
+                    # Producto tiene imagen, preservarla sin cambios
+                    pass
     
     # Normalizar contact - SIEMPRE debe ser un objeto, nunca None
     if "contact" not in config_doc or config_doc["contact"] is None or not isinstance(config_doc["contact"], dict):
@@ -401,10 +411,22 @@ async def update_home_config(request: HomeConfigRequest):
                     # CRÍTICO: Verificar si hay imágenes nuevas en el valor entrante
                     has_new_images = False
                     for sub_key, sub_value in value.items():
+                        # Para campos directos (url, image)
                         if sub_key in ["url", "image"] and isinstance(sub_value, str) and len(sub_value) > 100:
                             has_new_images = True
                             debug_log(f"🔍 IMAGEN NUEVA detectada en {key}.{sub_key}: {len(sub_value)} caracteres")
                             break
+                        # Para arrays de productos/servicios que contienen imágenes
+                        elif sub_key in ["products", "items"] and isinstance(sub_value, list):
+                            for item in sub_value:
+                                if isinstance(item, dict):
+                                    # Verificar si el item tiene imagen
+                                    if item.get("image") and isinstance(item["image"], str) and len(item["image"]) > 100:
+                                        has_new_images = True
+                                        debug_log(f"🔍 IMAGEN NUEVA detectada en {key}.{sub_key}[{sub_value.index(item)}].image: {len(item['image'])} caracteres")
+                                        break
+                            if has_new_images:
+                                break
                     
                     # Si hay imágenes nuevas, usar el objeto completo del frontend y hacer merge solo de campos no-imagen
                     if has_new_images:
@@ -536,6 +558,26 @@ async def update_home_config(request: HomeConfigRequest):
             else:
                 debug_log(f"✅ VERIFICACIÓN PRE-GUARDADO: Logo está en config_dict_clean: {len(config_dict_clean['logo']['url'])} caracteres")
         
+        # Verificar imágenes de productos
+        if products_with_images:
+            products_in_clean = False
+            if config_dict_clean.get("products") and isinstance(config_dict_clean["products"], dict):
+                clean_products = config_dict_clean["products"].get("products", [])
+                if isinstance(clean_products, list):
+                    products_with_images_count = sum(1 for p in clean_products if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+                    if products_with_images_count > 0:
+                        products_in_clean = True
+                        debug_log(f"✅ VERIFICACIÓN PRE-GUARDADO: {products_with_images_count} productos con imágenes en config_dict_clean")
+            
+            if not products_in_clean:
+                debug_log(f"❌ ERROR CRÍTICO PRE-GUARDADO: Productos con imágenes NO están en config_dict_clean antes de guardar")
+                # Restaurar desde config_dict
+                if config_dict.get("products") and isinstance(config_dict["products"], dict):
+                    if not config_dict_clean.get("products"):
+                        config_dict_clean["products"] = {}
+                    config_dict_clean["products"]["products"] = config_dict["products"].get("products", [])
+                    debug_log(f"🔧 RESTAURADO: Productos desde config_dict original")
+        
         # Actualizar o crear la configuración (upsert garantiza que solo haya un documento)
         # CRÍTICO: Usar $set para actualizar campos específicos, preservando otros campos existentes
         result = home_config_collection.update_one(
@@ -632,6 +674,22 @@ async def update_home_config(request: HomeConfigRequest):
                         updated_config["logo"] = {}
                     updated_config["logo"]["url"] = logo_url_before_normalize
                     debug_log(f"✅ Logo restaurado después de normalize_config: {len(logo_url_before_normalize)} caracteres")
+            
+            # CRÍTICO: Verificar y restaurar imágenes de productos DESPUÉS de normalizar
+            if products_with_images:
+                products_after_normalize = updated_config.get("products") and isinstance(updated_config["products"], dict) and updated_config["products"].get("products", [])
+                if isinstance(products_after_normalize, list):
+                    products_with_images_after = sum(1 for p in products_after_normalize if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+                    if products_with_images_after < len(products_with_images):
+                        debug_log(f"⚠️ CRÍTICO: Productos perdieron imágenes durante normalize_config ({products_with_images_after} de {len(products_with_images)}), restaurando...")
+                        # Restaurar desde config_dict_clean
+                        if config_dict_clean.get("products") and isinstance(config_dict_clean["products"], dict):
+                            if not updated_config.get("products"):
+                                updated_config["products"] = {}
+                            updated_config["products"]["products"] = config_dict_clean["products"].get("products", [])
+                            debug_log(f"✅ Productos restaurados después de normalize_config")
+                    else:
+                        debug_log(f"✅ Productos mantuvieron imágenes después de normalize_config: {products_with_images_after} productos con imágenes")
         
         # Verificar que las imágenes base64 se mantuvieron después de normalizar
         if updated_config.get("banner") and isinstance(updated_config["banner"], dict):
@@ -728,8 +786,35 @@ async def update_home_config(request: HomeConfigRequest):
         
         # VERIFICACIÓN FINAL ABSOLUTA: Serializar y verificar que las imágenes estén presentes
         try:
+            # CRÍTICO: Verificar que las imágenes estén en updated_config ANTES de serializar
+            if banner_has_image:
+                banner_in_updated = updated_config.get("banner") and updated_config["banner"].get("url") and len(updated_config["banner"]["url"]) > 100
+                if not banner_in_updated:
+                    debug_log(f"❌ CRÍTICO ANTES DE SERIALIZAR: Banner NO está en updated_config")
+                    debug_log(f"🔧 Restaurando banner desde config_dict_clean antes de serializar")
+                    if not updated_config.get("banner"):
+                        updated_config["banner"] = {}
+                    if config_dict_clean.get("banner") and config_dict_clean["banner"].get("url"):
+                        updated_config["banner"]["url"] = config_dict_clean["banner"]["url"]
+                        debug_log(f"✅ Banner restaurado en updated_config: {len(updated_config['banner']['url'])} caracteres")
+                else:
+                    debug_log(f"✅ VERIFICACIÓN: Banner está en updated_config antes de serializar: {len(updated_config['banner']['url'])} caracteres")
+            
             # Intentar serializar la respuesta para detectar problemas
             response_dict = {"config": updated_config, "message": "Configuración guardada exitosamente"}
+            
+            # Verificar que las imágenes estén en response_dict ANTES de serializar
+            if banner_has_image:
+                banner_in_response = response_dict.get("config") and response_dict["config"].get("banner") and response_dict["config"]["banner"].get("url") and len(response_dict["config"]["banner"]["url"]) > 100
+                if not banner_in_response:
+                    debug_log(f"❌ CRÍTICO: Banner NO está en response_dict antes de serializar")
+                    # Restaurar
+                    if config_dict_clean.get("banner") and config_dict_clean["banner"].get("url"):
+                        if not response_dict["config"].get("banner"):
+                            response_dict["config"]["banner"] = {}
+                        response_dict["config"]["banner"]["url"] = config_dict_clean["banner"]["url"]
+                        debug_log(f"✅ Banner restaurado en response_dict: {len(response_dict['config']['banner']['url'])} caracteres")
+            
             response_json = json.dumps(response_dict)
             response_size = len(response_json)
             debug_log(f"Tamaño final de respuesta JSON serializada: {response_size} bytes (~{response_size//1024}KB)")
