@@ -50,57 +50,64 @@ def normalize_config(config_doc):
     """
     Normaliza la configuración para asegurar que todas las propiedades anidadas existan.
     Esto previene errores cuando el frontend intenta acceder a propiedades como .title en objetos undefined.
+    IMPORTANTE: Siempre reemplaza None o undefined con objetos completos.
     """
     default = get_default_config()
     
-    # Normalizar banner
-    if "banner" not in config_doc or config_doc["banner"] is None:
-        config_doc["banner"] = default["banner"]
-    elif isinstance(config_doc["banner"], dict):
+    # Normalizar banner - SIEMPRE debe ser un objeto, nunca None
+    if "banner" not in config_doc or config_doc["banner"] is None or not isinstance(config_doc["banner"], dict):
+        config_doc["banner"] = default["banner"].copy()
+    else:
         for key in ["url", "alt", "active"]:
             if key not in config_doc["banner"]:
                 config_doc["banner"][key] = default["banner"][key]
     
-    # Normalizar logo
-    if "logo" not in config_doc or config_doc["logo"] is None:
-        config_doc["logo"] = default["logo"]
-    elif isinstance(config_doc["logo"], dict):
+    # Normalizar logo - SIEMPRE debe ser un objeto, nunca None
+    if "logo" not in config_doc or config_doc["logo"] is None or not isinstance(config_doc["logo"], dict):
+        config_doc["logo"] = default["logo"].copy()
+    else:
         for key in ["url", "alt"]:
             if key not in config_doc["logo"]:
                 config_doc["logo"][key] = default["logo"][key]
     
-    # Normalizar values
-    if "values" not in config_doc or config_doc["values"] is None:
-        config_doc["values"] = default["values"]
-    elif isinstance(config_doc["values"], dict):
-        for key in ["title", "subtitle"]:
-            if key not in config_doc["values"]:
-                config_doc["values"][key] = default["values"][key]
-        if "values" not in config_doc["values"] or config_doc["values"].get("values") is None:
+    # Normalizar values - SIEMPRE debe ser un objeto con title y subtitle, nunca None
+    if "values" not in config_doc or config_doc["values"] is None or not isinstance(config_doc["values"], dict):
+        config_doc["values"] = default["values"].copy()
+    else:
+        # Asegurar que title y subtitle existan
+        if "title" not in config_doc["values"]:
+            config_doc["values"]["title"] = default["values"]["title"]
+        if "subtitle" not in config_doc["values"]:
+            config_doc["values"]["subtitle"] = default["values"]["subtitle"]
+        # Asegurar que el array values existe
+        if "values" not in config_doc["values"] or not isinstance(config_doc["values"].get("values"), list):
             config_doc["values"]["values"] = []
     
-    # Normalizar products
-    if "products" not in config_doc or config_doc["products"] is None:
-        config_doc["products"] = default["products"]
-    elif isinstance(config_doc["products"], dict):
-        for key in ["title", "subtitle"]:
-            if key not in config_doc["products"]:
-                config_doc["products"][key] = default["products"][key]
-        if "products" not in config_doc["products"] or config_doc["products"].get("products") is None:
+    # Normalizar products - SIEMPRE debe ser un objeto con title y subtitle, nunca None
+    if "products" not in config_doc or config_doc["products"] is None or not isinstance(config_doc["products"], dict):
+        config_doc["products"] = default["products"].copy()
+    else:
+        # Asegurar que title y subtitle existan
+        if "title" not in config_doc["products"]:
+            config_doc["products"]["title"] = default["products"]["title"]
+        if "subtitle" not in config_doc["products"]:
+            config_doc["products"]["subtitle"] = default["products"]["subtitle"]
+        # Asegurar que el array products existe
+        if "products" not in config_doc["products"] or not isinstance(config_doc["products"].get("products"), list):
             config_doc["products"]["products"] = []
     
-    # Normalizar contact
-    if "contact" not in config_doc or config_doc["contact"] is None:
-        config_doc["contact"] = default["contact"]
-    elif isinstance(config_doc["contact"], dict):
+    # Normalizar contact - SIEMPRE debe ser un objeto, nunca None
+    if "contact" not in config_doc or config_doc["contact"] is None or not isinstance(config_doc["contact"], dict):
+        config_doc["contact"] = default["contact"].copy()
+    else:
         for key in ["phone", "email", "address", "social_media"]:
             if key not in config_doc["contact"]:
                 config_doc["contact"][key] = default["contact"][key]
     
-    # Normalizar colors
-    if "colors" not in config_doc or config_doc["colors"] is None:
-        config_doc["colors"] = default["colors"]
-    elif isinstance(config_doc["colors"], dict):
+    # Normalizar colors - SIEMPRE debe ser un objeto, nunca None
+    if "colors" not in config_doc or config_doc["colors"] is None or not isinstance(config_doc["colors"], dict):
+        config_doc["colors"] = default["colors"].copy()
+    else:
         for key in ["primary", "secondary", "accent", "background", "text"]:
             if key not in config_doc["colors"]:
                 config_doc["colors"][key] = default["colors"][key]
