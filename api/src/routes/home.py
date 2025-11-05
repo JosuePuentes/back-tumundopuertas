@@ -469,6 +469,18 @@ async def update_home_config(request: HomeConfigRequest):
                                         debug_log(f"  ✅ RESTAURADO: Array products.products desde value original")
                         
                         config_dict_clean[key] = merged_value
+                    # Si NO hay imágenes nuevas detectadas en este nivel, pero sabemos que hay productos con imágenes
+                    # CRÍTICO: Para products, si products_with_images tiene elementos, usar el array del frontend
+                    elif key == "products" and products_with_images:
+                        debug_log(f"✅ CRÍTICO: products_with_images detectado ({len(products_with_images)} productos), usando array del frontend")
+                        merged_value = value.copy()
+                        # Agregar solo campos que no son el array products
+                        if existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
+                            for existing_key, existing_value in existing_doc[key].items():
+                                if existing_key != "products" and existing_key not in merged_value:
+                                    merged_value[existing_key] = existing_value
+                                    debug_log(f"  Agregando campo {existing_key} desde documento existente")
+                        config_dict_clean[key] = merged_value
                     # Si NO hay imágenes nuevas, hacer merge normal
                     elif existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
                         # Merge profundo: preservar campos existentes, actualizar con nuevos
