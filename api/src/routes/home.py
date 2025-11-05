@@ -828,6 +828,21 @@ async def update_home_config(request: HomeConfigRequest):
                     updated_config["logo"]["url"] = config_dict_clean["logo"]["url"]
                     debug_log(f"✅ Logo restaurado en respuesta final: {len(updated_config['logo']['url'])} caracteres")
         
+        # CRÍTICO: Verificación final para productos con imágenes
+        if products_with_images:
+            products_final = updated_config.get("products") and isinstance(updated_config["products"], dict) and updated_config["products"].get("products", [])
+            if isinstance(products_final, list):
+                products_final_count = sum(1 for p in products_final if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+                if products_final_count < len(products_with_images):
+                    debug_log(f"❌ ERROR FINAL: Solo {products_final_count} de {len(products_with_images)} productos tienen imágenes en la respuesta final")
+                    debug_log(f"🔧 RESTAURANDO: Productos completos desde config_dict_clean")
+                    if config_dict_clean.get("products") and isinstance(config_dict_clean["products"], dict):
+                        if not updated_config.get("products"):
+                            updated_config["products"] = {}
+                        updated_config["products"]["products"] = config_dict_clean["products"].get("products", [])
+                        restored_count = sum(1 for p in updated_config["products"]["products"] if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+                        debug_log(f"✅ Productos restaurados en respuesta final: {restored_count} productos con imágenes")
+        
         debug_log("=== FIN ACTUALIZACIÓN CONFIG HOME ===")
         
         # VERIFICACIÓN FINAL ABSOLUTA: Serializar y verificar que las imágenes estén presentes
@@ -861,6 +876,28 @@ async def update_home_config(request: HomeConfigRequest):
                         response_dict["config"]["banner"]["url"] = config_dict_clean["banner"]["url"]
                         debug_log(f"✅ Banner restaurado en response_dict: {len(response_dict['config']['banner']['url'])} caracteres")
             
+            # CRÍTICO: Verificar imágenes de productos en response_dict ANTES de serializar
+            if products_with_images:
+                products_in_response = False
+                response_products = response_dict.get("config") and response_dict["config"].get("products") and isinstance(response_dict["config"]["products"], dict) and response_dict["config"]["products"].get("products", [])
+                if isinstance(response_products, list):
+                    products_with_images_count = sum(1 for p in response_products if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+                    if products_with_images_count >= len(products_with_images):
+                        products_in_response = True
+                        debug_log(f"✅ VERIFICACIÓN: {products_with_images_count} productos con imágenes en response_dict antes de serializar")
+                
+                if not products_in_response:
+                    debug_log(f"❌ CRÍTICO: Productos con imágenes NO están en response_dict antes de serializar")
+                    # Restaurar desde config_dict_clean
+                    if config_dict_clean.get("products") and isinstance(config_dict_clean["products"], dict):
+                        if not response_dict["config"].get("products"):
+                            response_dict["config"]["products"] = {}
+                        response_dict["config"]["products"]["products"] = config_dict_clean["products"].get("products", [])
+                        # Verificar que se restauró
+                        restored_products = response_dict["config"]["products"].get("products", [])
+                        restored_count = sum(1 for p in restored_products if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+                        debug_log(f"✅ Productos restaurados en response_dict: {restored_count} productos con imágenes")
+            
             response_json = json.dumps(response_dict)
             response_size = len(response_json)
             debug_log(f"Tamaño final de respuesta JSON serializada: {response_size} bytes (~{response_size//1024}KB)")
@@ -882,6 +919,15 @@ async def update_home_config(request: HomeConfigRequest):
                     if not response_dict["config"].get("logo"):
                         response_dict["config"]["logo"] = {}
                     response_dict["config"]["logo"]["url"] = config_dict_clean["logo"]["url"]
+                
+                # CRÍTICO: Restaurar productos con imágenes
+                if products_with_images and config_dict_clean.get("products") and isinstance(config_dict_clean["products"], dict):
+                    if not response_dict["config"].get("products"):
+                        response_dict["config"]["products"] = {}
+                    response_dict["config"]["products"]["products"] = config_dict_clean["products"].get("products", [])
+                    restored_count = sum(1 for p in response_dict["config"]["products"]["products"] if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+                    debug_log(f"✅ Productos restaurados en response_dict desde config_dict_clean: {restored_count} productos con imágenes")
+                
                 # Re-serializar
                 response_json = json.dumps(response_dict)
                 response_size = len(response_json)
