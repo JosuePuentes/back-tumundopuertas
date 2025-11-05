@@ -1,9 +1,11 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from typing import Optional
 from ..models.authmodels import HomeConfig, HomeConfigRequest
 from ..config.mongodb import home_config_collection
 from bson import ObjectId
 import os
+import json
 
 router = APIRouter()
 
@@ -356,7 +358,6 @@ async def update_home_config(request: HomeConfigRequest):
                         debug_log(f"✅ Producto {idx+1} tiene imagen base64: {len(p.get('image', ''))} caracteres")
         
         # Calcular tamaño aproximado del documento INCLUYENDO imágenes
-        import json
         doc_size = len(json.dumps(config_dict))
         debug_log(f"Tamaño aproximado del documento (incluyendo imágenes): {doc_size} bytes (~{doc_size//1024}KB)")
         
@@ -598,7 +599,6 @@ async def update_home_config(request: HomeConfigRequest):
         
         # Calcular tamaño de la respuesta
         try:
-            import json
             response_size = len(json.dumps(updated_config))
             debug_log(f"Tamaño de la respuesta: {response_size} bytes (~{response_size//1024}KB)")
             
@@ -655,8 +655,44 @@ async def update_home_config(request: HomeConfigRequest):
         
         debug_log("=== FIN ACTUALIZACIÓN CONFIG HOME ===")
         
-        # Retornar la configuración completa con todas las imágenes
-        return {"config": updated_config, "message": "Configuración guardada exitosamente"}
+        # VERIFICACIÓN FINAL ABSOLUTA: Serializar y verificar que las imágenes estén presentes
+        try:
+            # Intentar serializar la respuesta para detectar problemas
+            response_dict = {"config": updated_config, "message": "Configuración guardada exitosamente"}
+            response_json = json.dumps(response_dict)
+            response_size = len(response_json)
+            debug_log(f"Tamaño final de respuesta JSON serializada: {response_size} bytes (~{response_size//1024}KB)")
+            
+            # Si sabemos que hay imágenes pero la respuesta es muy pequeña, usar config_dict_clean directamente
+            if banner_has_image and response_size < banner_image_size * 0.5:
+                debug_log(f"❌ CRÍTICO: Respuesta serializada muy pequeña ({response_size} bytes) cuando debería tener al menos {banner_image_size} bytes")
+                debug_log(f"🔧 Usando config_dict_clean directamente en respuesta")
+                # Usar config_dict_clean que sabemos que tiene las imágenes
+                response_dict["config"] = config_dict_clean.copy()
+                # Normalizar pero preservar imágenes
+                response_dict["config"] = normalize_config(response_dict["config"])
+                # Restaurar imágenes si se perdieron
+                if banner_has_image and config_dict_clean.get("banner") and config_dict_clean["banner"].get("url"):
+                    if not response_dict["config"].get("banner"):
+                        response_dict["config"]["banner"] = {}
+                    response_dict["config"]["banner"]["url"] = config_dict_clean["banner"]["url"]
+                if logo_has_image and config_dict_clean.get("logo") and config_dict_clean["logo"].get("url"):
+                    if not response_dict["config"].get("logo"):
+                        response_dict["config"]["logo"] = {}
+                    response_dict["config"]["logo"]["url"] = config_dict_clean["logo"]["url"]
+                # Re-serializar
+                response_json = json.dumps(response_dict)
+                response_size = len(response_json)
+                debug_log(f"✅ Tamaño después de restaurar desde config_dict_clean: {response_size} bytes (~{response_size//1024}KB)")
+            
+            # Retornar usando JSONResponse para asegurar serialización correcta
+            return JSONResponse(content=response_dict)
+        except Exception as e:
+            debug_log(f"❌ ERROR al serializar respuesta: {str(e)}")
+            import traceback
+            debug_log(f"Traceback: {traceback.format_exc()}")
+            # Fallback: retornar directamente (FastAPI lo serializará)
+            return {"config": updated_config, "message": "Configuración guardada exitosamente"}
     
     except HTTPException:
         raise
