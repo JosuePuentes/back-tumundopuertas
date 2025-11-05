@@ -12,8 +12,15 @@ def get_default_config():
     para evitar errores cuando el frontend intenta hacer .filter() en arrays undefined.
     """
     return {
-        "banner": None,
-        "logo": None,
+        "banner": {
+            "url": None,
+            "alt": None,
+            "active": True
+        },
+        "logo": {
+            "url": None,
+            "alt": None
+        },
         "values": {
             "title": None,
             "subtitle": None,
@@ -24,15 +31,87 @@ def get_default_config():
             "subtitle": None,
             "products": []
         },
-        "contact": None,
-        "colors": None
+        "contact": {
+            "phone": None,
+            "email": None,
+            "address": None,
+            "social_media": None
+        },
+        "colors": {
+            "primary": None,
+            "secondary": None,
+            "accent": None,
+            "background": None,
+            "text": None
+        }
     }
+
+def normalize_config(config_doc):
+    """
+    Normaliza la configuración para asegurar que todas las propiedades anidadas existan.
+    Esto previene errores cuando el frontend intenta acceder a propiedades como .title en objetos undefined.
+    """
+    default = get_default_config()
+    
+    # Normalizar banner
+    if "banner" not in config_doc or config_doc["banner"] is None:
+        config_doc["banner"] = default["banner"]
+    elif isinstance(config_doc["banner"], dict):
+        for key in ["url", "alt", "active"]:
+            if key not in config_doc["banner"]:
+                config_doc["banner"][key] = default["banner"][key]
+    
+    # Normalizar logo
+    if "logo" not in config_doc or config_doc["logo"] is None:
+        config_doc["logo"] = default["logo"]
+    elif isinstance(config_doc["logo"], dict):
+        for key in ["url", "alt"]:
+            if key not in config_doc["logo"]:
+                config_doc["logo"][key] = default["logo"][key]
+    
+    # Normalizar values
+    if "values" not in config_doc or config_doc["values"] is None:
+        config_doc["values"] = default["values"]
+    elif isinstance(config_doc["values"], dict):
+        for key in ["title", "subtitle"]:
+            if key not in config_doc["values"]:
+                config_doc["values"][key] = default["values"][key]
+        if "values" not in config_doc["values"] or config_doc["values"].get("values") is None:
+            config_doc["values"]["values"] = []
+    
+    # Normalizar products
+    if "products" not in config_doc or config_doc["products"] is None:
+        config_doc["products"] = default["products"]
+    elif isinstance(config_doc["products"], dict):
+        for key in ["title", "subtitle"]:
+            if key not in config_doc["products"]:
+                config_doc["products"][key] = default["products"][key]
+        if "products" not in config_doc["products"] or config_doc["products"].get("products") is None:
+            config_doc["products"]["products"] = []
+    
+    # Normalizar contact
+    if "contact" not in config_doc or config_doc["contact"] is None:
+        config_doc["contact"] = default["contact"]
+    elif isinstance(config_doc["contact"], dict):
+        for key in ["phone", "email", "address", "social_media"]:
+            if key not in config_doc["contact"]:
+                config_doc["contact"][key] = default["contact"][key]
+    
+    # Normalizar colors
+    if "colors" not in config_doc or config_doc["colors"] is None:
+        config_doc["colors"] = default["colors"]
+    elif isinstance(config_doc["colors"], dict):
+        for key in ["primary", "secondary", "accent", "background", "text"]:
+            if key not in config_doc["colors"]:
+                config_doc["colors"][key] = default["colors"][key]
+    
+    return config_doc
 
 @router.get("/config")
 async def get_home_config():
     """
     Obtener la configuración de la página de inicio.
-    Retorna la configuración completa o estructura por defecto con arrays vacíos si no existe.
+    Retorna la configuración completa normalizada o estructura por defecto si no existe.
     """
     try:
         # Buscar el único documento de configuración
@@ -46,18 +125,8 @@ async def get_home_config():
         if "_id" in config_doc:
             del config_doc["_id"]
         
-        # Asegurar que los arrays existan para evitar errores de .filter()
-        if "values" not in config_doc or config_doc["values"] is None:
-            config_doc["values"] = {"title": None, "subtitle": None, "values": []}
-        elif "values" in config_doc and isinstance(config_doc["values"], dict):
-            if "values" not in config_doc["values"] or config_doc["values"].get("values") is None:
-                config_doc["values"]["values"] = []
-        
-        if "products" not in config_doc or config_doc["products"] is None:
-            config_doc["products"] = {"title": None, "subtitle": None, "products": []}
-        elif "products" in config_doc and isinstance(config_doc["products"], dict):
-            if "products" not in config_doc["products"] or config_doc["products"].get("products") is None:
-                config_doc["products"]["products"] = []
+        # Normalizar la configuración para asegurar que todas las propiedades existan
+        config_doc = normalize_config(config_doc)
         
         return {"config": config_doc}
     
@@ -94,9 +163,12 @@ async def update_home_config(request: HomeConfigRequest):
         if updated_config and "_id" in updated_config:
             del updated_config["_id"]
         
-        # Si no hay configuración, retornar objeto vacío
+        # Si no hay configuración, retornar estructura por defecto
         if not updated_config:
-            updated_config = {}
+            updated_config = get_default_config()
+        else:
+            # Normalizar la configuración antes de retornarla
+            updated_config = normalize_config(updated_config)
         
         return {"config": updated_config, "message": "Configuración guardada exitosamente"}
     
