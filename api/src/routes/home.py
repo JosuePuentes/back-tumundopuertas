@@ -433,6 +433,10 @@ async def update_home_config(request: HomeConfigRequest):
                         debug_log(f"✅ Usando objeto completo del frontend para {key} (contiene imágenes nuevas)")
                         # Empezar con el objeto del frontend (que tiene las imágenes)
                         merged_value = value.copy()
+                        # CRÍTICO: Para products, asegurar que el array products.products del frontend se preserve
+                        if key == "products" and "products" in merged_value:
+                            debug_log(f"  🔍 CRÍTICO: Preservando array products.products del frontend (tiene {len(merged_value['products'])} items)")
+                        
                         # Hacer merge solo de campos que NO son imágenes del documento existente
                         if existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
                             for existing_key, existing_value in existing_doc[key].items():
@@ -440,15 +444,30 @@ async def update_home_config(request: HomeConfigRequest):
                                 if existing_key in ["products", "items"] and isinstance(existing_value, list):
                                     # Si el frontend tiene este array, usar el del frontend (ya tiene las imágenes)
                                     if existing_key in merged_value and isinstance(merged_value[existing_key], list):
-                                        debug_log(f"  Preservando array {existing_key} del frontend (contiene imágenes)")
-                                        # Ya está en merged_value, no hacer nada
+                                        debug_log(f"  Preservando array {existing_key} del frontend (contiene imágenes, {len(merged_value[existing_key])} items)")
+                                        # Ya está en merged_value, no hacer nada - CRÍTICO: NO sobrescribir
                                     else:
                                         # Si el frontend no tiene este array, usar el existente
                                         merged_value[existing_key] = existing_value
+                                        debug_log(f"  Usando array {existing_key} del documento existente (frontend no lo tiene)")
                                 # Solo agregar campos que no son imágenes/arrays y que no están en el objeto del frontend
                                 elif existing_key not in ["url", "image"] and existing_key not in merged_value:
                                     merged_value[existing_key] = existing_value
                                     debug_log(f"  Agregando campo {existing_key} desde documento existente")
+                        
+                        # VERIFICACIÓN POST-MERGE: Asegurar que el array products.products todavía tiene imágenes
+                        if key == "products" and products_with_images:
+                            products_after_merge = merged_value.get("products", [])
+                            if isinstance(products_after_merge, list):
+                                products_with_images_after = sum(1 for p in products_after_merge if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+                                if products_with_images_after < len(products_with_images):
+                                    debug_log(f"  ⚠️ CRÍTICO: Solo {products_with_images_after} de {len(products_with_images)} productos tienen imágenes después del merge")
+                                    debug_log(f"  🔧 RESTAURANDO: Array products.products desde value original")
+                                    # Restaurar desde value original
+                                    if "products" in value:
+                                        merged_value["products"] = value["products"]
+                                        debug_log(f"  ✅ RESTAURADO: Array products.products desde value original")
+                        
                         config_dict_clean[key] = merged_value
                     # Si NO hay imágenes nuevas, hacer merge normal
                     elif existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
