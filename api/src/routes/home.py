@@ -3,8 +3,16 @@ from typing import Optional
 from ..models.authmodels import HomeConfig, HomeConfigRequest
 from ..config.mongodb import home_config_collection
 from bson import ObjectId
+import os
 
 router = APIRouter()
+
+# Control de logs: solo mostrar en desarrollo
+DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
+def debug_log(*args, **kwargs):
+    """Función para logs de debug - solo muestra en modo DEBUG"""
+    if DEBUG_MODE:
+        print(*args, **kwargs)
 
 def get_default_config():
     """
@@ -200,35 +208,114 @@ async def get_home_config():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener configuración: {str(e)}")
 
+def get_image_size(image_str):
+    """Obtener el tamaño aproximado de una imagen base64"""
+    if not image_str or not isinstance(image_str, str):
+        return 0
+    # Base64 ocupa aproximadamente 4/3 del tamaño original + overhead
+    return len(image_str)
+
+def log_image_info(config_dict, prefix=""):
+    """Log información sobre imágenes en la configuración para debugging"""
+    debug_log(f"{prefix}=== INFORMACIÓN DE IMÁGENES ===")
+    
+    # Banner
+    if config_dict.get("banner") and isinstance(config_dict["banner"], dict):
+        banner_url = config_dict["banner"].get("url", "")
+        if banner_url:
+            size = get_image_size(banner_url)
+            debug_log(f"{prefix}Banner URL: {len(banner_url)} caracteres, ~{size//1024}KB")
+            if banner_url.startswith("data:image"):
+                debug_log(f"{prefix}Banner es base64: SÍ (prefijo: {banner_url[:30]}...)")
+    
+    # Logo
+    if config_dict.get("logo") and isinstance(config_dict["logo"], dict):
+        logo_url = config_dict["logo"].get("url", "")
+        if logo_url:
+            size = get_image_size(logo_url)
+            debug_log(f"{prefix}Logo URL: {len(logo_url)} caracteres, ~{size//1024}KB")
+            if logo_url.startswith("data:image"):
+                debug_log(f"{prefix}Logo es base64: SÍ (prefijo: {logo_url[:30]}...)")
+    
+    # Products
+    if config_dict.get("products") and isinstance(config_dict["products"], dict):
+        products = config_dict["products"].get("products", [])
+        if isinstance(products, list):
+            debug_log(f"{prefix}Productos: {len(products)} items")
+            for idx, product in enumerate(products[:3]):  # Solo primeros 3 para no saturar
+                if isinstance(product, dict) and product.get("image"):
+                    img = product["image"]
+                    size = get_image_size(img)
+                    debug_log(f"{prefix}  Producto {idx+1} imagen: {len(img)} caracteres, ~{size//1024}KB")
+    
+    # Servicios
+    if config_dict.get("servicios") and isinstance(config_dict["servicios"], dict):
+        servicios = config_dict["servicios"].get("items", [])
+        if isinstance(servicios, list):
+            debug_log(f"{prefix}Servicios: {len(servicios)} items")
+            for idx, servicio in enumerate(servicios[:3]):  # Solo primeros 3
+                if isinstance(servicio, dict) and servicio.get("image"):
+                    img = servicio["image"]
+                    size = get_image_size(img)
+                    debug_log(f"{prefix}  Servicio {idx+1} imagen: {len(img)} caracteres, ~{size//1024}KB")
+    
+    debug_log(f"{prefix}================================")
+
 @router.put("/config")
 async def update_home_config(request: HomeConfigRequest):
     """
     Guardar o actualizar la configuración de la página de inicio.
     Solo debe haber un documento en la colección HOME_CONFIG.
+    Maneja correctamente imágenes base64 (strings largos).
     """
     try:
+        debug_log("=== INICIO ACTUALIZACIÓN CONFIG HOME ===")
+        
         # Convertir el modelo a diccionario
         # Usar exclude_none=False para mantener campos None que el frontend pueda querer limpiar
         config_dict = request.config.dict(exclude_unset=False)
         
+        # Log información de imágenes ANTES de limpiar
+        log_image_info(config_dict, "ANTES: ")
+        
+        # Calcular tamaño aproximado del documento
+        import json
+        doc_size = len(json.dumps(config_dict))
+        debug_log(f"Tamaño aproximado del documento: {doc_size} bytes (~{doc_size//1024}KB)")
+        
+        # Verificar que no exceda el límite de MongoDB (16MB)
+        if doc_size > 16 * 1024 * 1024:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"El documento es demasiado grande ({doc_size//1024//1024}MB). Límite de MongoDB: 16MB"
+            )
+        
         # Remover campos None vacíos para mantener la estructura limpia
-        # Pero mantener la estructura si el frontend envía valores None explícitos
+        # PERO mantener todos los campos con valores (incluyendo strings vacíos de base64)
         config_dict_clean = {}
         for key, value in config_dict.items():
             if value is not None:
                 config_dict_clean[key] = value
         
+        debug_log(f"Campos a guardar: {list(config_dict_clean.keys())}")
+        
         # Actualizar o crear la configuración (upsert garantiza que solo haya un documento)
-        home_config_collection.update_one(
+        result = home_config_collection.update_one(
             {},
             {"$set": config_dict_clean},
             upsert=True
         )
         
+        debug_log(f"Resultado update: matched={result.matched_count}, modified={result.modified_count}, upserted_id={result.upserted_id}")
+        
         # Obtener la configuración actualizada para retornar
         updated_config = home_config_collection.find_one({})
+        
         if updated_config and "_id" in updated_config:
             del updated_config["_id"]
+        
+        # Verificar que las imágenes se guardaron correctamente
+        log_image_info(updated_config or {}, "DESPUÉS: ")
         
         # Si no hay configuración, retornar estructura por defecto
         if not updated_config:
@@ -237,8 +324,20 @@ async def update_home_config(request: HomeConfigRequest):
             # Normalizar la configuración antes de retornarla
             updated_config = normalize_config(updated_config)
         
+        # Verificar que las imágenes base64 se mantuvieron
+        if updated_config.get("banner") and updated_config["banner"].get("url"):
+            banner_len = len(updated_config["banner"]["url"])
+            debug_log(f"Banner guardado correctamente: {banner_len} caracteres")
+        
+        debug_log("=== FIN ACTUALIZACIÓN CONFIG HOME ===")
+        
         return {"config": updated_config, "message": "Configuración guardada exitosamente"}
     
+    except HTTPException:
+        raise
     except Exception as e:
+        debug_log(f"ERROR al guardar configuración: {str(e)}")
+        import traceback
+        debug_log(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error al guardar configuración: {str(e)}")
 
