@@ -277,3 +277,60 @@ class InventarioExcelItem(BaseModel): # Keeping my new model
         # Permitir mapeo de nombres alternativos del Excel
         extra = "allow"
         populate_by_name = True
+
+# Modelos para configuración de Home Page
+class BannerConfig(BaseModel):
+    url: Optional[str] = None
+    alt: Optional[str] = None
+    active: bool = True
+
+class LogoConfig(BaseModel):
+    url: Optional[str] = None
+    alt: Optional[str] = None
+
+class ValueConfig(BaseModel):
+    title: str
+    description: str
+    icon: Optional[str] = None
+
+class ValuesConfig(BaseModel):
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    values: List[ValueConfig] = []
+
+class ProductItem(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    image: Optional[str] = None
+    price: Optional[float] = None
+    link: Optional[str] = None
+
+class ProductsConfig(BaseModel):
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    products: List[ProductItem] = []
+
+class ContactConfig(BaseModel):
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    social_media: Optional[Dict[str, str]] = None
+
+class ColorsConfig(BaseModel):
+    primary: Optional[str] = None
+    secondary: Optional[str] = None
+    accent: Optional[str] = None
+    background: Optional[str] = None
+    text: Optional[str] = None
+
+class HomeConfig(BaseModel):
+    banner: Optional[BannerConfig] = None
+    logo: Optional[LogoConfig] = None
+    values: Optional[ValuesConfig] = None
+    products: Optional[ProductsConfig] = None
+    contact: Optional[ContactConfig] = None
+    colors: Optional[ColorsConfig] = None
+
+class HomeConfigRequest(BaseModel):
+    config: HomeConfig
