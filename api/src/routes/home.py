@@ -15,11 +15,15 @@ def get_default_config():
         "banner": {
             "url": None,
             "alt": None,
-            "active": True
+            "active": True,
+            "width": "100%",
+            "height": "400px"
         },
         "logo": {
             "url": None,
-            "alt": None
+            "alt": None,
+            "width": "200px",
+            "height": "auto"
         },
         "values": {
             "title": None,
@@ -43,6 +47,35 @@ def get_default_config():
             "accent": None,
             "background": None,
             "text": None
+        },
+        "nosotros": {
+            "historia": None,
+            "mision": None,
+            "vision": None,
+            "enabled": True,
+            "titleFontSize": None,
+            "titleFontFamily": None,
+            "titleFontWeight": None,
+            "textFontSize": None,
+            "textFontFamily": None,
+            "textFontWeight": None
+        },
+        "servicios": {
+            "items": [],
+            "enabled": True,
+            "titleFontSize": None,
+            "titleFontFamily": None,
+            "titleFontWeight": None,
+            "textFontSize": None,
+            "textFontFamily": None,
+            "textFontWeight": None
+        },
+        "typography": {
+            "defaultFontFamily": None,
+            "defaultFontSize": None,
+            "headingFontFamily": None,
+            "headingFontSize": None,
+            "headingFontWeight": None
         }
     }
 
@@ -58,7 +91,7 @@ def normalize_config(config_doc):
     if "banner" not in config_doc or config_doc["banner"] is None or not isinstance(config_doc["banner"], dict):
         config_doc["banner"] = default["banner"].copy()
     else:
-        for key in ["url", "alt", "active"]:
+        for key in ["url", "alt", "active", "width", "height"]:
             if key not in config_doc["banner"]:
                 config_doc["banner"][key] = default["banner"][key]
     
@@ -66,7 +99,7 @@ def normalize_config(config_doc):
     if "logo" not in config_doc or config_doc["logo"] is None or not isinstance(config_doc["logo"], dict):
         config_doc["logo"] = default["logo"].copy()
     else:
-        for key in ["url", "alt"]:
+        for key in ["url", "alt", "width", "height"]:
             if key not in config_doc["logo"]:
                 config_doc["logo"][key] = default["logo"][key]
     
@@ -111,6 +144,33 @@ def normalize_config(config_doc):
         for key in ["primary", "secondary", "accent", "background", "text"]:
             if key not in config_doc["colors"]:
                 config_doc["colors"][key] = default["colors"][key]
+    
+    # Normalizar nosotros - SIEMPRE debe ser un objeto, nunca None
+    if "nosotros" not in config_doc or config_doc["nosotros"] is None or not isinstance(config_doc["nosotros"], dict):
+        config_doc["nosotros"] = default["nosotros"].copy()
+    else:
+        for key in ["historia", "mision", "vision", "enabled", "titleFontSize", "titleFontFamily", "titleFontWeight", "textFontSize", "textFontFamily", "textFontWeight"]:
+            if key not in config_doc["nosotros"]:
+                config_doc["nosotros"][key] = default["nosotros"][key]
+    
+    # Normalizar servicios - SIEMPRE debe ser un objeto, nunca None
+    if "servicios" not in config_doc or config_doc["servicios"] is None or not isinstance(config_doc["servicios"], dict):
+        config_doc["servicios"] = default["servicios"].copy()
+    else:
+        for key in ["enabled", "titleFontSize", "titleFontFamily", "titleFontWeight", "textFontSize", "textFontFamily", "textFontWeight"]:
+            if key not in config_doc["servicios"]:
+                config_doc["servicios"][key] = default["servicios"][key]
+        # Asegurar que el array items existe
+        if "items" not in config_doc["servicios"] or not isinstance(config_doc["servicios"].get("items"), list):
+            config_doc["servicios"]["items"] = []
+    
+    # Normalizar typography - SIEMPRE debe ser un objeto, nunca None
+    if "typography" not in config_doc or config_doc["typography"] is None or not isinstance(config_doc["typography"], dict):
+        config_doc["typography"] = default["typography"].copy()
+    else:
+        for key in ["defaultFontFamily", "defaultFontSize", "headingFontFamily", "headingFontSize", "headingFontWeight"]:
+            if key not in config_doc["typography"]:
+                config_doc["typography"][key] = default["typography"][key]
     
     return config_doc
 

@@ -283,10 +283,14 @@ class BannerConfig(BaseModel):
     url: Optional[str] = None
     alt: Optional[str] = None
     active: bool = True
+    width: Optional[str] = "100%"
+    height: Optional[str] = "400px"
 
 class LogoConfig(BaseModel):
     url: Optional[str] = None
     alt: Optional[str] = None
+    width: Optional[str] = "200px"
+    height: Optional[str] = "auto"
 
 class ValueConfig(BaseModel):
     title: str
@@ -324,6 +328,42 @@ class ColorsConfig(BaseModel):
     background: Optional[str] = None
     text: Optional[str] = None
 
+class ServicioItem(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    image: Optional[str] = None
+
+class NosotrosConfig(BaseModel):
+    historia: Optional[str] = None
+    mision: Optional[str] = None
+    vision: Optional[str] = None
+    enabled: bool = True
+    titleFontSize: Optional[str] = None
+    titleFontFamily: Optional[str] = None
+    titleFontWeight: Optional[str] = None
+    textFontSize: Optional[str] = None
+    textFontFamily: Optional[str] = None
+    textFontWeight: Optional[str] = None
+
+class ServiciosConfig(BaseModel):
+    items: List[ServicioItem] = []
+    enabled: bool = True
+    titleFontSize: Optional[str] = None
+    titleFontFamily: Optional[str] = None
+    titleFontWeight: Optional[str] = None
+    textFontSize: Optional[str] = None
+    textFontFamily: Optional[str] = None
+    textFontWeight: Optional[str] = None
+
+class TypographyConfig(BaseModel):
+    defaultFontFamily: Optional[str] = None
+    defaultFontSize: Optional[str] = None
+    headingFontFamily: Optional[str] = None
+    headingFontSize: Optional[str] = None
+    headingFontWeight: Optional[str] = None
+
 class HomeConfig(BaseModel):
     banner: Optional[BannerConfig] = None
     logo: Optional[LogoConfig] = None
@@ -331,6 +371,9 @@ class HomeConfig(BaseModel):
     products: Optional[ProductsConfig] = None
     contact: Optional[ContactConfig] = None
     colors: Optional[ColorsConfig] = None
+    nosotros: Optional[NosotrosConfig] = None
+    servicios: Optional[ServiciosConfig] = None
+    typography: Optional[TypographyConfig] = None
 
 class HomeConfigRequest(BaseModel):
     config: HomeConfig
