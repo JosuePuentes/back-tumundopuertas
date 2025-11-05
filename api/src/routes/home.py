@@ -208,8 +208,22 @@ async def get_home_config():
         if "_id" in config_doc:
             del config_doc["_id"]
         
+        # Log para verificar imágenes ANTES de normalizar
+        if config_doc.get("banner") and isinstance(config_doc["banner"], dict):
+            banner_url = config_doc["banner"].get("url", "")
+            if banner_url and len(banner_url) > 100:
+                debug_log(f"GET: Banner tiene imagen ANTES de normalizar: {len(banner_url)} caracteres")
+        
         # Normalizar la configuración para asegurar que todas las propiedades existan
         config_doc = normalize_config(config_doc)
+        
+        # Log para verificar imágenes DESPUÉS de normalizar
+        if config_doc.get("banner") and isinstance(config_doc["banner"], dict):
+            banner_url = config_doc["banner"].get("url", "")
+            if banner_url and len(banner_url) > 100:
+                debug_log(f"GET: ✅ Banner tiene imagen DESPUÉS de normalizar: {len(banner_url)} caracteres")
+            else:
+                debug_log(f"GET: ⚠️ Banner perdió imagen después de normalizar")
         
         return {"config": config_doc}
     
