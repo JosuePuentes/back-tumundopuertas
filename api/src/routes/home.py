@@ -208,22 +208,49 @@ async def get_home_config():
         if "_id" in config_doc:
             del config_doc["_id"]
         
-        # Log para verificar imágenes ANTES de normalizar
+        # Guardar valores originales de imágenes ANTES de normalizar (para restaurar si se pierden)
+        banner_url_raw = None
         if config_doc.get("banner") and isinstance(config_doc["banner"], dict):
-            banner_url = config_doc["banner"].get("url", "")
-            if banner_url and len(banner_url) > 100:
-                debug_log(f"GET: Banner tiene imagen ANTES de normalizar: {len(banner_url)} caracteres")
+            banner_url_raw = config_doc["banner"].get("url", "")
+            if banner_url_raw and len(banner_url_raw) > 100:
+                debug_log(f"GET: Banner tiene imagen ANTES de normalizar: {len(banner_url_raw)} caracteres")
+        
+        logo_url_raw = None
+        if config_doc.get("logo") and isinstance(config_doc["logo"], dict):
+            logo_url_raw = config_doc["logo"].get("url", "")
+            if logo_url_raw and len(logo_url_raw) > 100:
+                debug_log(f"GET: Logo tiene imagen ANTES de normalizar: {len(logo_url_raw)} caracteres")
         
         # Normalizar la configuración para asegurar que todas las propiedades existan
         config_doc = normalize_config(config_doc)
         
-        # Log para verificar imágenes DESPUÉS de normalizar
+        # Verificar y restaurar imágenes si se perdieron durante la normalización
         if config_doc.get("banner") and isinstance(config_doc["banner"], dict):
             banner_url = config_doc["banner"].get("url", "")
-            if banner_url and len(banner_url) > 100:
-                debug_log(f"GET: ✅ Banner tiene imagen DESPUÉS de normalizar: {len(banner_url)} caracteres")
+            banner_len = len(banner_url) if banner_url else 0
+            if banner_len > 100:
+                debug_log(f"GET: ✅ Banner tiene imagen DESPUÉS de normalizar: {banner_len} caracteres")
             else:
                 debug_log(f"GET: ⚠️ Banner perdió imagen después de normalizar")
+                # Restaurar desde el valor original
+                if banner_url_raw and len(banner_url_raw) > 100:
+                    debug_log(f"GET: 🔧 RESTAURANDO banner desde valor original de MongoDB")
+                    config_doc["banner"]["url"] = banner_url_raw
+        
+        if config_doc.get("logo") and isinstance(config_doc["logo"], dict):
+            logo_url = config_doc["logo"].get("url", "")
+            logo_len = len(logo_url) if logo_url else 0
+            if logo_len > 100:
+                debug_log(f"GET: ✅ Logo tiene imagen DESPUÉS de normalizar: {logo_len} caracteres")
+            else:
+                debug_log(f"GET: ⚠️ Logo perdió imagen después de normalizar")
+                # Restaurar desde el valor original
+                if logo_url_raw and len(logo_url_raw) > 100:
+                    debug_log(f"GET: 🔧 RESTAURANDO logo desde valor original de MongoDB")
+                    config_doc["logo"]["url"] = logo_url_raw
+        
+        # Verificación final de imágenes en la respuesta
+        log_image_info(config_doc, "GET RESPUESTA FINAL: ")
         
         return {"config": config_doc}
     
@@ -394,43 +421,94 @@ async def update_home_config(request: HomeConfigRequest):
         debug_log(f"Resultado update: matched={result.matched_count}, modified={result.modified_count}, upserted_id={result.upserted_id}")
         
         # Obtener la configuración actualizada para retornar
+        # IMPORTANTE: No usar proyección, obtener TODO el documento incluyendo imágenes base64
         updated_config = home_config_collection.find_one({})
         
-        if updated_config and "_id" in updated_config:
-            del updated_config["_id"]
+        if not updated_config:
+            # Si por alguna razón no se encontró, usar el config_dict_clean que acabamos de guardar
+            debug_log("⚠️ No se encontró documento después de guardar, usando config_dict_clean")
+            updated_config = config_dict_clean
+        else:
+            # Remover _id de MongoDB
+            if "_id" in updated_config:
+                del updated_config["_id"]
         
-        # Verificar que las imágenes se guardaron correctamente
-        log_image_info(updated_config or {}, "DESPUÉS: ")
+        # Verificar que las imágenes se guardaron correctamente EN MongoDB (antes de normalizar)
+        log_image_info(updated_config or {}, "DESPUÉS DE GUARDAR (ANTES NORMALIZAR): ")
+        
+        # Verificar explícitamente que las imágenes estén en el documento desde MongoDB
+        banner_url_raw = None
+        if updated_config.get("banner") and isinstance(updated_config["banner"], dict):
+            banner_url_raw = updated_config["banner"].get("url", "")
+            if banner_url_raw and len(banner_url_raw) > 100:
+                debug_log(f"✅ VERIFICACIÓN: Banner en MongoDB tiene imagen: {len(banner_url_raw)} caracteres")
+            else:
+                debug_log(f"⚠️ VERIFICACIÓN: Banner en MongoDB NO tiene imagen o es muy corta: {len(banner_url_raw) if banner_url_raw else 0} caracteres")
+        
+        logo_url_raw = None
+        if updated_config.get("logo") and isinstance(updated_config["logo"], dict):
+            logo_url_raw = updated_config["logo"].get("url", "")
+            if logo_url_raw and len(logo_url_raw) > 100:
+                debug_log(f"✅ VERIFICACIÓN: Logo en MongoDB tiene imagen: {len(logo_url_raw)} caracteres")
+            else:
+                debug_log(f"⚠️ VERIFICACIÓN: Logo en MongoDB NO tiene imagen o es muy corta: {len(logo_url_raw) if logo_url_raw else 0} caracteres")
         
         # Si no hay configuración, retornar estructura por defecto
         if not updated_config:
             updated_config = get_default_config()
         else:
             # Normalizar la configuración antes de retornarla
+            # IMPORTANTE: normalize_config solo agrega campos faltantes, NO debería eliminar imágenes
             updated_config = normalize_config(updated_config)
         
         # Verificar que las imágenes base64 se mantuvieron después de normalizar
-        if updated_config.get("banner") and updated_config["banner"].get("url"):
-            banner_len = len(updated_config["banner"]["url"])
+        if updated_config.get("banner") and isinstance(updated_config["banner"], dict):
+            banner_url = updated_config["banner"].get("url", "")
+            banner_len = len(banner_url) if banner_url else 0
             debug_log(f"Banner después de normalizar: {banner_len} caracteres")
             if banner_len > 100:
-                debug_log(f"✅ Banner tiene imagen base64 guardada")
+                debug_log(f"✅ Banner tiene imagen base64 después de normalizar")
             else:
-                debug_log(f"⚠️ Banner URL es muy corta, posiblemente no tiene imagen")
+                debug_log(f"⚠️ Banner URL es muy corta después de normalizar (posible pérdida de imagen)")
+                # Si se perdió la imagen, restaurarla desde el valor original
+                if banner_url_raw and len(banner_url_raw) > 100:
+                    debug_log(f"🔧 RESTAURANDO banner desde valor original de MongoDB")
+                    updated_config["banner"]["url"] = banner_url_raw
         
-        if updated_config.get("logo") and updated_config["logo"].get("url"):
-            logo_len = len(updated_config["logo"]["url"])
+        if updated_config.get("logo") and isinstance(updated_config["logo"], dict):
+            logo_url = updated_config["logo"].get("url", "")
+            logo_len = len(logo_url) if logo_url else 0
             debug_log(f"Logo después de normalizar: {logo_len} caracteres")
             if logo_len > 100:
-                debug_log(f"✅ Logo tiene imagen base64 guardada")
+                debug_log(f"✅ Logo tiene imagen base64 después de normalizar")
+            else:
+                debug_log(f"⚠️ Logo URL es muy corta después de normalizar (posible pérdida de imagen)")
+                # Si se perdió la imagen, restaurarla desde el valor original
+                if logo_url_raw and len(logo_url_raw) > 100:
+                    debug_log(f"🔧 RESTAURANDO logo desde valor original de MongoDB")
+                    updated_config["logo"]["url"] = logo_url_raw
         
         if updated_config.get("products") and isinstance(updated_config["products"], dict):
             products = updated_config["products"].get("products", [])
             products_con_imagen = sum(1 for p in products if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
-            debug_log(f"Productos con imágenes base64: {products_con_imagen} de {len(products)}")
+            debug_log(f"Productos con imágenes base64 después de normalizar: {products_con_imagen} de {len(products)}")
+        
+        # Verificación FINAL antes de retornar: asegurar que las imágenes estén en la respuesta
+        log_image_info(updated_config, "RESPUESTA FINAL (ANTES DE RETORNAR): ")
+        
+        # Calcular tamaño de la respuesta
+        try:
+            import json
+            response_size = len(json.dumps(updated_config))
+            debug_log(f"Tamaño de la respuesta: {response_size} bytes (~{response_size//1024}KB)")
+            if response_size > 10 * 1024 * 1024:  # 10MB
+                debug_log(f"⚠️ ADVERTENCIA: Respuesta muy grande ({response_size//1024//1024}MB), podría haber problemas de serialización")
+        except Exception as e:
+            debug_log(f"Error al calcular tamaño de respuesta: {str(e)}")
         
         debug_log("=== FIN ACTUALIZACIÓN CONFIG HOME ===")
         
+        # Retornar la configuración completa con todas las imágenes
         return {"config": updated_config, "message": "Configuración guardada exitosamente"}
     
     except HTTPException:
