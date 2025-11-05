@@ -401,10 +401,21 @@ async def update_home_config(request: HomeConfigRequest):
         existing_doc = home_config_collection.find_one({})
         
         # Procesar campos preservando objetos anidados completos
-        # ESTRATEGIA MEJORADA: Si hay imágenes nuevas, usar el objeto completo del frontend
-        # y hacer merge solo de campos que no son imágenes del documento existente
+        # ESTRATEGIA CRÍTICA: Para products, si hay imágenes, usar directamente el objeto del frontend SIN merge
         config_dict_clean = {}
+        
+        # CRÍTICO: Si hay productos con imágenes, procesar products PRIMERO y usar directamente el valor del frontend
+        if products_with_images and config_dict.get("products"):
+            debug_log(f"🔧 CRÍTICO: products_with_images detectado ({len(products_with_images)} productos), usando products del frontend DIRECTAMENTE")
+            config_dict_clean["products"] = config_dict["products"].copy()
+            debug_log(f"✅ Productos del frontend copiados directamente: {len(config_dict_clean['products'].get('products', []))} items")
+        
         for key, value in config_dict.items():
+            # CRÍTICO: Si products ya fue procesado arriba, saltarlo aquí
+            if key == "products" and products_with_images and key in config_dict_clean:
+                debug_log(f"⏭️ Saltando procesamiento de products (ya procesado directamente)")
+                continue
+                
             if value is not None:
                 # Si es un diccionario (objeto anidado), hacer merge con lo existente
                 if isinstance(value, dict):
