@@ -40,26 +40,12 @@ async def update_home_config(request: HomeConfigRequest):
         # Convertir el modelo a diccionario
         config_dict = request.config.dict(exclude_unset=True, exclude_none=True)
         
-        # Buscar si ya existe una configuración
-        existing_config = home_config_collection.find_one({})
-        
-        if existing_config:
-            # Actualizar la configuración existente
-            result = home_config_collection.update_one(
-                {},
-                {"$set": config_dict},
-                upsert=False
-            )
-            
-            if result.modified_count == 0:
-                # Si no se modificó nada, intentar actualizar de todas formas
-                home_config_collection.update_one(
-                    {},
-                    {"$set": config_dict}
-                )
-        else:
-            # Crear nueva configuración
-            home_config_collection.insert_one(config_dict)
+        # Actualizar o crear la configuración (upsert garantiza que solo haya un documento)
+        home_config_collection.update_one(
+            {},
+            {"$set": config_dict},
+            upsert=True
+        )
         
         # Obtener la configuración actualizada para retornar
         updated_config = home_config_collection.find_one({})
