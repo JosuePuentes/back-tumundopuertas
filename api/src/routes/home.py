@@ -436,8 +436,17 @@ async def update_home_config(request: HomeConfigRequest):
                         # Hacer merge solo de campos que NO son imágenes del documento existente
                         if existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
                             for existing_key, existing_value in existing_doc[key].items():
-                                # Solo agregar campos que no son imágenes y que no están en el objeto del frontend
-                                if existing_key not in ["url", "image"] and existing_key not in merged_value:
+                                # Para arrays como products.products o servicios.items, NO hacer merge, usar el del frontend
+                                if existing_key in ["products", "items"] and isinstance(existing_value, list):
+                                    # Si el frontend tiene este array, usar el del frontend (ya tiene las imágenes)
+                                    if existing_key in merged_value and isinstance(merged_value[existing_key], list):
+                                        debug_log(f"  Preservando array {existing_key} del frontend (contiene imágenes)")
+                                        # Ya está en merged_value, no hacer nada
+                                    else:
+                                        # Si el frontend no tiene este array, usar el existente
+                                        merged_value[existing_key] = existing_value
+                                # Solo agregar campos que no son imágenes/arrays y que no están en el objeto del frontend
+                                elif existing_key not in ["url", "image"] and existing_key not in merged_value:
                                     merged_value[existing_key] = existing_value
                                     debug_log(f"  Agregando campo {existing_key} desde documento existente")
                         config_dict_clean[key] = merged_value
@@ -449,8 +458,14 @@ async def update_home_config(request: HomeConfigRequest):
                         # Actualizar solo con valores válidos (no None, no string vacío para imágenes)
                         for sub_key, sub_value in value.items():
                             if sub_value is not None:
+                                # CRÍTICO: Para arrays como products.products, usar el del frontend si existe
+                                # Esto asegura que las imágenes de productos se preserven
+                                if sub_key in ["products", "items"] and isinstance(sub_value, list):
+                                    # Usar el array del frontend (puede tener imágenes actualizadas)
+                                    merged_value[sub_key] = sub_value
+                                    debug_log(f"✅ Actualizando array {sub_key} desde frontend (preservando imágenes)")
                                 # Para campos de imagen (url en banner/logo, image en productos)
-                                if sub_key in ["url", "image"]:
+                                elif sub_key in ["url", "image"]:
                                     # Si es una imagen base64 (más de 100 caracteres), actualizar
                                     if isinstance(sub_value, str):
                                         if len(sub_value) > 100:
