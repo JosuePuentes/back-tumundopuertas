@@ -573,25 +573,56 @@ async def update_home_config(request: HomeConfigRequest):
             else:
                 debug_log(f"✅ VERIFICACIÓN PRE-GUARDADO: Logo está en config_dict_clean: {len(config_dict_clean['logo']['url'])} caracteres")
         
-        # Verificar imágenes de productos
+        # Verificar imágenes de productos - CRÍTICO: Asegurar que se preserven
         if products_with_images:
+            debug_log(f"🔍 VERIFICACIÓN: Se detectaron {len(products_with_images)} productos con imágenes en el frontend")
             products_in_clean = False
+            products_with_images_count = 0
+            
             if config_dict_clean.get("products") and isinstance(config_dict_clean["products"], dict):
                 clean_products = config_dict_clean["products"].get("products", [])
                 if isinstance(clean_products, list):
                     products_with_images_count = sum(1 for p in clean_products if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
-                    if products_with_images_count > 0:
+                    if products_with_images_count >= len(products_with_images):
                         products_in_clean = True
                         debug_log(f"✅ VERIFICACIÓN PRE-GUARDADO: {products_with_images_count} productos con imágenes en config_dict_clean")
+                    else:
+                        debug_log(f"⚠️ VERIFICACIÓN PRE-GUARDADO: Solo {products_with_images_count} de {len(products_with_images)} productos tienen imágenes en config_dict_clean")
             
-            if not products_in_clean:
-                debug_log(f"❌ ERROR CRÍTICO PRE-GUARDADO: Productos con imágenes NO están en config_dict_clean antes de guardar")
-                # Restaurar desde config_dict
+            # CRÍTICO: Si no hay suficientes productos con imágenes, restaurar desde config_dict
+            if not products_in_clean or products_with_images_count < len(products_with_images):
+                debug_log(f"❌ ERROR CRÍTICO PRE-GUARDADO: Productos con imágenes NO están correctamente en config_dict_clean")
+                debug_log(f"🔧 RESTAURANDO: Productos completos desde config_dict original (tiene {len(products_with_images)} productos con imágenes)")
+                # Restaurar desde config_dict - FORZAR el array completo
                 if config_dict.get("products") and isinstance(config_dict["products"], dict):
                     if not config_dict_clean.get("products"):
                         config_dict_clean["products"] = {}
+                    # CRÍTICO: Usar el array completo del frontend que sabemos que tiene las imágenes
                     config_dict_clean["products"]["products"] = config_dict["products"].get("products", [])
-                    debug_log(f"🔧 RESTAURADO: Productos desde config_dict original")
+                    # Preservar title y subtitle si existen
+                    if "title" not in config_dict_clean["products"] and config_dict["products"].get("title"):
+                        config_dict_clean["products"]["title"] = config_dict["products"]["title"]
+                    if "subtitle" not in config_dict_clean["products"] and config_dict["products"].get("subtitle"):
+                        config_dict_clean["products"]["subtitle"] = config_dict["products"]["subtitle"]
+                    
+                    # Verificar que se restauró correctamente
+                    restored_products = config_dict_clean["products"].get("products", [])
+                    restored_count = sum(1 for p in restored_products if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+                    debug_log(f"✅ RESTAURADO: {restored_count} productos con imágenes ahora en config_dict_clean")
+        
+        # VERIFICACIÓN FINAL ABSOLUTA: Antes de guardar, asegurar que productos con imágenes estén presentes
+        if products_with_images:
+            final_products = config_dict_clean.get("products") and config_dict_clean["products"].get("products", [])
+            if isinstance(final_products, list):
+                final_count = sum(1 for p in final_products if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+                if final_count < len(products_with_images):
+                    debug_log(f"❌ CRÍTICO FINAL: Solo {final_count} de {len(products_with_images)} productos tienen imágenes antes de guardar")
+                    debug_log(f"🔧 FORZANDO: Restaurar array completo de productos desde config_dict")
+                    if config_dict.get("products") and isinstance(config_dict["products"], dict):
+                        if not config_dict_clean.get("products"):
+                            config_dict_clean["products"] = {}
+                        config_dict_clean["products"]["products"] = config_dict["products"].get("products", [])
+                        debug_log(f"✅ FORZADO: Array de productos restaurado desde config_dict")
         
         # Actualizar o crear la configuración (upsert garantiza que solo haya un documento)
         # CRÍTICO: Usar $set para actualizar campos específicos, preservando otros campos existentes
