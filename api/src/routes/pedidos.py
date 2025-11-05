@@ -161,6 +161,8 @@ async def get_all_pedidos():
     query = excluir_pedidos_web(query)
     # Excluir pedidos de TU MUNDO PUERTA (RIF: J-507172554)
     query = excluir_pedidos_tu_mundo_puerta(query)
+    # Excluir todos los pedidos cancelados
+    query["estado_general"] = {"$ne": "cancelado"}
     
     pedidos = list(pedidos_collection.find(query))
     for pedido in pedidos:
@@ -4725,6 +4727,8 @@ async def obtener_pagos(
     filtro = excluir_pedidos_web(filtro)
     # Excluir pedidos de TU MUNDO PUERTA (RIF: J-507172554)
     filtro = excluir_pedidos_tu_mundo_puerta(filtro)
+    # Excluir todos los pedidos cancelados
+    filtro["estado_general"] = {"$ne": "cancelado"}
 
     # Buscar pedidos internos solamente
     pedidos = list(
