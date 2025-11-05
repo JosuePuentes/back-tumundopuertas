@@ -25,6 +25,7 @@ preferencias_clientes_collection = db["preferencias_clientes"]
 soporte_reclamos_clientes_collection = db["soporte_reclamos_clientes"]
 facturas_cliente_collection = db["facturas_cliente"]
 home_config_collection = db["HOME_CONFIG"]
+movimientos_logisticos_collection = db["MOVIMIENTOS_LOGISTICOS"]  # Para panel de control logístico
 
 def init_pedidos_indexes():
     """

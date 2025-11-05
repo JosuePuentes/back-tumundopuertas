@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Body, Depends, Query
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 import os
-from ..config.mongodb import pedidos_collection, db, items_collection, clientes_collection, clientes_usuarios_collection, facturas_cliente_collection
+from ..config.mongodb import pedidos_collection, db, items_collection, clientes_collection, clientes_usuarios_collection, facturas_cliente_collection, movimientos_logisticos_collection
 transacciones_collection = db["transacciones"]
 from ..models.authmodels import Pedido
 from ..auth.auth import get_current_user, get_current_cliente
@@ -415,6 +415,28 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
         )
     except Exception as e:
         print(f"ERROR CREAR PEDIDO - asignaciones herreria: {e}")
+    
+    # Registrar movimientos logísticos para items que van a producción (estado_item = 0)
+    for idx, item in enumerate(pedido.items):
+        estado_item = getattr(item, 'estado_item', None) if hasattr(item, 'estado_item') else (item.get('estado_item') if isinstance(item, dict) else None)
+        codigo = getattr(item, 'codigo', None) if hasattr(item, 'codigo') else (item.get('codigo') if isinstance(item, dict) else None)
+        cantidad = getattr(item, 'cantidad', None) if hasattr(item, 'cantidad') else (item.get('cantidad') if isinstance(item, dict) else None)
+        item_id = getattr(item, 'id', None) if hasattr(item, 'id') else (item.get('id') if isinstance(item, dict) else None)
+        nombre = getattr(item, 'nombre', None) if hasattr(item, 'nombre') else (item.get('nombre') if isinstance(item, dict) else None)
+        
+        # Registrar movimiento para items que van a producción
+        if estado_item == 0 and cantidad and cantidad > 0 and codigo:
+            try:
+                registrar_movimiento_logistico(
+                    item_id=str(item_id) if item_id else str(codigo),
+                    item_codigo=str(codigo),
+                    item_nombre=nombre or codigo,
+                    tipo_movimiento="crear_pedido",
+                    cantidad=float(cantidad),
+                    pedido_id=pedido_id
+                )
+            except Exception as e:
+                debug_log(f"ERROR REGISTRAR MOVIMIENTO CREAR PEDIDO: {e}")
     
     # Restar cantidades del inventario SOLO para items con estado_item = 4 (disponibles)
     # Los items con estado_item = 0 (faltantes) NO se restan del inventario, van a producción
@@ -3500,6 +3522,34 @@ async def terminar_asignacion_articulo(
             raise HTTPException(status_code=404, detail="Pedido no encontrado al actualizar")
             
         print(f"DEBUG TERMINAR: Asignación terminada, campos del item limpiados y estado_item actualizado a {nuevo_estado_item}")
+        
+        # Registrar movimiento logístico
+        try:
+            item_pedido = None
+            for it in pedido.get("items", []):
+                if it.get("id") == item_id:
+                    item_pedido = it
+                    break
+            
+            if item_pedido:
+                codigo_item = item_pedido.get("codigo", "")
+                nombre_item = item_pedido.get("nombre", "") or item_pedido.get("descripcion", "") or codigo_item
+                cantidad_item = item_pedido.get("cantidad", 1)
+                estado_anterior_item = item.get("estado_item", 0) if item else 0
+                
+                registrar_movimiento_logistico(
+                    item_id=item_id,
+                    item_codigo=str(codigo_item) if codigo_item else item_id,
+                    item_nombre=nombre_item,
+                    tipo_movimiento="terminar_asignacion",
+                    cantidad=float(cantidad_item),
+                    pedido_id=pedido_id,
+                    estado_anterior=str(estado_anterior_item),
+                    estado_nuevo=str(nuevo_estado_item),
+                    empleado_id=empleado_id
+                )
+        except Exception as e:
+            print(f"ERROR REGISTRAR MOVIMIENTO TERMINAR: {e}")
         
         # REGISTRAR COMISIÓN EN EL PEDIDO
         print(f"DEBUG TERMINAR: === INICIANDO REGISTRO DE COMISIÓN ===")
@@ -7420,3 +7470,646 @@ async def get_pedidos_cliente(cliente_id: str, cliente: dict = Depends(get_curre
         import traceback
         print(f"ERROR GET PEDIDOS CLIENTE TRACEBACK: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error al obtener pedidos: {str(e)}")
+
+# ============================================================================
+# PANEL DE CONTROL LOGÍSTICO
+# ============================================================================
+
+def registrar_movimiento_logistico(
+    item_id: str,
+    item_codigo: str,
+    item_nombre: str,
+    tipo_movimiento: str,  # "crear_pedido", "terminar_asignacion", "facturar", "cancelar"
+    cantidad: float,
+    pedido_id: Optional[str] = None,
+    estado_anterior: Optional[str] = None,
+    estado_nuevo: Optional[str] = None,
+    empleado_id: Optional[str] = None
+):
+    """
+    Registra un movimiento de unidades en el sistema logístico
+    """
+    try:
+        movimiento = {
+            "item_id": item_id,
+            "item_codigo": item_codigo,
+            "item_nombre": item_nombre,
+            "tipo_movimiento": tipo_movimiento,
+            "cantidad": cantidad,
+            "fecha": datetime.now().isoformat(),
+            "timestamp": datetime.now().timestamp(),
+            "pedido_id": pedido_id,
+            "estado_anterior": estado_anterior,
+            "estado_nuevo": estado_nuevo,
+            "empleado_id": empleado_id
+        }
+        movimientos_logisticos_collection.insert_one(movimiento)
+    except Exception as e:
+        print(f"ERROR REGISTRAR MOVIMIENTO: Error registrando movimiento: {e}")
+        # No lanzar error, solo loggear para no interrumpir el flujo principal
+
+@router.get("/panel-control-logistico/resumen/")
+async def get_resumen_panel_control_logistico():
+    """
+    Resumen general del panel de control logístico con totales
+    """
+    try:
+        # Items en producción (estado_item < 4)
+        items_produccion = pedidos_collection.aggregate([
+            {"$unwind": "$items"},
+            {"$match": {"items.estado_item": {"$lt": 4}}},
+            {"$group": {
+                "_id": "$items.codigo",
+                "cantidad": {"$sum": "$items.cantidad"},
+                "item_nombre": {"$first": "$items.nombre"},
+                "item_descripcion": {"$first": "$items.descripcion"}
+            }}
+        ])
+        
+        total_items_produccion = sum(item["cantidad"] for item in items_produccion)
+        
+        # Items vendidos (estado_item >= 4 en pedidos facturados o completados)
+        items_vendidos = pedidos_collection.aggregate([
+            {"$unwind": "$items"},
+            {"$match": {
+                "items.estado_item": {"$gte": 4},
+                "estado_general": {"$in": ["orden4", "orden5", "orden6"]}
+            }},
+            {"$group": {
+                "_id": "$items.codigo",
+                "cantidad": {"$sum": "$items.cantidad"}
+            }}
+        ])
+        
+        total_items_vendidos = sum(item["cantidad"] for item in items_vendidos)
+        
+        # Items en inventario
+        total_items_inventario = items_collection.count_documents({"activo": True})
+        
+        # Items con existencia en 0
+        items_existencia_cero = items_collection.count_documents({
+            "$or": [
+                {"cantidad": 0},
+                {"cantidad": {"$exists": False}},
+                {"existencia": 0},
+                {"existencia": {"$exists": False}}
+            ],
+            "activo": True
+        })
+        
+        # Movimientos en últimos 7 días
+        fecha_7_dias = (datetime.now() - timedelta(days=7)).isoformat()
+        movimientos_7_dias = movimientos_logisticos_collection.count_documents({
+            "fecha": {"$gte": fecha_7_dias}
+        })
+        
+        return {
+            "total_items_produccion": total_items_produccion,
+            "total_items_vendidos": total_items_vendidos,
+            "total_items_inventario": total_items_inventario,
+            "items_existencia_cero": items_existencia_cero,
+            "movimientos_7_dias": movimientos_7_dias,
+            "fecha_actualizacion": datetime.now().isoformat()
+        }
+    except Exception as e:
+        print(f"ERROR RESUMEN PANEL: {e}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener resumen: {str(e)}")
+
+@router.get("/panel-control-logistico/items-produccion/")
+async def get_items_produccion():
+    """
+    Items en producción con detalles
+    """
+    try:
+        items_produccion = list(pedidos_collection.aggregate([
+            {"$unwind": "$items"},
+            {"$match": {"items.estado_item": {"$lt": 4}}},
+            {"$group": {
+                "_id": "$items.codigo",
+                "item_id": {"$first": "$items.id"},
+                "cantidad": {"$sum": "$items.cantidad"},
+                "item_nombre": {"$first": "$items.nombre"},
+                "item_descripcion": {"$first": "$items.descripcion"},
+                "estado_item": {"$first": "$items.estado_item"},
+                "pedidos": {"$push": {
+                    "pedido_id": {"$toString": "$_id"},
+                    "cantidad": "$items.cantidad",
+                    "estado_general": "$estado_general"
+                }}
+            }},
+            {"$sort": {"cantidad": -1}}
+        ]))
+        
+        # Enriquecer con datos del inventario
+        for item in items_produccion:
+            codigo = item.get("_id")
+            if codigo:
+                item_inventario = items_collection.find_one({"codigo": codigo})
+                if item_inventario:
+                    item["existencia_inventario"] = item_inventario.get("cantidad", 0)
+                    item["existencia_sucursal2"] = item_inventario.get("existencia2", 0)
+                    item["precio"] = item_inventario.get("precio", 0)
+                    item["costo"] = item_inventario.get("costo", 0)
+                else:
+                    item["existencia_inventario"] = 0
+                    item["existencia_sucursal2"] = 0
+        
+        return items_produccion
+    except Exception as e:
+        print(f"ERROR ITEMS PRODUCCION: {e}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener items en producción: {str(e)}")
+
+@router.get("/panel-control-logistico/movimientos-unidades/")
+async def get_movimientos_unidades(
+    item_id: Optional[str] = Query(None),
+    item_codigo: Optional[str] = Query(None),
+    fecha_inicio: Optional[str] = Query(None),
+    fecha_fin: Optional[str] = Query(None)
+):
+    """
+    Movimientos de unidades por item
+    """
+    try:
+        query = {}
+        
+        if item_id:
+            query["item_id"] = item_id
+        if item_codigo:
+            query["item_codigo"] = item_codigo
+        if fecha_inicio:
+            query["fecha"] = {"$gte": fecha_inicio}
+        if fecha_fin:
+            if "fecha" in query:
+                query["fecha"]["$lte"] = fecha_fin
+            else:
+                query["fecha"] = {"$lte": fecha_fin}
+        
+        movimientos = list(movimientos_logisticos_collection.find(query).sort("fecha", -1).limit(1000))
+        
+        # Convertir ObjectId a string
+        for movimiento in movimientos:
+            movimiento["_id"] = str(movimiento["_id"])
+        
+        return {
+            "movimientos": movimientos,
+            "total": len(movimientos)
+        }
+    except Exception as e:
+        print(f"ERROR MOVIMIENTOS: {e}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener movimientos: {str(e)}")
+
+@router.get("/panel-control-logistico/items-sin-movimiento/")
+async def get_items_sin_movimiento():
+    """
+    Items sin movimiento en los últimos 7 días
+    """
+    try:
+        fecha_7_dias = (datetime.now() - timedelta(days=7)).isoformat()
+        
+        # Obtener items que han tenido movimientos en los últimos 7 días
+        items_con_movimiento = movimientos_logisticos_collection.distinct("item_codigo", {
+            "fecha": {"$gte": fecha_7_dias}
+        })
+        
+        # Obtener todos los items activos
+        todos_items = list(items_collection.find({"activo": True}, {"codigo": 1, "nombre": 1, "descripcion": 1, "cantidad": 1, "existencia": 1, "existencia2": 1}))
+        
+        # Filtrar items sin movimiento
+        items_sin_movimiento = []
+        for item in todos_items:
+            codigo = item.get("codigo")
+            if codigo and codigo not in items_con_movimiento:
+                # Calcular existencia real (inventario - producción - vendidas)
+                existencia = item.get("cantidad", 0) or item.get("existencia", 0)
+                existencia2 = item.get("existencia2", 0)
+                
+                # Calcular en producción
+                items_produccion = list(pedidos_collection.aggregate([
+                    {"$unwind": "$items"},
+                    {"$match": {
+                        "items.codigo": codigo,
+                        "items.estado_item": {"$lt": 4}
+                    }},
+                    {"$group": {
+                        "_id": None,
+                        "cantidad": {"$sum": "$items.cantidad"}
+                    }}
+                ]))
+                cantidad_produccion = items_produccion[0]["cantidad"] if items_produccion else 0
+                
+                # Calcular vendidas
+                items_vendidas = list(pedidos_collection.aggregate([
+                    {"$unwind": "$items"},
+                    {"$match": {
+                        "items.codigo": codigo,
+                        "items.estado_item": {"$gte": 4},
+                        "estado_general": {"$in": ["orden4", "orden5", "orden6"]}
+                    }},
+                    {"$group": {
+                        "_id": None,
+                        "cantidad": {"$sum": "$items.cantidad"}
+                    }}
+                ]))
+                cantidad_vendidas = items_vendidas[0]["cantidad"] if items_vendidas else 0
+                
+                existencia_real = existencia - cantidad_produccion - cantidad_vendidas
+                
+                items_sin_movimiento.append({
+                    "item_id": str(item["_id"]),
+                    "codigo": codigo,
+                    "nombre": item.get("nombre", ""),
+                    "descripcion": item.get("descripcion", ""),
+                    "existencia": existencia,
+                    "existencia2": existencia2,
+                    "existencia_real": existencia_real,
+                    "categoria": "sin_movimiento"
+                })
+        
+        return {
+            "items": items_sin_movimiento,
+            "total": len(items_sin_movimiento)
+        }
+    except Exception as e:
+        print(f"ERROR ITEMS SIN MOVIMIENTO: {e}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener items sin movimiento: {str(e)}")
+
+@router.get("/panel-control-logistico/items-mas-movidos/")
+async def get_items_mas_movidos():
+    """
+    Items más movidos en los últimos 7 días
+    """
+    try:
+        fecha_7_dias = (datetime.now() - timedelta(days=7)).isoformat()
+        
+        # Agrupar movimientos por item
+        items_movidos = list(movimientos_logisticos_collection.aggregate([
+            {"$match": {"fecha": {"$gte": fecha_7_dias}}},
+            {"$group": {
+                "_id": "$item_codigo",
+                "item_id": {"$first": "$item_id"},
+                "item_nombre": {"$first": "$item_nombre"},
+                "total_movimientos": {"$sum": 1},
+                "cantidad_total": {"$sum": "$cantidad"},
+                "tipos_movimiento": {"$push": "$tipo_movimiento"},
+                "ultimo_movimiento": {"$max": "$fecha"}
+            }},
+            {"$sort": {"total_movimientos": -1}},
+            {"$limit": 50}
+        ]))
+        
+        # Enriquecer con datos del inventario
+        for item in items_movidos:
+            codigo = item.get("_id")
+            if codigo:
+                item_inventario = items_collection.find_one({"codigo": codigo})
+                if item_inventario:
+                    item["existencia_inventario"] = item_inventario.get("cantidad", 0)
+                    item["precio"] = item_inventario.get("precio", 0)
+        
+        return {
+            "items": items_movidos,
+            "total": len(items_movidos)
+        }
+    except Exception as e:
+        print(f"ERROR ITEMS MAS MOVIDOS: {e}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener items más movidos: {str(e)}")
+
+@router.get("/panel-control-logistico/items-existencia-cero/")
+async def get_items_existencia_cero():
+    """
+    Items con existencia en 0
+    """
+    try:
+        items_cero = list(items_collection.find({
+            "$or": [
+                {"cantidad": 0},
+                {"cantidad": {"$exists": False}},
+                {"existencia": 0},
+                {"existencia": {"$exists": False}}
+            ],
+            "activo": True
+        }, {
+            "codigo": 1,
+            "nombre": 1,
+            "descripcion": 1,
+            "cantidad": 1,
+            "existencia": 1,
+            "existencia2": 1,
+            "precio": 1,
+            "costo": 1,
+            "categoria": 1
+        }))
+        
+        # Enriquecer con datos de producción y ventas
+        for item in items_cero:
+            codigo = item.get("codigo")
+            if codigo:
+                # Calcular en producción
+                items_produccion = list(pedidos_collection.aggregate([
+                    {"$unwind": "$items"},
+                    {"$match": {
+                        "items.codigo": codigo,
+                        "items.estado_item": {"$lt": 4}
+                    }},
+                    {"$group": {
+                        "_id": None,
+                        "cantidad": {"$sum": "$items.cantidad"}
+                    }}
+                ]))
+                item["en_produccion"] = items_produccion[0]["cantidad"] if items_produccion else 0
+                
+                # Calcular vendidas en últimos 30 días
+                fecha_30_dias = (datetime.now() - timedelta(days=30)).isoformat()
+                items_vendidas = list(pedidos_collection.aggregate([
+                    {"$unwind": "$items"},
+                    {"$match": {
+                        "items.codigo": codigo,
+                        "items.estado_item": {"$gte": 4},
+                        "estado_general": {"$in": ["orden4", "orden5", "orden6"]},
+                        "fecha_creacion": {"$gte": fecha_30_dias}
+                    }},
+                    {"$group": {
+                        "_id": None,
+                        "cantidad": {"$sum": "$items.cantidad"}
+                    }}
+                ]))
+                item["vendidas_30_dias"] = items_vendidas[0]["cantidad"] if items_vendidas else 0
+                
+                item["_id"] = str(item["_id"])
+        
+        return {
+            "items": items_cero,
+            "total": len(items_cero)
+        }
+    except Exception as e:
+        print(f"ERROR ITEMS EXISTENCIA CERO: {e}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener items con existencia cero: {str(e)}")
+
+@router.get("/panel-control-logistico/sugerencia-produccion/")
+async def get_sugerencia_produccion():
+    """
+    Sugerencias de producción con prioridades
+    """
+    try:
+        sugerencias = []
+        
+        # Obtener items con existencia baja o en producción
+        todos_items = list(items_collection.find({"activo": True}, {
+            "codigo": 1,
+            "nombre": 1,
+            "descripcion": 1,
+            "cantidad": 1,
+            "existencia": 1,
+            "existencia2": 1,
+            "precio": 1,
+            "costo": 1
+        }))
+        
+        for item in todos_items:
+            codigo = item.get("codigo")
+            if not codigo:
+                continue
+            
+            existencia = item.get("cantidad", 0) or item.get("existencia", 0)
+            
+            # Calcular en producción
+            items_produccion = list(pedidos_collection.aggregate([
+                {"$unwind": "$items"},
+                {"$match": {
+                    "items.codigo": codigo,
+                    "items.estado_item": {"$lt": 4}
+                }},
+                {"$group": {
+                    "_id": None,
+                    "cantidad": {"$sum": "$items.cantidad"}
+                }}
+            ]))
+            cantidad_produccion = items_produccion[0]["cantidad"] if items_produccion else 0
+            
+            # Calcular vendidas en últimos 30 días
+            fecha_30_dias = (datetime.now() - timedelta(days=30)).isoformat()
+            items_vendidas = list(pedidos_collection.aggregate([
+                {"$unwind": "$items"},
+                {"$match": {
+                    "items.codigo": codigo,
+                    "items.estado_item": {"$gte": 4},
+                    "estado_general": {"$in": ["orden4", "orden5", "orden6"]},
+                    "fecha_creacion": {"$gte": fecha_30_dias}
+                }},
+                {"$group": {
+                    "_id": None,
+                    "cantidad": {"$sum": "$items.cantidad"}
+                }}
+            ]))
+            cantidad_vendidas_30_dias = items_vendidas[0]["cantidad"] if items_vendidas else 0
+            
+            # Calcular existencia real
+            existencia_real = existencia - cantidad_produccion
+            
+            # Calcular prioridad
+            prioridad = 0
+            if existencia_real <= 0:
+                prioridad = 3  # Alta
+            elif existencia_real <= 5:
+                prioridad = 2  # Media
+            elif cantidad_vendidas_30_dias > 0:
+                prioridad = 1  # Baja
+            
+            # Solo agregar si tiene prioridad o está en producción
+            if prioridad > 0 or cantidad_produccion > 0:
+                sugerencias.append({
+                    "item_id": str(item["_id"]),
+                    "codigo": codigo,
+                    "nombre": item.get("nombre", ""),
+                    "descripcion": item.get("descripcion", ""),
+                    "existencia_actual": existencia,
+                    "existencia_real": existencia_real,
+                    "en_produccion": cantidad_produccion,
+                    "vendidas_30_dias": cantidad_vendidas_30_dias,
+                    "prioridad": prioridad,
+                    "cantidad_sugerida": max(cantidad_vendidas_30_dias - existencia_real, 0) if existencia_real < cantidad_vendidas_30_dias else 0
+                })
+        
+        # Ordenar por prioridad
+        sugerencias.sort(key=lambda x: (x["prioridad"], x["vendidas_30_dias"]), reverse=True)
+        
+        return {
+            "sugerencias": sugerencias,
+            "total": len(sugerencias)
+        }
+    except Exception as e:
+        print(f"ERROR SUGERENCIA PRODUCCION: {e}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener sugerencias: {str(e)}")
+
+@router.get("/panel-control-logistico/graficas/")
+async def get_graficas_panel_control(
+    periodo: Optional[str] = Query("7", description="Período en días: 7, 30, 90")
+):
+    """
+    Datos para gráficas y comparaciones
+    """
+    try:
+        periodo_int = int(periodo)
+        fecha_inicio = (datetime.now() - timedelta(days=periodo_int)).isoformat()
+        fecha_fin = datetime.now().isoformat()
+        
+        # Movimientos por día
+        movimientos_por_dia = list(movimientos_logisticos_collection.aggregate([
+            {"$match": {"fecha": {"$gte": fecha_inicio, "$lte": fecha_fin}}},
+            {"$group": {
+                "_id": {"$substr": ["$fecha", 0, 10]},  # Extraer fecha (YYYY-MM-DD)
+                "total_movimientos": {"$sum": 1},
+                "cantidad_total": {"$sum": "$cantidad"}
+            }},
+            {"$sort": {"_id": 1}}
+        ]))
+        
+        # Items más movidos
+        items_movidos = list(movimientos_logisticos_collection.aggregate([
+            {"$match": {"fecha": {"$gte": fecha_inicio, "$lte": fecha_fin}}},
+            {"$group": {
+                "_id": "$item_codigo",
+                "item_nombre": {"$first": "$item_nombre"},
+                "total_movimientos": {"$sum": 1},
+                "cantidad_total": {"$sum": "$cantidad"}
+            }},
+            {"$sort": {"total_movimientos": -1}},
+            {"$limit": 10}
+        ]))
+        
+        # Movimientos por tipo
+        movimientos_por_tipo = list(movimientos_logisticos_collection.aggregate([
+            {"$match": {"fecha": {"$gte": fecha_inicio, "$lte": fecha_fin}}},
+            {"$group": {
+                "_id": "$tipo_movimiento",
+                "total": {"$sum": 1},
+                "cantidad_total": {"$sum": "$cantidad"}
+            }}
+        ]))
+        
+        # Comparar con período anterior
+        fecha_inicio_anterior = (datetime.now() - timedelta(days=periodo_int * 2)).isoformat()
+        fecha_fin_anterior = fecha_inicio
+        
+        movimientos_anterior = movimientos_logisticos_collection.count_documents({
+            "fecha": {"$gte": fecha_inicio_anterior, "$lte": fecha_fin_anterior}
+        })
+        
+        movimientos_actual = movimientos_logisticos_collection.count_documents({
+            "fecha": {"$gte": fecha_inicio, "$lte": fecha_fin}
+        })
+        
+        variacion = ((movimientos_actual - movimientos_anterior) / movimientos_anterior * 100) if movimientos_anterior > 0 else 0
+        
+        return {
+            "periodo": periodo_int,
+            "fecha_inicio": fecha_inicio,
+            "fecha_fin": fecha_fin,
+            "movimientos_por_dia": movimientos_por_dia,
+            "items_mas_movidos": items_movidos,
+            "movimientos_por_tipo": movimientos_por_tipo,
+            "comparacion_periodo_anterior": {
+                "movimientos_actual": movimientos_actual,
+                "movimientos_anterior": movimientos_anterior,
+                "variacion_porcentual": round(variacion, 2)
+            }
+        }
+    except Exception as e:
+        print(f"ERROR GRAFICAS: {e}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener datos para gráficas: {str(e)}")
+
+@router.get("/panel-control-logistico/planificacion-produccion/")
+async def get_planificacion_produccion():
+    """
+    Planificación completa de producción
+    """
+    try:
+        planificacion = {
+            "items_urgentes": [],
+            "items_en_produccion": [],
+            "items_sugeridos": [],
+            "resumen": {}
+        }
+        
+        # Items urgentes (existencia <= 0)
+        items_urgentes = list(items_collection.find({
+            "$or": [
+                {"cantidad": {"$lte": 0}},
+                {"existencia": {"$lte": 0}}
+            ],
+            "activo": True
+        }, {
+            "codigo": 1,
+            "nombre": 1,
+            "descripcion": 1,
+            "cantidad": 1,
+            "existencia": 1,
+            "precio": 1,
+            "costo": 1
+        }))
+        
+        for item in items_urgentes:
+            codigo = item.get("codigo")
+            if codigo:
+                # Calcular en producción
+                items_produccion = list(pedidos_collection.aggregate([
+                    {"$unwind": "$items"},
+                    {"$match": {
+                        "items.codigo": codigo,
+                        "items.estado_item": {"$lt": 4}
+                    }},
+                    {"$group": {
+                        "_id": None,
+                        "cantidad": {"$sum": "$items.cantidad"}
+                    }}
+                ]))
+                cantidad_produccion = items_produccion[0]["cantidad"] if items_produccion else 0
+                
+                planificacion["items_urgentes"].append({
+                    "item_id": str(item["_id"]),
+                    "codigo": codigo,
+                    "nombre": item.get("nombre", ""),
+                    "descripcion": item.get("descripcion", ""),
+                    "existencia_actual": item.get("cantidad", 0) or item.get("existencia", 0),
+                    "en_produccion": cantidad_produccion,
+                    "prioridad": "alta"
+                })
+        
+        # Items en producción (del endpoint anterior)
+        items_produccion_data = await get_items_produccion()
+        planificacion["items_en_produccion"] = items_produccion_data[:20]  # Limitar a 20
+        
+        # Items sugeridos (del endpoint anterior)
+        sugerencias_data = await get_sugerencia_produccion()
+        planificacion["items_sugeridos"] = sugerencias_data["sugerencias"][:20]  # Limitar a 20
+        
+        # Resumen
+        planificacion["resumen"] = {
+            "items_urgentes": len(planificacion["items_urgentes"]),
+            "items_en_produccion": len(planificacion["items_en_produccion"]),
+            "items_sugeridos": len(planificacion["items_sugeridos"]),
+            "fecha_actualizacion": datetime.now().isoformat()
+        }
+        
+        return planificacion
+    except Exception as e:
+        print(f"ERROR PLANIFICACION: {e}")
+        import traceback
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener planificación: {str(e)}")
