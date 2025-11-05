@@ -380,57 +380,59 @@ async def update_home_config(request: HomeConfigRequest):
         existing_doc = home_config_collection.find_one({})
         
         # Procesar campos preservando objetos anidados completos
-        # IMPORTANTE: Hacer merge profundo para preservar campos existentes
-        # Esto asegura que las imágenes base64 y otros campos no se pierdan
+        # ESTRATEGIA MEJORADA: Si hay imágenes nuevas, usar el objeto completo del frontend
+        # y hacer merge solo de campos que no son imágenes del documento existente
         config_dict_clean = {}
         for key, value in config_dict.items():
             if value is not None:
                 # Si es un diccionario (objeto anidado), hacer merge con lo existente
                 if isinstance(value, dict):
-                    # Si existe un valor previo, hacer merge
-                    if existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
+                    # CRÍTICO: Verificar si hay imágenes nuevas en el valor entrante
+                    has_new_images = False
+                    for sub_key, sub_value in value.items():
+                        if sub_key in ["url", "image"] and isinstance(sub_value, str) and len(sub_value) > 100:
+                            has_new_images = True
+                            debug_log(f"🔍 IMAGEN NUEVA detectada en {key}.{sub_key}: {len(sub_value)} caracteres")
+                            break
+                    
+                    # Si hay imágenes nuevas, usar el objeto completo del frontend y hacer merge solo de campos no-imagen
+                    if has_new_images:
+                        debug_log(f"✅ Usando objeto completo del frontend para {key} (contiene imágenes nuevas)")
+                        # Empezar con el objeto del frontend (que tiene las imágenes)
+                        merged_value = value.copy()
+                        # Hacer merge solo de campos que NO son imágenes del documento existente
+                        if existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
+                            for existing_key, existing_value in existing_doc[key].items():
+                                # Solo agregar campos que no son imágenes y que no están en el objeto del frontend
+                                if existing_key not in ["url", "image"] and existing_key not in merged_value:
+                                    merged_value[existing_key] = existing_value
+                                    debug_log(f"  Agregando campo {existing_key} desde documento existente")
+                        config_dict_clean[key] = merged_value
+                    # Si NO hay imágenes nuevas, hacer merge normal
+                    elif existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
                         # Merge profundo: preservar campos existentes, actualizar con nuevos
                         merged_value = existing_doc[key].copy()
-                        
-                        # CRÍTICO: Verificar si hay imágenes en el valor entrante ANTES del merge
-                        incoming_image_fields = {}
-                        for sub_key, sub_value in value.items():
-                            if sub_key in ["url", "image"] and isinstance(sub_value, str) and len(sub_value) > 100:
-                                incoming_image_fields[sub_key] = sub_value
-                                debug_log(f"🔍 IMAGEN ENTRANTE detectada en {key}.{sub_key}: {len(sub_value)} caracteres")
                         
                         # Actualizar solo con valores válidos (no None, no string vacío para imágenes)
                         for sub_key, sub_value in value.items():
                             if sub_value is not None:
                                 # Para campos de imagen (url en banner/logo, image en productos)
                                 if sub_key in ["url", "image"]:
-                                    # CRÍTICO: Si es una imagen base64 (más de 100 caracteres), SIEMPRE actualizar
+                                    # Si es una imagen base64 (más de 100 caracteres), actualizar
                                     if isinstance(sub_value, str):
                                         if len(sub_value) > 100:
-                                            # Es una imagen base64 válida, actualizar SIEMPRE
                                             merged_value[sub_key] = sub_value
                                             debug_log(f"✅ ACTUALIZANDO {key}.{sub_key} con imagen base64: {len(sub_value)} caracteres")
                                         elif sub_value.strip() != "":
-                                            # String no vacío pero corto, actualizar
                                             merged_value[sub_key] = sub_value
                                             debug_log(f"Actualizando {key}.{sub_key} con valor: {len(sub_value)} caracteres")
-                                        else:
-                                            # String vacío, preservar el existente
-                                            debug_log(f"Preservando {key}.{sub_key} existente (nuevo valor es vacío)")
-                                    else:
-                                        merged_value[sub_key] = sub_value
+                                        # Si es vacío, preservar el existente
                                 else:
                                     # Para otros campos, actualizar normalmente
                                     merged_value[sub_key] = sub_value
                         
-                        # VERIFICACIÓN POST-MERGE: Asegurar que las imágenes entrantes estén presentes
-                        for img_field, img_value in incoming_image_fields.items():
-                            if img_field not in merged_value or merged_value[img_field] != img_value:
-                                debug_log(f"⚠️ CRÍTICO: Imagen entrante en {key}.{img_field} no está en merged_value, restaurando...")
-                                merged_value[img_field] = img_value
-                        
                         config_dict_clean[key] = merged_value
-                        debug_log(f"Merge para {key}: preservando {len(existing_doc[key])} campos existentes, {len(incoming_image_fields)} imágenes entrantes")
+                        debug_log(f"Merge normal para {key}: preservando {len(existing_doc[key])} campos existentes")
                     else:
                         # Si no existe, usar el valor tal cual
                         debug_log(f"No hay documento existente para {key}, usando valor completo del frontend")
