@@ -191,18 +191,31 @@ async def cargar_existencias_desde_pedido(pedido_id: str = Body(..., embed=True)
         raise HTTPException(status_code=500, detail=f"Error al cargar existencias: {str(e)}")
 
 @router.get("/all")
-async def get_all_items():
+async def get_all_items(sucursal: Optional[str] = Query(None, description="Filtrar por sucursal: 'sucursal1' o 'sucursal2'")):
     """
     Obtener todos los items del inventario.
     Filtra solo items activos con precio > 0.
+    Si se especifica sucursal, incluye información de existencia de esa sucursal.
     """
     # Filtrar items activos con precio > 0
     items = list(items_collection.find({
         "activo": True,
         "precio": {"$gt": 0}
     }))
+    
     for item in items:
         item["_id"] = str(item["_id"])
+        
+        # Si se especifica sucursal, agregar campo de existencia de esa sucursal
+        if sucursal:
+            if sucursal == "sucursal1":
+                # Sucursal 1 puede usar "cantidad" o "existencia"
+                existencia = item.get("cantidad") or item.get("existencia", 0)
+                item["existencia_sucursal"] = existencia
+            elif sucursal == "sucursal2":
+                # Sucursal 2 usa "existencia2"
+                item["existencia_sucursal"] = item.get("existencia2", 0)
+    
     return items
 
 @router.get("/id/{item_id}/")

@@ -225,6 +225,7 @@ class Pedido(BaseModel):
     total_abonado: float = 0.0
     adicionales: Optional[List[Adicional]] = []  # Campo para adicionales del pedido
     tipo_pedido: Optional[str] = None  # "interno" para /crearpedido, "web" para /clientes
+    sucursal: Optional[str] = "sucursal1"  # "sucursal1" o "sucursal2" - determina de qué sucursal se descuenta el inventario
     
     class Config:
         extra = "allow"  # Permitir campos adicionales no definidos en el modelo

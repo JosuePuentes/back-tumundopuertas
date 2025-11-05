@@ -446,24 +446,37 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                         print(f"DEBUG CREAR PEDIDO [Item {idx}]: Error al convertir ID a ObjectId: {item_id}, error: {e_id}")
                 
                 if item_inventario:
-                    cantidad_actual = item_inventario.get("cantidad", 0.0)
+                    # Obtener la sucursal del pedido (por defecto sucursal1)
+                    sucursal = getattr(pedido, 'sucursal', None) or pedido.dict().get('sucursal', 'sucursal1')
+                    if sucursal not in ['sucursal1', 'sucursal2']:
+                        sucursal = 'sucursal1'  # Valor por defecto si no es válido
+                    
+                    # Determinar qué campo de existencia usar según la sucursal
+                    # Sucursal 1 usa "cantidad" o "existencia", Sucursal 2 usa "existencia2"
+                    campo_existencia = "cantidad" if sucursal == "sucursal1" else "existencia2"
+                    
+                    # Si es sucursal1 y no existe "cantidad", usar "existencia" como fallback
+                    if sucursal == "sucursal1" and campo_existencia not in item_inventario:
+                        campo_existencia = "existencia"
+                    
+                    cantidad_actual = item_inventario.get(campo_existencia, 0.0)
                     cantidad_a_restar = float(cantidad)
                     
-                    print(f"DEBUG CREAR PEDIDO [Item {idx}]: Cantidad actual en inventario: {cantidad_actual}, cantidad a restar: {cantidad_a_restar}")
+                    print(f"DEBUG CREAR PEDIDO [Item {idx}]: Sucursal={sucursal}, Campo={campo_existencia}, Cantidad actual={cantidad_actual}, Cantidad a restar={cantidad_a_restar}")
                     
                     if cantidad_a_restar > cantidad_actual:
-                        print(f"WARNING CREAR PEDIDO [Item {idx}]: No hay suficiente existencia para {item_inventario.get('codigo', 'N/A')}. Existencia: {cantidad_actual}, Requerida: {cantidad_a_restar}")
+                        print(f"WARNING CREAR PEDIDO [Item {idx}]: No hay suficiente existencia en {sucursal} para {item_inventario.get('codigo', 'N/A')}. Existencia: {cantidad_actual}, Requerida: {cantidad_a_restar}")
                         # No lanzar error, solo registrar warning ya que el frontend ya validó
                     
-                    # Restar la cantidad del inventario
+                    # Restar la cantidad del inventario según la sucursal
                     nueva_cantidad = max(0, cantidad_actual - cantidad_a_restar)
                     result_update = items_collection.update_one(
                         {"_id": item_inventario["_id"]},
-                        {"$set": {"cantidad": nueva_cantidad}}
+                        {"$set": {campo_existencia: nueva_cantidad}}
                     )
                     
                     if result_update.modified_count > 0:
-                        print(f"SUCCESS CREAR PEDIDO [Item {idx}]: Item {item_inventario.get('codigo', 'N/A')} actualizado. Cantidad anterior: {cantidad_actual}, Cantidad nueva: {nueva_cantidad}")
+                        print(f"SUCCESS CREAR PEDIDO [Item {idx}]: Item {item_inventario.get('codigo', 'N/A')} actualizado en {sucursal}. {campo_existencia} anterior: {cantidad_actual}, {campo_existencia} nueva: {nueva_cantidad}")
                     else:
                         print(f"WARNING CREAR PEDIDO [Item {idx}]: No se pudo actualizar el item (modified_count=0). Item: {item_inventario.get('codigo', 'N/A')}")
                 else:
