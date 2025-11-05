@@ -25,6 +25,41 @@ preferencias_clientes_collection = db["preferencias_clientes"]
 soporte_reclamos_clientes_collection = db["soporte_reclamos_clientes"]
 facturas_cliente_collection = db["facturas_cliente"]
 
+def init_pedidos_indexes():
+    """
+    Inicializar índices para optimizar queries de pedidos.
+    Mejora el rendimiento de búsquedas por estado_general y items.estado_item.
+    """
+    try:
+        # Índice compuesto para estado_general y tipo_pedido
+        pedidos_collection.create_index(
+            [("estado_general", 1), ("tipo_pedido", 1)],
+            name="idx_estado_tipo_pedido"
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            pass  # Índice ya existe
+        
+    try:
+        # Índice para items.estado_item (para filtrar items por estado)
+        pedidos_collection.create_index(
+            [("items.estado_item", 1)],
+            name="idx_items_estado_item"
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            pass  # Índice ya existe
+    
+    try:
+        # Índice para fecha_creacion (para ordenamiento)
+        pedidos_collection.create_index(
+            [("fecha_creacion", -1)],
+            name="idx_fecha_creacion_desc"
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            pass  # Índice ya existe
+
 def init_clientes_indexes():
     """
     Inicializar índices únicos para las colecciones de datos del dashboard de clientes.

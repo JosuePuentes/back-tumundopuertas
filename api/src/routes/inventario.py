@@ -6,8 +6,16 @@ from pydantic import BaseModel
 from typing import List, Literal, Optional  # Keep this import as it's used in the /bulk endpoint
 import openpyxl
 import io
+import os
 
 router = APIRouter()
+
+# Control de logs: solo mostrar en desarrollo
+DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
+def debug_log(*args, **kwargs):
+    """Función para logs de debug - solo muestra en modo DEBUG"""
+    if DEBUG_MODE:
+        print(*args, **kwargs)
 
 def generar_codigo_automatico():
     """
@@ -243,18 +251,18 @@ async def get_item(item_id: str):
 @router.post("/")
 async def create_item(item: Item):
     try:
-        print(f"DEBUG CREATE ITEM: === INICIO CREACIÓN ===")
-        print(f"DEBUG CREATE ITEM: Item recibido - codigo={item.codigo}, nombre={item.nombre}")
+        debug_log(f"DEBUG CREATE ITEM: === INICIO CREACIÓN ===")
+        debug_log(f"DEBUG CREATE ITEM: Item recibido - codigo={item.codigo}, nombre={item.nombre}")
         
         # Si no se proporciona código, generar uno automáticamente
         if not item.codigo or (isinstance(item.codigo, str) and item.codigo.strip() == ""):
             item.codigo = generar_codigo_automatico()
-            print(f"DEBUG CREATE ITEM: Código generado automáticamente: {item.codigo}")
+            debug_log(f"DEBUG CREATE ITEM: Código generado automáticamente: {item.codigo}")
         
         # Verificar que el código no exista
         existing_item = items_collection.find_one({"codigo": item.codigo})
         if existing_item:
-            print(f"DEBUG CREATE ITEM: ❌ Código ya existe: {item.codigo}")
+            debug_log(f"DEBUG CREATE ITEM: ❌ Código ya existe: {item.codigo}")
             raise HTTPException(status_code=400, detail="El item con este código ya existe")
         
         # Convertir a diccionario con todos los campos (exclude_unset=False)
@@ -292,31 +300,31 @@ async def create_item(item: Item):
         if item.modelo:
             item_dict_clean["modelo"] = item.modelo
         
-        print(f"DEBUG CREATE ITEM: Datos a insertar:")
-        print(f"  - codigo: {item_dict_clean.get('codigo')}")
-        print(f"  - nombre: {item_dict_clean.get('nombre')}")
-        print(f"  - categoria: {item_dict_clean.get('categoria')}")
-        print(f"  - precio: {item_dict_clean.get('precio')}")
-        print(f"  - cantidad: {item_dict_clean.get('cantidad')}")
-        print(f"  - activo: {item_dict_clean.get('activo')}")
+        debug_log(f"DEBUG CREATE ITEM: Datos a insertar:")
+        debug_log(f"  - codigo: {item_dict_clean.get('codigo')}")
+        debug_log(f"  - nombre: {item_dict_clean.get('nombre')}")
+        debug_log(f"  - categoria: {item_dict_clean.get('categoria')}")
+        debug_log(f"  - precio: {item_dict_clean.get('precio')}")
+        debug_log(f"  - cantidad: {item_dict_clean.get('cantidad')}")
+        debug_log(f"  - activo: {item_dict_clean.get('activo')}")
         
         # Insertar en la base de datos
         result = items_collection.insert_one(item_dict_clean)
         
         if not result.inserted_id:
-            print(f"DEBUG CREATE ITEM: ❌ ERROR: No se obtuvo inserted_id")
+            debug_log(f"DEBUG CREATE ITEM: ❌ ERROR: No se obtuvo inserted_id")
             raise HTTPException(status_code=500, detail="Error al insertar el item en la base de datos")
         
-        print(f"DEBUG CREATE ITEM: ✅ Item insertado con _id: {result.inserted_id}")
+        debug_log(f"DEBUG CREATE ITEM: ✅ Item insertado con _id: {result.inserted_id}")
         
         # Verificar que realmente se guardó
         item_verificado = items_collection.find_one({"_id": result.inserted_id})
         if not item_verificado:
-            print(f"DEBUG CREATE ITEM: ❌ ERROR: Item no encontrado después de insertar")
+            debug_log(f"DEBUG CREATE ITEM: ❌ ERROR: Item no encontrado después de insertar")
             raise HTTPException(status_code=500, detail="El item no se guardó correctamente en la base de datos")
         
-        print(f"DEBUG CREATE ITEM: ✅ Verificación exitosa - Item guardado correctamente")
-        print(f"DEBUG CREATE ITEM: === FIN CREACIÓN ===")
+        debug_log(f"DEBUG CREATE ITEM: ✅ Verificación exitosa - Item guardado correctamente")
+        debug_log(f"DEBUG CREATE ITEM: === FIN CREACIÓN ===")
         
         return {
             "message": "Item creado correctamente",
@@ -326,10 +334,10 @@ async def create_item(item: Item):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"DEBUG CREATE ITEM: ❌ EXCEPCIÓN: {str(e)}")
-        print(f"DEBUG CREATE ITEM: Tipo: {type(e).__name__}")
+        debug_log(f"DEBUG CREATE ITEM: ❌ EXCEPCIÓN: {str(e)}")
+        debug_log(f"DEBUG CREATE ITEM: Tipo: {type(e).__name__}")
         import traceback
-        print(f"DEBUG CREATE ITEM: Traceback: {traceback.format_exc()}")
+        debug_log(f"DEBUG CREATE ITEM: Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error al crear el item: {str(e)}")
 
 @router.patch("/id/{item_id}/")
