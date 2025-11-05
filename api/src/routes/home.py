@@ -345,11 +345,26 @@ async def update_home_config(request: HomeConfigRequest):
                     if existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
                         # Merge profundo: preservar campos existentes, actualizar con nuevos
                         merged_value = existing_doc[key].copy()
-                        # Actualizar solo con valores que no son None
+                        # Actualizar solo con valores válidos (no None, no string vacío para imágenes)
                         for sub_key, sub_value in value.items():
                             if sub_value is not None:
-                                merged_value[sub_key] = sub_value
-                            # Si sub_value es None pero queremos limpiarlo, mantenerlo
+                                # Para campos de imagen (url en banner/logo, image en productos)
+                                # Solo actualizar si el nuevo valor es realmente una imagen (base64 largo)
+                                if sub_key in ["url", "image"]:
+                                    # Si el nuevo valor es una imagen base64 (más de 100 caracteres)
+                                    # o si es un string no vacío, actualizar
+                                    if isinstance(sub_value, str):
+                                        if len(sub_value) > 100 or sub_value.strip() != "":
+                                            merged_value[sub_key] = sub_value
+                                            debug_log(f"Actualizando {key}.{sub_key} con imagen base64: {len(sub_value)} caracteres")
+                                        else:
+                                            # String vacío o muy corto, preservar el existente
+                                            debug_log(f"Preservando {key}.{sub_key} existente (nuevo valor es vacío)")
+                                    else:
+                                        merged_value[sub_key] = sub_value
+                                else:
+                                    # Para otros campos, actualizar normalmente
+                                    merged_value[sub_key] = sub_value
                         config_dict_clean[key] = merged_value
                         debug_log(f"Merge para {key}: preservando {len(existing_doc[key])} campos existentes")
                     else:
