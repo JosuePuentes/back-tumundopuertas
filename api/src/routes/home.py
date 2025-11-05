@@ -316,22 +316,44 @@ async def update_home_config(request: HomeConfigRequest):
                 detail=f"El documento es demasiado grande ({doc_size//1024//1024}MB). Límite de MongoDB: 16MB"
             )
         
+        # Obtener configuración actual para hacer merge inteligente
+        existing_doc = home_config_collection.find_one({})
+        
         # Procesar campos preservando objetos anidados completos
-        # IMPORTANTE: Preservar objetos anidados aunque algunos campos sean None
-        # Esto asegura que las imágenes base64 no se pierdan
+        # IMPORTANTE: Hacer merge profundo para preservar campos existentes
+        # Esto asegura que las imágenes base64 y otros campos no se pierdan
         config_dict_clean = {}
         for key, value in config_dict.items():
             if value is not None:
-                # Si es un diccionario (objeto anidado), preservar TODO el objeto
+                # Si es un diccionario (objeto anidado), hacer merge con lo existente
                 if isinstance(value, dict):
-                    # Preservar el objeto completo, incluso si tiene campos None
-                    # Esto es crítico para banner, logo, etc. que pueden tener url=None
-                    # pero otros campos con valores
+                    # Si existe un valor previo, hacer merge
+                    if existing_doc and key in existing_doc and isinstance(existing_doc[key], dict):
+                        # Merge profundo: preservar campos existentes, actualizar con nuevos
+                        merged_value = existing_doc[key].copy()
+                        # Actualizar solo con valores que no son None
+                        for sub_key, sub_value in value.items():
+                            if sub_value is not None:
+                                merged_value[sub_key] = sub_value
+                            # Si sub_value es None pero queremos limpiarlo, mantenerlo
+                        config_dict_clean[key] = merged_value
+                        debug_log(f"Merge para {key}: preservando {len(existing_doc[key])} campos existentes")
+                    else:
+                        # Si no existe, usar el valor tal cual
+                        config_dict_clean[key] = value
+                # Si es una lista (arrays como products.products), reemplazar completamente
+                elif isinstance(value, list):
                     config_dict_clean[key] = value
                 else:
                     config_dict_clean[key] = value
         
         debug_log(f"Campos a guardar: {list(config_dict_clean.keys())}")
+        
+        # Verificar que las imágenes base64 están en config_dict_clean
+        if config_dict_clean.get("banner") and isinstance(config_dict_clean["banner"], dict):
+            banner_url = config_dict_clean["banner"].get("url", "")
+            if banner_url and len(banner_url) > 100:
+                debug_log(f"✅ Banner URL en config_dict_clean: {len(banner_url)} caracteres")
         
         # Actualizar o crear la configuración (upsert garantiza que solo haya un documento)
         result = home_config_collection.update_one(
