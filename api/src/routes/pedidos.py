@@ -58,6 +58,53 @@ def excluir_pedidos_web(query: dict) -> dict:
         }
     return query
 
+def excluir_pedidos_tu_mundo_puerta(query: dict) -> dict:
+    """
+    Agrega filtro para excluir pedidos de TU MUNDO PUERTA (RIF: J-507172554) de una consulta.
+    Busca el cliente por RIF y excluye sus pedidos por cliente_id o cliente_nombre.
+    """
+    try:
+        # Buscar el cliente TU MUNDO PUERTA por RIF
+        cliente_tumundo = clientes_collection.find_one({"rif": "J-507172554"})
+        if cliente_tumundo:
+            cliente_tumundo_id = str(cliente_tumundo["_id"])
+            
+            # Crear condición de exclusión
+            exclusion_condition = {
+                "$and": [
+                    {"cliente_id": {"$ne": cliente_tumundo_id}},
+                    {"cliente_nombre": {"$not": {"$regex": "TU MUNDO.*PUERTA", "$options": "i"}}}
+                ]
+            }
+            
+            # Agregar a la query existente
+            if "$and" in query:
+                query["$and"].append(exclusion_condition)
+            else:
+                query = {
+                    "$and": [
+                        query,
+                        exclusion_condition
+                    ]
+                }
+    except Exception as e:
+        # Si hay error, no fallar silenciosamente pero registrar
+        print(f"WARNING: Error al excluir pedidos de TU MUNDO PUERTA: {e}")
+        # Como alternativa, usar solo filtro por nombre
+        if "$and" in query:
+            query["$and"].append({
+                "cliente_nombre": {"$not": {"$regex": "TU MUNDO.*PUERTA", "$options": "i"}}
+            })
+        else:
+            query = {
+                "$and": [
+                    query,
+                    {"cliente_nombre": {"$not": {"$regex": "TU MUNDO.*PUERTA", "$options": "i"}}}
+                ]
+            }
+    
+    return query
+
 def enriquecer_pedido_con_datos_cliente(pedido: dict):
     """
     Enriquece un pedido con datos del cliente (cédula y teléfono) desde la colección de clientes.
@@ -102,6 +149,11 @@ async def get_all_pedidos():
             {"tipo_pedido": {"$exists": False}}  # No tiene tipo_pedido (pedidos antiguos)
         ]
     }
+    # Excluir pedidos web
+    query = excluir_pedidos_web(query)
+    # Excluir pedidos de TU MUNDO PUERTA (RIF: J-507172554)
+    query = excluir_pedidos_tu_mundo_puerta(query)
+    
     pedidos = list(pedidos_collection.find(query))
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
@@ -4674,6 +4726,8 @@ async def obtener_pagos(
 
     # Excluir pedidos web
     filtro = excluir_pedidos_web(filtro)
+    # Excluir pedidos de TU MUNDO PUERTA (RIF: J-507172554)
+    filtro = excluir_pedidos_tu_mundo_puerta(filtro)
 
     # Buscar pedidos internos solamente
     pedidos = list(
