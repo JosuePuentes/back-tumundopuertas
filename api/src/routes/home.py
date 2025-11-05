@@ -286,6 +286,24 @@ async def update_home_config(request: HomeConfigRequest):
         # Log información de imágenes ANTES de limpiar
         log_image_info(config_dict, "ANTES: ")
         
+        # Verificar específicamente si hay imágenes base64 en los campos clave
+        if config_dict.get("banner") and isinstance(config_dict["banner"], dict):
+            banner_url = config_dict["banner"].get("url", "")
+            if banner_url and len(banner_url) > 100:
+                debug_log(f"✅ Banner tiene imagen base64: {len(banner_url)} caracteres")
+        
+        if config_dict.get("logo") and isinstance(config_dict["logo"], dict):
+            logo_url = config_dict["logo"].get("url", "")
+            if logo_url and len(logo_url) > 100:
+                debug_log(f"✅ Logo tiene imagen base64: {len(logo_url)} caracteres")
+        
+        if config_dict.get("products") and isinstance(config_dict["products"], dict):
+            products = config_dict["products"].get("products", [])
+            if isinstance(products, list):
+                for idx, p in enumerate(products):
+                    if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100:
+                        debug_log(f"✅ Producto {idx+1} tiene imagen base64: {len(p['image'])} caracteres")
+        
         # Calcular tamaño aproximado del documento
         import json
         doc_size = len(json.dumps(config_dict))
@@ -340,10 +358,25 @@ async def update_home_config(request: HomeConfigRequest):
             # Normalizar la configuración antes de retornarla
             updated_config = normalize_config(updated_config)
         
-        # Verificar que las imágenes base64 se mantuvieron
+        # Verificar que las imágenes base64 se mantuvieron después de normalizar
         if updated_config.get("banner") and updated_config["banner"].get("url"):
             banner_len = len(updated_config["banner"]["url"])
-            debug_log(f"Banner guardado correctamente: {banner_len} caracteres")
+            debug_log(f"Banner después de normalizar: {banner_len} caracteres")
+            if banner_len > 100:
+                debug_log(f"✅ Banner tiene imagen base64 guardada")
+            else:
+                debug_log(f"⚠️ Banner URL es muy corta, posiblemente no tiene imagen")
+        
+        if updated_config.get("logo") and updated_config["logo"].get("url"):
+            logo_len = len(updated_config["logo"]["url"])
+            debug_log(f"Logo después de normalizar: {logo_len} caracteres")
+            if logo_len > 100:
+                debug_log(f"✅ Logo tiene imagen base64 guardada")
+        
+        if updated_config.get("products") and isinstance(updated_config["products"], dict):
+            products = updated_config["products"].get("products", [])
+            products_con_imagen = sum(1 for p in products if isinstance(p, dict) and p.get("image") and len(p.get("image", "")) > 100)
+            debug_log(f"Productos con imágenes base64: {products_con_imagen} de {len(products)}")
         
         debug_log("=== FIN ACTUALIZACIÓN CONFIG HOME ===")
         
