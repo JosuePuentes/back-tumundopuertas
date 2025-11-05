@@ -3657,16 +3657,16 @@ async def terminar_asignacion_articulo(
                 print(f"ERROR TERMINAR: Traceback inventario: {traceback.format_exc()}")
         
         # VERIFICAR SI EL PEDIDO PUEDE AVANZAR A FACTURACIÓN
-        # Si se terminó un item en orden3 y todos los items tienen estado_item >= 4
-        if orden_int == 3:
-            try:
-                print(f"DEBUG TERMINAR: Verificando si el pedido {pedido_id} puede avanzar a Facturación...")
-                
-                # Verificar estado actualizado del pedido
-                pedido_actualizado = pedidos_collection.find_one({"_id": pedido_obj_id})
-                
-                if pedido_actualizado:
-                    items_actualizado = pedido_actualizado.get("items", [])
+        # Si todos los items tienen estado_item >= 4, mover a orden4 independientemente del estado actual
+        try:
+            print(f"DEBUG TERMINAR: Verificando si el pedido {pedido_id} puede avanzar a Facturación...")
+            
+            # Verificar estado actualizado del pedido
+            pedido_actualizado = pedidos_collection.find_one({"_id": pedido_obj_id})
+            
+            if pedido_actualizado:
+                items_actualizado = pedido_actualizado.get("items", [])
+                if items_actualizado:  # Solo verificar si hay items
                     todos_completos = all(item.get("estado_item", 0) >= 4 for item in items_actualizado)
                     
                     print(f"DEBUG TERMINAR: Todos los items completos: {todos_completos}")
@@ -3674,17 +3674,18 @@ async def terminar_asignacion_articulo(
                     
                     if todos_completos:
                         estado_general = pedido_actualizado.get("estado_general", "")
-                        if estado_general == "orden3":
+                        # Mover a orden4 si está en orden1, orden2 o orden3 (no si ya está en orden4, orden5, orden6 o cancelado)
+                        if estado_general in ["orden1", "orden2", "orden3"]:
                             # Mover pedido a orden4 (Facturación)
                             result_orden = pedidos_collection.update_one(
                                 {"_id": pedido_obj_id},
                                 {"$set": {"estado_general": "orden4"}}
                             )
-                            print(f"DEBUG TERMINAR: Pedido movido a orden4 - {result_orden.modified_count} documentos modificados")
+                            print(f"DEBUG TERMINAR: Pedido movido de {estado_general} a orden4 - {result_orden.modified_count} documentos modificados")
                         
-            except Exception as e:
-                print(f"ERROR TERMINAR: Error verificando pedido completo: {e}")
-                # No lanzar error, solo loggear
+        except Exception as e:
+            print(f"ERROR TERMINAR: Error verificando pedido completo: {e}")
+            # No lanzar error, solo loggear
         
         # Retornar respuesta exitosa CON el inventario actualizado
         return {
@@ -4698,6 +4699,27 @@ async def actualizar_pago(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
 
+    # Verificar si el pedido debería estar en orden4 (Facturación)
+    # Si todos los items tienen estado_item >= 4, mover a orden4
+    try:
+        pedido_actualizado = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        if pedido_actualizado:
+            items = pedido_actualizado.get("items", [])
+            if items:
+                todos_completos = all(item.get("estado_item", 0) >= 4 for item in items)
+                estado_general = pedido_actualizado.get("estado_general", "")
+                
+                if todos_completos and estado_general in ["orden1", "orden2", "orden3"]:
+                    # Mover pedido a orden4 (Facturación)
+                    pedidos_collection.update_one(
+                        {"_id": ObjectId(pedido_id)},
+                        {"$set": {"estado_general": "orden4"}}
+                    )
+                    print(f"DEBUG PAGO: Pedido {pedido_id} movido a orden4 después de actualizar pago")
+    except Exception as e:
+        print(f"ERROR PAGO: Error verificando si pedido debe estar en orden4: {e}")
+        # No lanzar error, solo loggear
+
     response = {"message": "Pago actualizado correctamente", "pago": pago}
     if registro:
         response["registro"] = registro
@@ -5387,6 +5409,25 @@ async def aprobar_abono_pendiente(
         pedido_actualizado = pedidos_collection.find_one({"_id": pedido_obj_id})
         historial_actualizado = pedido_actualizado.get("historial_pagos", [])
         
+        # Verificar si el pedido debería estar en orden4 (Facturación)
+        # Si todos los items tienen estado_item >= 4, mover a orden4
+        try:
+            items = pedido_actualizado.get("items", [])
+            if items:
+                todos_completos = all(item.get("estado_item", 0) >= 4 for item in items)
+                estado_general = pedido_actualizado.get("estado_general", "")
+                
+                if todos_completos and estado_general in ["orden1", "orden2", "orden3"]:
+                    # Mover pedido a orden4 (Facturación)
+                    pedidos_collection.update_one(
+                        {"_id": pedido_obj_id},
+                        {"$set": {"estado_general": "orden4"}}
+                    )
+                    print(f"DEBUG APROBAR ABONO: Pedido {pedido_id} movido a orden4 después de aprobar abono")
+        except Exception as e:
+            print(f"ERROR APROBAR ABONO: Error verificando si pedido debe estar en orden4: {e}")
+            # No lanzar error, solo loggear
+        
         return {
             "message": f"Abono aprobado exitosamente",
             "pedido_id": pedido_id,
@@ -5516,6 +5557,25 @@ async def agregar_abono_pedido(
         # Obtener el pedido actualizado
         pedido_actualizado = pedidos_collection.find_one({"_id": pedido_obj_id})
         historial_actualizado = pedido_actualizado.get("historial_pagos", [])
+        
+        # Verificar si el pedido debería estar en orden4 (Facturación)
+        # Si todos los items tienen estado_item >= 4, mover a orden4
+        try:
+            items = pedido_actualizado.get("items", [])
+            if items:
+                todos_completos = all(item.get("estado_item", 0) >= 4 for item in items)
+                estado_general = pedido_actualizado.get("estado_general", "")
+                
+                if todos_completos and estado_general in ["orden1", "orden2", "orden3"]:
+                    # Mover pedido a orden4 (Facturación)
+                    pedidos_collection.update_one(
+                        {"_id": pedido_obj_id},
+                        {"$set": {"estado_general": "orden4"}}
+                    )
+                    print(f"DEBUG AGREGAR ABONO: Pedido {pedido_id} movido a orden4 después de agregar abono")
+        except Exception as e:
+            print(f"ERROR AGREGAR ABONO: Error verificando si pedido debe estar en orden4: {e}")
+            # No lanzar error, solo loggear
         
         return {
             "message": "Abono agregado exitosamente",
@@ -6854,8 +6914,8 @@ async def marcar_apartado_facturado(apartado_id: str):
 @router.post("/verificar-pedido-completo/{pedido_id}")
 async def verificar_pedido_completo(pedido_id: str):
     """
-    Verificar si un pedido puede avanzar de orden3 (Preparar) a orden4 (Facturación)
-    Esto se debe llamar cuando se termina el último item en orden3
+    Verificar si un pedido puede avanzar a orden4 (Facturación)
+    Si todos los items tienen estado_item >= 4, mueve el pedido a orden4 independientemente del estado actual
     """
     try:
         pedido_obj_id = ObjectId(pedido_id)
@@ -6868,31 +6928,38 @@ async def verificar_pedido_completo(pedido_id: str):
         
         # Verificar si todos los items tienen estado_item >= 4
         items = pedido.get("items", [])
+        if not items:
+            return {
+                "message": "Pedido sin items",
+                "completado": False,
+                "estado_general": pedido.get("estado_general", "")
+            }
+        
         todos_completos = all(item.get("estado_item", 0) >= 4 for item in items)
         
         estado_general = pedido.get("estado_general", "")
         print(f"DEBUG VERIFICAR PEDIDO: todos_completos={todos_completos}, estado_general={estado_general}")
         print(f"DEBUG VERIFICAR PEDIDO: Items: {[(item.get('id', 'N/A'), item.get('estado_item', 'N/A')) for item in items]}")
         
-        # Si todos los items están completos y el pedido está en orden3
-        if todos_completos and estado_general == "orden3":
+        # Si todos los items están completos y el pedido está en orden1, orden2 o orden3
+        if todos_completos and estado_general in ["orden1", "orden2", "orden3"]:
             # Actualizar estado_general a orden4
             result = pedidos_collection.update_one(
                 {"_id": pedido_obj_id},
                 {"$set": {"estado_general": "orden4"}}
             )
             
-            print(f"DEBUG VERIFICAR PEDIDO: Pedido movido a orden4 - {result.modified_count} documentos modificados")
+            print(f"DEBUG VERIFICAR PEDIDO: Pedido movido de {estado_general} a orden4 - {result.modified_count} documentos modificados")
             
             return {
                 "message": "Pedido completado y movido a Facturación",
-                "estado_anterior": "orden3",
+                "estado_anterior": estado_general,
                 "estado_nuevo": "orden4",
                 "completado": True
             }
         
         return {
-            "message": "Pedido aún en proceso",
+            "message": "Pedido aún en proceso" if not todos_completos else f"Pedido completo pero en estado {estado_general}",
             "completado": todos_completos,
             "estado_general": estado_general
         }
@@ -6902,6 +6969,153 @@ async def verificar_pedido_completo(pedido_id: str):
         import traceback
         print(f"ERROR VERIFICAR PEDIDO: Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error verificando pedido: {str(e)}")
+
+@router.post("/verificar-todos-pedidos-completos")
+async def verificar_todos_pedidos_completos():
+    """
+    Verificar todos los pedidos y mover aquellos que tienen 100% (todos items estado_item >= 4) a orden4
+    Útil para corregir pedidos que deberían estar en Facturación pero no lo están
+    """
+    try:
+        # Buscar todos los pedidos que están en orden1, orden2 o orden3
+        pedidos = pedidos_collection.find({
+            "estado_general": {"$in": ["orden1", "orden2", "orden3"]}
+        })
+        
+        pedidos_movidos = []
+        pedidos_completos_no_movidos = []
+        
+        for pedido in pedidos:
+            try:
+                pedido_id = str(pedido["_id"])
+                items = pedido.get("items", [])
+                
+                if not items:
+                    continue
+                
+                # Verificar si todos los items tienen estado_item >= 4
+                todos_completos = all(item.get("estado_item", 0) >= 4 for item in items)
+                
+                if todos_completos:
+                    estado_general = pedido.get("estado_general", "")
+                    # Mover a orden4
+                    result = pedidos_collection.update_one(
+                        {"_id": pedido["_id"]},
+                        {"$set": {"estado_general": "orden4"}}
+                    )
+                    
+                    if result.modified_count > 0:
+                        pedidos_movidos.append({
+                            "pedido_id": pedido_id,
+                            "estado_anterior": estado_general,
+                            "estado_nuevo": "orden4"
+                        })
+                    else:
+                        pedidos_completos_no_movidos.append({
+                            "pedido_id": pedido_id,
+                            "estado_actual": estado_general,
+                            "razon": "No se pudo actualizar"
+                        })
+                        
+            except Exception as e:
+                print(f"ERROR VERIFICAR TODOS: Error procesando pedido {pedido.get('_id', 'N/A')}: {e}")
+                continue
+        
+        return {
+            "message": f"Verificación completada. {len(pedidos_movidos)} pedidos movidos a orden4",
+            "pedidos_movidos": pedidos_movidos,
+            "pedidos_completos_no_movidos": pedidos_completos_no_movidos,
+            "total_movidos": len(pedidos_movidos)
+        }
+        
+    except Exception as e:
+        print(f"ERROR VERIFICAR TODOS: Error verificando pedidos: {e}")
+        import traceback
+        print(f"ERROR VERIFICAR TODOS: Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error verificando pedidos: {str(e)}")
+
+@router.post("/recalcular-total-abonado/{pedido_id}")
+async def recalcular_total_abonado(pedido_id: str):
+    """
+    Recalcular el total_abonado de un pedido sumando todos los montos del historial_pagos
+    Útil para corregir inconsistencias en el cálculo de abonos
+    """
+    try:
+        pedido_obj_id = ObjectId(pedido_id)
+        pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+        
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        
+        historial_pagos = pedido.get("historial_pagos", [])
+        
+        # Calcular total_abonado sumando todos los montos del historial
+        total_abonado_calculado = 0.0
+        for pago in historial_pagos:
+            if isinstance(pago, dict):
+                monto = pago.get("monto", 0)
+                # Solo sumar pagos que no estén pendientes
+                estado_pago = pago.get("estado", "")
+                if estado_pago not in ["pendiente", "sin pago"]:
+                    total_abonado_calculado += float(monto)
+        
+        total_abonado_actual = float(pedido.get("total_abonado", 0))
+        
+        # Calcular total del pedido
+        items = pedido.get("items", [])
+        monto_total_items = sum(
+            float(item.get("precio", 0)) * float(item.get("cantidad", 0))
+            for item in items
+        )
+        
+        # Sumar adicionales si existen
+        monto_total_adicionales = 0.0
+        adicionales = pedido.get("adicionales", [])
+        if adicionales and isinstance(adicionales, list):
+            for adicional in adicionales:
+                if isinstance(adicional, dict):
+                    precio = float(adicional.get("precio", 0))
+                    cantidad = float(adicional.get("cantidad", 1))
+                    monto_total_adicionales += precio * cantidad
+        
+        total_pedido = monto_total_items + monto_total_adicionales
+        
+        # Determinar nuevo estado de pago
+        if total_abonado_calculado >= total_pedido - 0.01:  # Tolerancia para floats
+            nuevo_estado_pago = "pagado"
+        elif total_abonado_calculado > 0:
+            nuevo_estado_pago = "abonado"
+        else:
+            nuevo_estado_pago = "sin pago"
+        
+        # Actualizar total_abonado y estado de pago
+        result = pedidos_collection.update_one(
+            {"_id": pedido_obj_id},
+            {
+                "$set": {
+                    "total_abonado": total_abonado_calculado,
+                    "pago": nuevo_estado_pago
+                }
+            }
+        )
+        
+        return {
+            "message": "Total abonado recalculado",
+            "pedido_id": pedido_id,
+            "total_abonado_anterior": total_abonado_actual,
+            "total_abonado_nuevo": total_abonado_calculado,
+            "total_pedido": total_pedido,
+            "estado_pago_anterior": pedido.get("pago", ""),
+            "estado_pago_nuevo": nuevo_estado_pago,
+            "historial_pagos_count": len(historial_pagos),
+            "modificado": result.modified_count > 0
+        }
+        
+    except Exception as e:
+        print(f"ERROR RECALCULAR ABONO: Error recalculando total abonado: {e}")
+        import traceback
+        print(f"ERROR RECALCULAR ABONO: Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error recalculando total abonado: {str(e)}")
 
 # ============================================================================
 # ENDPOINTS PARA CLIENTES AUTENTICADOS
