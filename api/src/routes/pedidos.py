@@ -5336,8 +5336,19 @@ async def get_pagos_pedido(pedido_id: str):
         historial_pagos = pedido.get("historial_pagos", [])
         total_abonado = pedido.get("total_abonado", 0)
         
-        # Calcular total del pedido
-        total_pedido = sum(item.get("precio", 0) * item.get("cantidad", 0) for item in pedido.get("items", []))
+        # Calcular total del pedido (items + adicionales)
+        total_items = sum(item.get("precio", 0) * item.get("cantidad", 0) for item in pedido.get("items", []))
+
+        # Calcular total de adicionales
+        adicionales = pedido.get("adicionales", [])
+        total_adicionales = 0
+        if adicionales and isinstance(adicionales, list):
+            for adicional in adicionales:
+                cantidad = adicional.get("cantidad", 1)
+                precio = adicional.get("precio", 0)
+                total_adicionales += precio * cantidad
+
+        total_pedido = total_items + total_adicionales
         saldo_pendiente = total_pedido - total_abonado
         
         return {
