@@ -552,26 +552,26 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                     # Intentar buscar por ObjectId primero
                     try:
                         metodo_pago = metodos_pago_collection.find_one({"_id": ObjectId(pago.metodo)})
-                        print(f"DEBUG CREAR PEDIDO: Buscando por ObjectId: {pago.metodo}")
+                        debug_log(f"DEBUG CREAR PEDIDO: Buscando por ObjectId: {pago.metodo}")
                     except:
-                        print(f"DEBUG CREAR PEDIDO: No es ObjectId válido, buscando por nombre: {pago.metodo}")
+                        debug_log(f"DEBUG CREAR PEDIDO: No es ObjectId válido, buscando por nombre: {pago.metodo}")
                     
                     # Si no se encontró por ObjectId, buscar por nombre
                     if not metodo_pago:
                         metodo_pago = metodos_pago_collection.find_one({"nombre": pago.metodo})
-                        print(f"DEBUG CREAR PEDIDO: Buscando por nombre: {pago.metodo}")
+                        debug_log(f"DEBUG CREAR PEDIDO: Buscando por nombre: {pago.metodo}")
                     
                     if metodo_pago:
                         saldo_actual = metodo_pago.get("saldo", 0.0)
                         nuevo_saldo = saldo_actual + pago.monto
-                        print(f"DEBUG CREAR PEDIDO: Incrementando saldo de {saldo_actual} a {nuevo_saldo} para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
+                        debug_log(f"DEBUG CREAR PEDIDO: Incrementando saldo de {saldo_actual} a {nuevo_saldo} para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
                         
                         # Actualizar saldo usando $inc (operación atómica)
                         result_update = metodos_pago_collection.update_one(
                             {"_id": metodo_pago["_id"]},
                             {"$inc": {"saldo": pago.monto}}
                         )
-                        print(f"DEBUG CREAR PEDIDO: Resultado de actualización: {result_update.modified_count} documentos modificados")
+                        debug_log(f"DEBUG CREAR PEDIDO: Resultado de actualización: {result_update.modified_count} documentos modificados")
                         
                         # Registrar transacción automáticamente (depósito)
                         try:
@@ -584,17 +584,17 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                                 "fecha": datetime.utcnow().isoformat()
                             }
                             transacciones_collection.insert_one(transaccion_deposito)
-                            print(f"DEBUG CREAR PEDIDO: Transacción de depósito registrada automáticamente para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
+                            debug_log(f"DEBUG CREAR PEDIDO: Transacción de depósito registrada automáticamente para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
                         except Exception as trans_error:
                             print(f"ERROR CREAR PEDIDO: Error al registrar transacción de depósito: {trans_error}")
                             # No interrumpimos el flujo si falla el registro de transacción
                             # pero logueamos el error para debugging
                     else:
-                        print(f"DEBUG CREAR PEDIDO: Método de pago '{pago.metodo}' no encontrado ni por ID ni por nombre")
+                        debug_log(f"DEBUG CREAR PEDIDO: Método de pago '{pago.metodo}' no encontrado ni por ID ni por nombre")
                 except Exception as e:
-                    print(f"DEBUG CREAR PEDIDO: Error al actualizar saldo: {e}")
+                    debug_log(f"DEBUG CREAR PEDIDO: Error al actualizar saldo: {e}")
                     import traceback
-                    print(f"DEBUG CREAR PEDIDO: Traceback: {traceback.format_exc()}")
+                    debug_log(f"DEBUG CREAR PEDIDO: Traceback: {traceback.format_exc()}")
     
     return {"message": "Pedido creado correctamente", "id": pedido_id, "cliente_nombre": pedido.cliente_nombre}
 
@@ -4611,9 +4611,9 @@ async def actualizar_pago(
     metodo = data.get("metodo")
 
     # Debug: Log de los datos recibidos
-    print(f"DEBUG PAGO: Pedido {pedido_id}")
-    print(f"DEBUG PAGO: Datos recibidos: {data}")
-    print(f"DEBUG PAGO: Método recibido: {metodo} (tipo: {type(metodo).__name__})")
+    debug_log(f"DEBUG PAGO: Pedido {pedido_id}")
+    debug_log(f"DEBUG PAGO: Datos recibidos: {data}")
+    debug_log(f"DEBUG PAGO: Método recibido: {metodo} (tipo: {type(metodo).__name__})")
 
     if pago not in ["sin pago", "abonado", "pagado"]:
         raise HTTPException(status_code=400, detail="Valor de pago inválido")
@@ -4646,7 +4646,7 @@ async def actualizar_pago(
         }
         if metodo:
             registro["metodo"] = metodo
-            print(f"DEBUG PAGO: Método guardado en registro: {registro['metodo']}")
+            debug_log(f"DEBUG PAGO: Método guardado en registro: {registro['metodo']}")
         update["$push"] = {"historial_pagos": registro}
 
     try:
@@ -5801,7 +5801,7 @@ async def eliminar_pedido(
 async def debug_pedido(pedido_id: str):
     """Endpoint para debuggear el estado de un pedido específico"""
     try:
-        print(f"DEBUG PEDIDO: Verificando pedido {pedido_id}")
+        debug_log(f"DEBUG PEDIDO: Verificando pedido {pedido_id}")
         
         # Validar ID
         if not pedido_id or len(pedido_id) != 24:
@@ -5812,7 +5812,7 @@ async def debug_pedido(pedido_id: str):
             pedido_obj_id = ObjectId(pedido_id)
             pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
         except Exception as e:
-            print(f"Error convirtiendo ObjectId: {e}")
+            debug_log(f"Error convirtiendo ObjectId: {e}")
             raise HTTPException(status_code=400, detail="ID de pedido inválido")
         
         if not pedido:

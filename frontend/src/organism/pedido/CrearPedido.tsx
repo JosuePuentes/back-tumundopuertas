@@ -101,11 +101,17 @@ const CrearPedido: React.FC = () => {
   const apiUrl = import.meta.env.VITE_API_URL || "https://localhost:3000";
 
   useEffect(() => {
-    fetchClientes(`${apiUrl}/clientes/all`);
-  }, []);
-
-  useEffect(() => {
-    fetchItems(`${apiUrl}/inventario/all`);
+    // Carga paralela: ambas peticiones se ejecutan simultáneamente
+    Promise.all([
+      fetchClientes(`${apiUrl}/clientes/all`).catch(() => {
+        // Error silencioso, se maneja en el hook
+        return null;
+      }),
+      fetchItems(`${apiUrl}/inventario/all`).catch(() => {
+        // Error silencioso, se maneja en el hook
+        return null;
+      })
+    ]);
   }, []);
 
   // === Helpers de totales ===
@@ -695,7 +701,7 @@ const CrearPedido: React.FC = () => {
             >
               <AlertTitle>
                 {mensajeTipo === "error" ? "Error" : "Éxito"}
-              </Aler tTitle>
+              </AlertTitle>
               <AlertDescription>{mensaje}</AlertDescription>
             </Alert>
           </div>

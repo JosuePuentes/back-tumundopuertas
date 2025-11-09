@@ -50,10 +50,17 @@ const PedidosHerreria: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    fetchPedido("/pedidos/estado/?estado_general=orden1&estado_general=pendiente&/")
-      .catch(() => setError("Error al cargar los pedidos"))
-      .finally(() => setLoading(false));
-    fetchEmpleado(`${import.meta.env.VITE_API_URL}/empleados/all/`);
+    // Carga paralela: ambas peticiones se ejecutan simultáneamente
+    Promise.all([
+      fetchPedido("/pedidos/estado/?estado_general=orden1&estado_general=pendiente&/").catch(() => {
+        setError("Error al cargar los pedidos");
+        return null;
+      }),
+      fetchEmpleado(`${import.meta.env.VITE_API_URL}/empleados/all/`).catch(() => {
+        // Error silencioso para empleados, no crítico
+        return null;
+      })
+    ]).finally(() => setLoading(false));
   }, []);
 
   // ...

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +43,17 @@ interface DetalleHerreriaProps {
 }
 
 const DetalleHerreria: React.FC<DetalleHerreriaProps> = ({ pedido, onClose }) => {
+  // Memoizar fechas formateadas para evitar recalcular en cada render
+  const fechaCreacion = useMemo(
+    () => new Date(pedido.fecha_creacion).toLocaleDateString(),
+    [pedido.fecha_creacion]
+  );
+  
+  const fechaActualizacion = useMemo(
+    () => new Date(pedido.fecha_actualizacion).toLocaleDateString(),
+    [pedido.fecha_actualizacion]
+  );
+
   return (
     <Card className="mb-4">
       <CardHeader className="flex flex-row items-center justify-between">
@@ -62,11 +73,11 @@ const DetalleHerreria: React.FC<DetalleHerreriaProps> = ({ pedido, onClose }) =>
           <div className="flex flex-row gap-4 items-center justify-end md:justify-start">
             <div className="flex flex-col items-center">
               <span className="text-xs text-gray-500">Creado</span>
-              <span className="font-semibold text-green-700">{new Date(pedido.fecha_creacion).toLocaleDateString()}</span>
+              <span className="font-semibold text-green-700">{fechaCreacion}</span>
             </div>
             <div className="flex flex-col items-center">
               <span className="text-xs text-gray-500">Actualizado</span>
-              <span className="font-semibold text-blue-700">{new Date(pedido.fecha_actualizacion).toLocaleDateString()}</span>
+              <span className="font-semibold text-blue-700">{fechaActualizacion}</span>
             </div>
             <div className="flex flex-col items-center">
               <span className="text-xs text-gray-500">Estado</span>
@@ -125,4 +136,5 @@ const DetalleHerreria: React.FC<DetalleHerreriaProps> = ({ pedido, onClose }) =>
   );
 }
 
-export default DetalleHerreria;
+// Memoizar componente para evitar re-renderizados innecesarios
+export default React.memo(DetalleHerreria);

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import FinalizarSubestado from "@/organism/designar/FinalizarSubestado";
 import useTerminarEmpleado from "@/hooks/useTerminarEmpleado";
 
@@ -109,7 +109,7 @@ const AsignarArticulos: React.FC<AsignarArticulosProps> = ({
     }
   }, [asignadosPrevios]);
 
-  const handleEmpleadoChange = (
+  const handleEmpleadoChange = useCallback((
     item: PedidoItem,
     idx: number,
     empleadoId: string,
@@ -128,9 +128,9 @@ const AsignarArticulos: React.FC<AsignarArticulosProps> = ({
       },
     }));
     setShowCambio((prev) => ({ ...prev, [`${item.id}-${idx}`]: false }));
-  };
+  }, []);
 
-  const handleAsignar = async () => {
+  const handleAsignar = useCallback(async () => {
     setLoading(true);
     setMessage("");
     const asignacionPorItem = items.map((item, idx) => ({
@@ -165,7 +165,20 @@ const AsignarArticulos: React.FC<AsignarArticulosProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [items, asignaciones, pedidoId, numeroOrden, estado_general, asignadosPrevios]);
+
+  // Memoizar empleados filtrados una sola vez (no dentro del map)
+  const empleadosFiltrados = useMemo(() => {
+    return empleados.filter(
+      (e) =>
+        Array.isArray(e.permisos) &&
+        (
+          Array.isArray(tipoEmpleado)
+            ? tipoEmpleado.some((tipo) => e.permisos.includes(tipo))
+            : e.permisos.includes(tipoEmpleado)
+        )
+    );
+  }, [empleados, tipoEmpleado]);
 
   return (
     <div className="mt-4">
@@ -176,6 +189,7 @@ const AsignarArticulos: React.FC<AsignarArticulosProps> = ({
           const asignacion = asignaciones[key] || {};
           const asignadoPrevio = asignadosPrevios[key];
           const cambioActivo = showCambio[key];
+          
           return (
             <li key={key} className="flex flex-col gap-2 border rounded p-3">
               <span className="font-medium">{item.nombre}</span>
@@ -232,17 +246,7 @@ const AsignarArticulos: React.FC<AsignarArticulosProps> = ({
                     }}
                   >
                     <option value="">Seleccionar empleado</option>
-                    {empleados
-                      .filter(
-                        (e) =>
-                          Array.isArray(e.permisos) &&
-                          (
-                            Array.isArray(tipoEmpleado)
-                              ? tipoEmpleado.some((tipo) => e.permisos.includes(tipo))
-                              : e.permisos.includes(tipoEmpleado)
-                          )
-                      )
-                      .map((empleado) => (
+                    {empleadosFiltrados.map((empleado) => (
                         <option
                           key={empleado.identificador}
                           value={empleado.identificador}
@@ -294,4 +298,5 @@ const AsignarArticulos: React.FC<AsignarArticulosProps> = ({
   );
 };
 
-export default AsignarArticulos;
+// Memoizar componente para evitar re-renderizados innecesarios
+export default React.memo(AsignarArticulos);

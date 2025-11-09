@@ -1,30 +1,40 @@
 import { Routes, Route, Navigate } from "react-router";
+import { lazy, Suspense } from "react";
 import Dashboard from "../organism/dashboard/Dashboard";
 import HomePage from "../organism/home/HomePage";
-import CrearPedido from "../organism/pedido/CrearPedido";
-import DashboardPedidos from "@/organism/pedido/DashboardPedidos";
-import ModificarEmpleado from "@/organism/empleados/ModificarEmpleado";
-import PedidosHerreria from "@/organism/fabricacion/creacion/PedidosHerreria";
-import CrearCliente from "@/organism/clientes/CrearCliente";
-import CrearItem from "@/organism/inventario/CrearItem";
-import CrearEmpleado from "@/organism/empleados/CrearEmpleado";
-import PedidosMasillar from "@/organism/fabricacion/masillar/Masillar";
-import PedidosPreparar from "@/organism/fabricacion/preparar/Preparar";
-import FacturacionPage from "@/organism/facturacion/facturacion/FacturacionPage";
-import EnvioPage from "@/organism/envios/envio/Envio";
-import Register from "@/organism/auth/Register";
 import Login from "@/organism/auth/Login";
-import ReporteComisionesProduccion from "@/organism/pedido/ReporteComisionesProduccion";
-import ModificarItemPage from "@/organism/inventario/ModificarItemPage";
-import ModificarUsuario from "@/organism/usuarios/ModificarUsuario";
-import ModificarCliente from "@/organism/clientes/ModificarCliente";
-import TerminarAsignacion from "@/organism/teminarasignacion/TerminarAsignacion";
-import MonitorPedidos from "@/organism/monitorped/MonitorPedidos";
-import  Pedidos  from "@/organism/pagosFacturacion/Pedidos";
-import MisPagos from "@/organism/pagosFacturacion/MisPagos";
+
+// Lazy loading de componentes pesados para mejorar carga inicial
+const CrearPedido = lazy(() => import("../organism/pedido/CrearPedido"));
+const DashboardPedidos = lazy(() => import("@/organism/pedido/DashboardPedidos"));
+const ModificarEmpleado = lazy(() => import("@/organism/empleados/ModificarEmpleado"));
+const PedidosHerreria = lazy(() => import("@/organism/fabricacion/creacion/PedidosHerreria"));
+const CrearCliente = lazy(() => import("@/organism/clientes/CrearCliente"));
+const CrearItem = lazy(() => import("@/organism/inventario/CrearItem"));
+const CrearEmpleado = lazy(() => import("@/organism/empleados/CrearEmpleado"));
+const PedidosMasillar = lazy(() => import("@/organism/fabricacion/masillar/Masillar"));
+const PedidosPreparar = lazy(() => import("@/organism/fabricacion/preparar/Preparar"));
+const FacturacionPage = lazy(() => import("@/organism/facturacion/facturacion/FacturacionPage"));
+const EnvioPage = lazy(() => import("@/organism/envios/envio/Envio"));
+const Register = lazy(() => import("@/organism/auth/Register"));
+const ReporteComisionesProduccion = lazy(() => import("@/organism/pedido/ReporteComisionesProduccion"));
+const ModificarItemPage = lazy(() => import("@/organism/inventario/ModificarItemPage"));
+const ModificarUsuario = lazy(() => import("@/organism/usuarios/ModificarUsuario"));
+const ModificarCliente = lazy(() => import("@/organism/clientes/ModificarCliente"));
+const TerminarAsignacion = lazy(() => import("@/organism/teminarasignacion/TerminarAsignacion"));
+const MonitorPedidos = lazy(() => import("@/organism/monitorped/MonitorPedidos"));
+const Pedidos = lazy(() => import("@/organism/pagosFacturacion/Pedidos"));
+const MisPagos = lazy(() => import("@/organism/pagosFacturacion/MisPagos"));
 // Importar CuentasPorPagar - El componente debe existir en: frontend/src/organism/cuentasPorPagar/CuentasPorPagar.tsx
 // @ts-ignore - Permitir importación aunque el archivo pueda no existir aún
-import CuentasPorPagar from "@/organism/cuentasPorPagar/CuentasPorPagar";
+const CuentasPorPagar = lazy(() => import("@/organism/cuentasPorPagar/CuentasPorPagar").catch(() => ({ default: () => <div>Módulo no disponible</div> })));
+
+// Componente de carga para Suspense
+const LoadingFallback = () => (
+  <div className="flex justify-center items-center min-h-screen">
+    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+  </div>
+);
 
 function AppRouter() {
   // Función para verificar token y permisos
@@ -67,7 +77,9 @@ function AppRouter() {
           path="crearpedido"
           element={
             <ProtectedRoute permiso="ventas">
-              <CrearPedido />
+              <Suspense fallback={<LoadingFallback />}>
+                <CrearPedido />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -75,7 +87,9 @@ function AppRouter() {
           path="pagos"
           element={
             <ProtectedRoute permiso="pagos">
-              <Pedidos />
+              <Suspense fallback={<LoadingFallback />}>
+                <Pedidos />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -83,7 +97,9 @@ function AppRouter() {
           path="mispagos"
           element={
             <ProtectedRoute permiso="pagos">
-              <MisPagos />
+              <Suspense fallback={<LoadingFallback />}>
+                <MisPagos />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -91,7 +107,9 @@ function AppRouter() {
           path="crearcliente"
           element={
             <ProtectedRoute permiso="crearclientes">
-              <CrearCliente />
+              <Suspense fallback={<LoadingFallback />}>
+                <CrearCliente />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -99,7 +117,9 @@ function AppRouter() {
           path="modificarcliente"
           element={
             <ProtectedRoute permiso="modificarclientes">
-              <ModificarCliente />
+              <Suspense fallback={<LoadingFallback />}>
+                <ModificarCliente />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -107,7 +127,9 @@ function AppRouter() {
           path="crearitem"
           element={
             <ProtectedRoute permiso="crearinventario">
-              <CrearItem />
+              <Suspense fallback={<LoadingFallback />}>
+                <CrearItem />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -115,7 +137,9 @@ function AppRouter() {
           path="inventario/modificar"
           element={
             <ProtectedRoute permiso="modificarinventario">
-              <ModificarItemPage />
+              <Suspense fallback={<LoadingFallback />}>
+                <ModificarItemPage />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -123,7 +147,9 @@ function AppRouter() {
           path="terminarasignacion"
           element={
             <ProtectedRoute permiso="terminarasignacion">
-              <TerminarAsignacion />
+              <Suspense fallback={<LoadingFallback />}>
+                <TerminarAsignacion />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -131,7 +157,9 @@ function AppRouter() {
           path="monitorpedidos"
           element={
             <ProtectedRoute permiso="monitorpedidos">
-              <MonitorPedidos />
+              <Suspense fallback={<LoadingFallback />}>
+                <MonitorPedidos />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -139,7 +167,9 @@ function AppRouter() {
           path="pedidos/facturacion"
           element={
             <ProtectedRoute permiso="monitorpedidos">
-              <Pedidos />
+              <Suspense fallback={<LoadingFallback />}>
+                <Pedidos />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -147,16 +177,24 @@ function AppRouter() {
           path="pedidosherreria"
           element={
             <ProtectedRoute permiso="asignar">
-              <PedidosHerreria />
+              <Suspense fallback={<LoadingFallback />}>
+                <PedidosHerreria />
+              </Suspense>
             </ProtectedRoute>
           }
         />
-        <Route path="dashboard" element={<DashboardPedidos />} />
+        <Route path="dashboard" element={
+          <Suspense fallback={<LoadingFallback />}>
+            <DashboardPedidos />
+          </Suspense>
+        } />
         <Route
           path="crearempleado"
           element={
             <ProtectedRoute permiso="crearempleados">
-              <CrearEmpleado />
+              <Suspense fallback={<LoadingFallback />}>
+                <CrearEmpleado />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -164,7 +202,9 @@ function AppRouter() {
           path="modificarempleado"
           element={
             <ProtectedRoute permiso="modificarempleados">
-              <ModificarEmpleado />
+              <Suspense fallback={<LoadingFallback />}>
+                <ModificarEmpleado />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -172,7 +212,9 @@ function AppRouter() {
           path="modificarusuario"
           element={
             <ProtectedRoute permiso="modificarusuarios">
-              <ModificarUsuario />
+              <Suspense fallback={<LoadingFallback />}>
+                <ModificarUsuario />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -180,7 +222,9 @@ function AppRouter() {
           path="masillar"
           element={
             <ProtectedRoute permiso="asignar">
-              <PedidosMasillar />
+              <Suspense fallback={<LoadingFallback />}>
+                <PedidosMasillar />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -188,7 +232,9 @@ function AppRouter() {
           path="preparar"
           element={
             <ProtectedRoute permiso="asignar">
-              <PedidosPreparar />
+              <Suspense fallback={<LoadingFallback />}>
+                <PedidosPreparar />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -196,7 +242,9 @@ function AppRouter() {
           path="facturacion"
           element={
             <ProtectedRoute permiso="asignar">
-              <FacturacionPage />
+              <Suspense fallback={<LoadingFallback />}>
+                <FacturacionPage />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -204,7 +252,9 @@ function AppRouter() {
           path="envios"
           element={
             <ProtectedRoute permiso="asignar">
-              <EnvioPage />
+              <Suspense fallback={<LoadingFallback />}>
+                <EnvioPage />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -212,7 +262,9 @@ function AppRouter() {
           path="reportes/comisiones/produccion"
           element={
             <ProtectedRoute permiso="admin">
-              <ReporteComisionesProduccion />
+              <Suspense fallback={<LoadingFallback />}>
+                <ReporteComisionesProduccion />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -220,7 +272,9 @@ function AppRouter() {
           path="register"
           element={
             <ProtectedRoute permiso="admin">
-              <Register />
+              <Suspense fallback={<LoadingFallback />}>
+                <Register />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -228,7 +282,9 @@ function AppRouter() {
           path="cuentas-por-pagar"
           element={
             <ProtectedRoute permiso="cuentas_por_pagar">
-              <CuentasPorPagar />
+              <Suspense fallback={<LoadingFallback />}>
+                <CuentasPorPagar />
+              </Suspense>
             </ProtectedRoute>
           }
         />
