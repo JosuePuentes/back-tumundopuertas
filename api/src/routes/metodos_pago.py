@@ -374,10 +374,17 @@ async def transferir_dinero(id: str, request: TransferenciaRequest):
     return object_id_to_str(updated_metodo)
 
 @router.get("/all", response_model=List[MetodoPago])
+@router.get("/all/", response_model=List[MetodoPago])  # Soporte para ruta con barra final
 async def get_all_metodos_pago_all():
     """Endpoint específico para obtener todos los métodos de pago"""
-    metodos = list(metodos_pago_collection.find())
-    return [object_id_to_str(metodo) for metodo in metodos]
+    try:
+        metodos = list(metodos_pago_collection.find())
+        return [object_id_to_str(metodo) for metodo in metodos]
+    except Exception as e:
+        import traceback
+        print(f"ERROR GET ALL METODOS PAGO: {str(e)}")
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener métodos de pago: {str(e)}")
 
 @router.get("/historial-completo", response_model=List[Transaccion])
 async def get_historial_completo():

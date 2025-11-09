@@ -79,6 +79,7 @@ app.add_middleware(
         "Access-Control-Allow-Methods", 
         "Access-Control-Allow-Headers",
     ],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Manejador de errores de validación
@@ -90,19 +91,32 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     print(f"  Method: {request.method}")
     print(f"  Errors: {exc.errors()}")
     print(f"  Body: {await request.body()}")
-    return JSONResponse(
+    origin = request.headers.get("origin", "*")
+    response = JSONResponse(
         status_code=422,
         content={
             "detail": exc.errors(),
             "body": str(await request.body()) if hasattr(request, 'body') else None
         }
     )
+    # Agregar headers CORS a la respuesta de error
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 # Middleware para manejo de errores
 @app.middleware("http")
 async def catch_exceptions_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
+        # Asegurar que las respuestas de error también tengan headers CORS
+        if response.status_code >= 400:
+            response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
     except RequestValidationError as e:
         # Esto será manejado por el exception_handler
@@ -110,13 +124,20 @@ async def catch_exceptions_middleware(request: Request, call_next):
     except Exception as e:
         print(f"ERROR MIDDLEWARE: {str(e)}")
         print(f"ERROR MIDDLEWARE TRACEBACK: {traceback.format_exc()}")
-        return JSONResponse(
+        # Asegurar que los errores también tengan headers CORS
+        origin = request.headers.get("origin", "*")
+        error_response = JSONResponse(
             status_code=500,
             content={
                 "detail": f"Error interno del servidor: {str(e)}",
                 "error_type": type(e).__name__
             }
         )
+        error_response.headers["Access-Control-Allow-Origin"] = origin
+        error_response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
+        error_response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        error_response.headers["Access-Control-Allow-Credentials"] = "true"
+        return error_response
 
 # Endpoint de prueba para verificar CORS
 @app.get("/health")
