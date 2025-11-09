@@ -61,6 +61,46 @@ def init_pedidos_indexes():
     except Exception as e:
         if "already exists" in str(e).lower():
             pass  # Índice ya existe
+    
+    try:
+        # Índice para cliente_id (búsquedas frecuentes)
+        pedidos_collection.create_index(
+            [("cliente_id", 1)],
+            name="idx_cliente_id"
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            pass  # Índice ya existe
+    
+    try:
+        # Índice compuesto para queries comunes: cliente_id + estado_general + fecha_creacion
+        pedidos_collection.create_index(
+            [("cliente_id", 1), ("estado_general", 1), ("fecha_creacion", -1)],
+            name="idx_cliente_estado_fecha"
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            pass  # Índice ya existe
+    
+    try:
+        # Índice para numero_orden (búsquedas frecuentes)
+        pedidos_collection.create_index(
+            [("numero_orden", 1)],
+            name="idx_numero_orden"
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            pass  # Índice ya existe
+    
+    try:
+        # Índice para tipo_pedido (filtros comunes)
+        pedidos_collection.create_index(
+            [("tipo_pedido", 1)],
+            name="idx_tipo_pedido"
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            pass  # Índice ya existe
 
 def init_clientes_indexes():
     """
@@ -111,3 +151,106 @@ def init_clientes_indexes():
             print("ℹ️  Índice único en preferencias_clientes.cliente_id ya existe")
         else:
             print(f"⚠️  Error al crear índice en preferencias_clientes: {e}")
+
+def init_empleados_indexes():
+    """
+    Inicializar índices para optimizar queries de empleados.
+    """
+    try:
+        # Índice para identificador (búsquedas muy frecuentes)
+        empleados_collection.create_index(
+            [("identificador", 1)],
+            name="idx_empleado_identificador"
+        )
+        print("✅ Índice creado en empleados.identificador")
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            print("ℹ️  Índice en empleados.identificador ya existe")
+        else:
+            print(f"⚠️  Error al crear índice en empleados.identificador: {e}")
+    
+    try:
+        # Índice de texto para búsquedas por nombre
+        empleados_collection.create_index(
+            [("nombreCompleto", "text")],
+            name="idx_empleado_nombre_text"
+        )
+        print("✅ Índice de texto creado en empleados.nombreCompleto")
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            print("ℹ️  Índice de texto en empleados.nombreCompleto ya existe")
+        else:
+            print(f"⚠️  Error al crear índice de texto en empleados.nombreCompleto: {e}")
+
+def init_inventario_indexes():
+    """
+    Inicializar índices para optimizar queries de inventario.
+    """
+    try:
+        # Índice para código (búsquedas muy frecuentes)
+        items_collection.create_index(
+            [("codigo", 1)],
+            name="idx_item_codigo"
+        )
+        print("✅ Índice creado en inventario.codigo")
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            print("ℹ️  Índice en inventario.codigo ya existe")
+        else:
+            print(f"⚠️  Error al crear índice en inventario.codigo: {e}")
+    
+    try:
+        # Índice de texto para búsquedas por nombre
+        items_collection.create_index(
+            [("nombre", "text")],
+            name="idx_item_nombre_text"
+        )
+        print("✅ Índice de texto creado en inventario.nombre")
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            print("ℹ️  Índice de texto en inventario.nombre ya existe")
+        else:
+            print(f"⚠️  Error al crear índice de texto en inventario.nombre: {e}")
+    
+    try:
+        # Índice para categoría (filtros comunes)
+        items_collection.create_index(
+            [("categoria", 1)],
+            name="idx_item_categoria"
+        )
+        print("✅ Índice creado en inventario.categoria")
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            print("ℹ️  Índice en inventario.categoria ya existe")
+        else:
+            print(f"⚠️  Error al crear índice en inventario.categoria: {e}")
+
+def init_clientes_indexes_adicionales():
+    """
+    Inicializar índices adicionales para optimizar queries de clientes.
+    """
+    try:
+        # Índice para RIF (búsquedas frecuentes)
+        clientes_collection.create_index(
+            [("rif", 1)],
+            name="idx_cliente_rif"
+        )
+        print("✅ Índice creado en clientes.rif")
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            print("ℹ️  Índice en clientes.rif ya existe")
+        else:
+            print(f"⚠️  Error al crear índice en clientes.rif: {e}")
+    
+    try:
+        # Índice de texto para búsquedas por nombre
+        clientes_collection.create_index(
+            [("cliente_nombre", "text")],
+            name="idx_cliente_nombre_text"
+        )
+        print("✅ Índice de texto creado en clientes.cliente_nombre")
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            print("ℹ️  Índice de texto en clientes.cliente_nombre ya existe")
+        else:
+            print(f"⚠️  Error al crear índice de texto en clientes.cliente_nombre: {e}")

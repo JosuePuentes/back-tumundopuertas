@@ -169,8 +169,17 @@ async def asignaciones_directo():
 @app.on_event("startup")
 async def startup_event():
     """Inicializar índices únicos en las colecciones de clientes y pedidos"""
-    from .config.mongodb import init_clientes_indexes, init_pedidos_indexes
+    from .config.mongodb import (
+        init_clientes_indexes, 
+        init_pedidos_indexes,
+        init_empleados_indexes,
+        init_inventario_indexes,
+        init_clientes_indexes_adicionales
+    )
     print("🔧 Inicializando índices de MongoDB...")
     init_clientes_indexes()
     init_pedidos_indexes()
+    init_empleados_indexes()
+    init_inventario_indexes()
+    init_clientes_indexes_adicionales()
     print("✅ Inicialización de índices completada")

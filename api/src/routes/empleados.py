@@ -30,7 +30,17 @@ async def test_empleados_endpoint():
 
 @router.get("/all/")
 async def get_all_empleados():
-    empleados = list(empleados_collection.find())
+    # Proyección optimizada: solo campos necesarios
+    projection = {
+        "_id": 1,
+        "identificador": 1,
+        "nombreCompleto": 1,
+        "cargo": 1,
+        "permisos": 1,
+        "pin": 1,
+        "activo": 1
+    }
+    empleados = list(empleados_collection.find({}, projection))
     
     # Mapear cargo a permisos automáticamente
     def mapear_cargo_a_permisos(cargo, nombre_completo):

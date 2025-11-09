@@ -23,7 +23,19 @@ class ClienteUpdate(BaseModel):
 
 @router.get("/all")
 async def get_all_clientes():
-    clientes = list(clientes_collection.find())
+    # Proyección optimizada: solo campos necesarios
+    projection = {
+        "_id": 1,
+        "cliente_id": 1,
+        "cliente_nombre": 1,
+        "rif": 1,
+        "cliente_direccion": 1,
+        "cliente_telefono": 1,
+        "cliente_email": 1,
+        "activo": 1
+    }
+    
+    clientes = list(clientes_collection.find({}, projection))
     for cliente in clientes:
         cliente["_id"] = str(cliente["_id"])
     return clientes

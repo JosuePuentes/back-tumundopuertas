@@ -205,11 +205,27 @@ async def get_all_items(sucursal: Optional[str] = Query(None, description="Filtr
     Filtra solo items activos con precio > 0.
     Si se especifica sucursal, incluye información de existencia de esa sucursal.
     """
+    # Proyección optimizada: solo campos necesarios
+    projection = {
+        "_id": 1,
+        "codigo": 1,
+        "nombre": 1,
+        "descripcion": 1,
+        "categoria": 1,
+        "precio": 1,
+        "costo": 1,
+        "cantidad": 1,
+        "existencia": 1,
+        "existencia2": 1,
+        "activo": 1,
+        "imagenes": 1
+    }
+    
     # Filtrar items activos con precio > 0
     items = list(items_collection.find({
         "activo": True,
         "precio": {"$gt": 0}
-    }))
+    }, projection))
     
     for item in items:
         item["_id"] = str(item["_id"])

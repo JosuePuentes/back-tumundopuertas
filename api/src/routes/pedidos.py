@@ -164,7 +164,26 @@ async def get_all_pedidos():
     # Excluir todos los pedidos cancelados
     query["estado_general"] = {"$ne": "cancelado"}
     
-    pedidos = list(pedidos_collection.find(query))
+    # Proyección optimizada: solo campos necesarios
+    projection = {
+        "_id": 1,
+        "numero_orden": 1,
+        "cliente_id": 1,
+        "cliente_nombre": 1,
+        "fecha_creacion": 1,
+        "fecha_actualizacion": 1,
+        "estado_general": 1,
+        "items": 1,
+        "seguimiento": 1,
+        "adicionales": 1,
+        "tipo_pedido": 1
+    }
+    
+    # Limitar a 1000 pedidos más recientes y ordenar por fecha descendente
+    pedidos = list(pedidos_collection.find(query, projection)
+                   .sort("fecha_creacion", -1)
+                   .limit(1000))
+    
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
         # Normalizar adicionales: None o no existe → []
@@ -1760,7 +1779,26 @@ async def get_pedidos_ruta_produccion():
     # Devuelve todos los pedidos en estado_general orden1, orden2, orden3 (excluyendo pedidos web)
     filtro = {"estado_general": {"$in": ["orden1", "orden2", "orden3","pendiente","orden4","orden5","orden6","entregado"]}}
     filtro = excluir_pedidos_web(filtro)
-    pedidos = list(pedidos_collection.find(filtro))
+    
+    # Proyección optimizada: solo campos necesarios
+    projection = {
+        "_id": 1,
+        "numero_orden": 1,
+        "cliente_id": 1,
+        "cliente_nombre": 1,
+        "fecha_creacion": 1,
+        "fecha_actualizacion": 1,
+        "estado_general": 1,
+        "items": 1,
+        "seguimiento": 1,
+        "tipo_pedido": 1
+    }
+    
+    # Limitar a 1000 pedidos más recientes y ordenar por fecha descendente
+    pedidos = list(pedidos_collection.find(filtro, projection)
+                   .sort("fecha_creacion", -1)
+                   .limit(1000))
+    
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
     return pedidos
