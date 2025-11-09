@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -41,26 +41,35 @@ const MonitorPedidos: React.FC = () => {
   const [estadoSeleccionado, setEstadoSeleccionado] = useState<Record<string, string>>({});
   const [actualizando, setActualizando] = useState<string>("");
 
-  useEffect(() => {
-    if (!shouldSearch) return;
-    const fetchPedidos = async () => {
-      setLoading(true);
-      try {
-        let url = `${apiUrl}/pedidos/filtrar/por-fecha/?`;
-        if (fechaInicio && fechaFin) {
-          url += `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
-        }
-        const res = await fetch(url);
-        const data = await res.json();
-        setPedidos(Array.isArray(data) ? data : []);
-      } catch {}
-      setLoading(false);
-      setShouldSearch(false);
-    };
-    fetchPedidos();
-  }, [shouldSearch, apiUrl, fechaInicio, fechaFin]);
+  // Función memoizada para cargar pedidos
+  const fetchPedidos = useCallback(async () => {
+    setLoading(true);
+    try {
+      let url = `${apiUrl}/pedidos/filtrar/por-fecha/?`;
+      if (fechaInicio && fechaFin) {
+        url += `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
+      }
+      const res = await fetch(url);
+      const data = await res.json();
+      setPedidos(Array.isArray(data) ? data : []);
+    } catch {}
+    setLoading(false);
+    setShouldSearch(false);
+  }, [apiUrl, fechaInicio, fechaFin]);
 
-  const handleActualizarEstado = async (pedidoId: string) => {
+  // Carga inicial automática
+  useEffect(() => {
+    fetchPedidos();
+  }, []);
+
+  // Carga cuando se activa shouldSearch
+  useEffect(() => {
+    if (shouldSearch) {
+      fetchPedidos();
+    }
+  }, [shouldSearch, fetchPedidos]);
+
+  const handleActualizarEstado = useCallback(async (pedidoId: string) => {
     if (!estadoSeleccionado[pedidoId]) return;
     setActualizando(pedidoId);
     try {
@@ -74,15 +83,18 @@ const MonitorPedidos: React.FC = () => {
       setPedidos((prev) => prev.map((p) => p._id === pedidoId ? { ...p, estado_general: estadoSeleccionado[pedidoId] } : p));
     } catch {}
     setActualizando("");
-  };
+  }, [apiUrl, estadoSeleccionado]);
 
-  const pedidosFiltrados = pedidos.filter(
-    (p) =>
-      (ordenFilter === "" || p.estado_general === ordenFilter) &&
-      ((p.cliente_nombre?.toLowerCase?.().includes(search.toLowerCase()) || "") ||
-        (p.estado_general?.toLowerCase?.().includes(search.toLowerCase()) || "") ||
-        (p._id?.includes(search) || ""))
-  );
+  // Memoizar pedidos filtrados para evitar recalcular en cada render
+  const pedidosFiltrados = useMemo(() => {
+    return pedidos.filter(
+      (p) =>
+        (ordenFilter === "" || p.estado_general === ordenFilter) &&
+        ((p.cliente_nombre?.toLowerCase?.().includes(search.toLowerCase()) || "") ||
+          (p.estado_general?.toLowerCase?.().includes(search.toLowerCase()) || "") ||
+          (p._id?.includes(search) || ""))
+    );
+  }, [pedidos, ordenFilter, search]);
 
   return (
     <div className="max-w-4xl mx-auto mt-8">

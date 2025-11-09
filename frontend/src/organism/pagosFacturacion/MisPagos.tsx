@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import {
   Card,
   CardHeader,
@@ -37,7 +37,7 @@ const MisPagos: React.FC = () => {
   const [fechaInicio, setFechaInicio] = useState("");
   const [fechaFin, setFechaFin] = useState("");
 
-  const fetchPagos = async () => {
+  const fetchPagos = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -55,11 +55,11 @@ const MisPagos: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [fechaInicio, fechaFin]);
 
   useEffect(() => {
     fetchPagos();
-  }, []);
+  }, [fetchPagos]);
 
   return (
     <Card className="w-full shadow-md rounded-2xl">

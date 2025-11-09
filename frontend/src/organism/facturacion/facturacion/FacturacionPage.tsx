@@ -29,8 +29,18 @@ const FacturacionPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchPedidosFacturacion();
-    fetchEmpleado(`${import.meta.env.VITE_API_URL}/empleados/all/`);
+    // Carga paralela: ambas peticiones se ejecutan simultáneamente
+    const apiUrl = import.meta.env.VITE_API_URL || "https://localhost:3000";
+    Promise.all([
+      fetchPedidosFacturacion().catch(() => {
+        // Error silencioso, se maneja en el estado
+        return null;
+      }),
+      fetchEmpleado(`${apiUrl}/empleados/all/`).catch(() => {
+        // Error silencioso, se maneja en el hook
+        return null;
+      })
+    ]);
   }, []);
 
   return (

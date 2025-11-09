@@ -2602,7 +2602,7 @@ async def actualizar_estado_general_pedido(
 async def get_asignaciones_modulo_produccion(modulo: str):
     """Obtener asignaciones reales de un módulo específico para el dashboard"""
     try:
-        print(f"DEBUG MODULO: Obteniendo asignaciones para módulo {modulo}")
+        debug_log(f"DEBUG MODULO: Obteniendo asignaciones para módulo {modulo}")
         
         # Mapear módulos a órdenes
         modulo_orden = {
@@ -2616,7 +2616,7 @@ async def get_asignaciones_modulo_produccion(modulo: str):
         if not orden:
             raise HTTPException(status_code=400, detail=f"Módulo no válido: {modulo}")
         
-        print(f"DEBUG MODULO: Buscando pedidos con orden {orden}")
+        debug_log(f"DEBUG MODULO: Buscando pedidos con orden {orden}")
         
         # Buscar pedidos que tengan asignaciones en este módulo
         pipeline = [
@@ -2668,6 +2668,8 @@ async def get_asignaciones_modulo_produccion(modulo: str):
             }
         ]
         
+        # Agregar límite para mejorar rendimiento
+        pipeline.append({"$limit": 500})
         asignaciones = list(pedidos_collection.aggregate(pipeline))
         
         # Convertir ObjectId a string para JSON
@@ -2677,7 +2679,7 @@ async def get_asignaciones_modulo_produccion(modulo: str):
             if asignacion.get("_id"):
                 asignacion["_id"] = str(asignacion["_id"])
         
-        print(f"DEBUG MODULO: Encontradas {len(asignaciones)} asignaciones para módulo {modulo}")
+        debug_log(f"DEBUG MODULO: Encontradas {len(asignaciones)} asignaciones para módulo {modulo}")
         
         return {
             "asignaciones": asignaciones,
@@ -2695,7 +2697,7 @@ async def get_asignaciones_modulo_produccion(modulo: str):
 async def get_todas_asignaciones_produccion():
     """Obtener todas las asignaciones de todos los módulos para el dashboard"""
     try:
-        print(f"DEBUG TODAS: Obteniendo todas las asignaciones de producción")
+        debug_log(f"DEBUG TODAS: Obteniendo todas las asignaciones de producción")
         
         pipeline = [
             {
@@ -2759,6 +2761,8 @@ async def get_todas_asignaciones_produccion():
             }
         ]
         
+        # Agregar límite para mejorar rendimiento
+        pipeline.append({"$limit": 1000})
         asignaciones = list(pedidos_collection.aggregate(pipeline))
         
         # Convertir ObjectId a string para JSON
@@ -2768,7 +2772,7 @@ async def get_todas_asignaciones_produccion():
             if asignacion.get("_id"):
                 asignacion["_id"] = str(asignacion["_id"])
         
-        print(f"DEBUG TODAS: Encontradas {len(asignaciones)} asignaciones totales")
+        debug_log(f"DEBUG TODAS: Encontradas {len(asignaciones)} asignaciones totales")
         
         return {
             "asignaciones": asignaciones,
@@ -2777,7 +2781,7 @@ async def get_todas_asignaciones_produccion():
         }
         
     except Exception as e:
-        print(f"ERROR TODAS: Error al obtener todas las asignaciones: {e}")
+        debug_log(f"ERROR TODAS: Error al obtener todas las asignaciones: {e}")
         raise HTTPException(status_code=500, detail=f"Error al obtener asignaciones: {str(e)}")
 
 

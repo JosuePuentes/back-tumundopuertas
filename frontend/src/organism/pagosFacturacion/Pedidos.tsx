@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
   Table,
@@ -175,7 +175,7 @@ const Pedidos: React.FC = () => {
   // Filtro local por cliente
   const [clienteFiltro, setClienteFiltro] = useState<string>("");
 
-  const fetchPedidos = async () => {
+  const fetchPedidos = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -197,17 +197,33 @@ const Pedidos: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [fechaInicio, fechaFin]);
+
+  // Carga inicial automática
+  useEffect(() => {
+    fetchPedidos();
+  }, [fetchPedidos]);
 
 
-  // Calcular suma de pagos realizados usando historial_pagos
-  const sumaPagos = pedidos.reduce((acc, pedido) => {
-    const sumaPedido = (pedido.historial_pagos || []).reduce(
-      (a, pago) => a + (pago.monto || 0),
-      0
+  // Memoizar suma de pagos para evitar recalcular en cada render
+  const sumaPagos = useMemo(() => {
+    return pedidos.reduce((acc, pedido) => {
+      const sumaPedido = (pedido.historial_pagos || []).reduce(
+        (a, pago) => a + (pago.monto || 0),
+        0
+      );
+      return acc + sumaPedido;
+    }, 0);
+  }, [pedidos]);
+
+  // Memoizar pedidos filtrados
+  const pedidosFiltrados = useMemo(() => {
+    return pedidos.filter((pedido) =>
+      clienteFiltro.trim() === ""
+        ? true
+        : (pedido.cliente_nombre || "").toLowerCase().includes(clienteFiltro.trim().toLowerCase())
     );
-    return acc + sumaPedido;
-  }, 0);
+  }, [pedidos, clienteFiltro]);
 
   return (
     <Card className="w-full shadow-md rounded-2xl max-w-5xl mx-auto px-1 sm:px-4">
@@ -289,13 +305,7 @@ const Pedidos: React.FC = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pedidos
-                  .filter((pedido) =>
-                    clienteFiltro.trim() === ""
-                      ? true
-                      : (pedido.cliente_nombre || "").toLowerCase().includes(clienteFiltro.trim().toLowerCase())
-                  )
-                  .map((pedido) => {
+                {pedidosFiltrados.map((pedido) => {
                   // Calcular el total del pedido
                   const total = (pedido.items || []).reduce(
                     (acc, item) => acc + (item.precio || 0) * (item.cantidad || 0),
