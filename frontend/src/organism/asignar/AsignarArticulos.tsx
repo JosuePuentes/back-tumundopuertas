@@ -158,13 +158,10 @@ const AsignarArticulos: React.FC<AsignarArticulosProps> = ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(consulta),
       });
-      console.log("Respuesta de /pruebaapi1:", res);
       setMessage("Asignación enviada correctamente");
-      const result = await res.json();
-      console.log("Respuesta de /pruebaapi1:", result);
+      await res.json();
     } catch (err) {
       setMessage("Error al enviar la asignación");
-      console.error("Error al enviar a /pruebaapi1:", err);
     } finally {
       setLoading(false);
     }

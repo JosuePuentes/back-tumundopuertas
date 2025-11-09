@@ -27,7 +27,6 @@ export function useEmpleado() {
       });
       if (!res.ok) throw new Error("Error en la petición");
       const result = await res.json();
-      console.log("Empleados obtenidos:", result);
       setDataEmpleados(result);
     } catch (err: any) {
       setError(err.message || "Error desconocido");

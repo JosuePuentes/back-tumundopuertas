@@ -109,3 +109,4 @@
 
 Los datos del carrito, borradores y preferencias se mantendrán en la BD incluso después del cierre de sesión, y se recuperarán automáticamente al iniciar sesión nuevamente con el mismo `cliente_id`.
 
+

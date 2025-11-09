@@ -71,7 +71,6 @@ const TerminarAsignacion: React.FC = () => {
   }, [identificador, apiUrl]);
 
   if (loading) return <div>Cargando asignaciones...</div>;
-  console.log(asignaciones.forEach((a) => console.log(a.cliente.cliente_nombre)));
   document.querySelectorAll('input[type="number"].no-mouse-wheel');
   return (
     <div className="max-w-3xl mx-auto mt-8">
@@ -135,12 +134,6 @@ const TerminarAsignacion: React.FC = () => {
                     <div className="pt-4">
                       <button
                         onClick={async () => {
-                          console.log("DEBUG: Enviando datos al backend:");
-                          console.log("- orden:", asig.orden);
-                          console.log("- pedido_id:", asig.pedido_id);
-                          console.log("- item_id:", asig.item_id);
-                          console.log("- empleado_id:", identificador);
-                          
                           const payload = {
                             orden: asig.orden,
                             pedido_id: asig.pedido_id,
@@ -150,13 +143,10 @@ const TerminarAsignacion: React.FC = () => {
                             fecha_fin: new Date().toISOString(),
                           };
                           
-                          console.log("DEBUG: Payload completo:", JSON.stringify(payload, null, 2));
-                          
                           try {
                             await terminarEmpleado(payload);
                             window.location.reload();
                           } catch (error) {
-                            console.error("ERROR al terminar:", error);
                             alert(`Error: ${error}`);
                           }
                         }}

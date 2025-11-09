@@ -286,3 +286,5 @@ const pedidosFiltrados = useMemo(() => {
 - ✅ Mensaje informativo al abrir F12 (opcional)
 - ✅ Mejor rendimiento general del módulo
 
+
+

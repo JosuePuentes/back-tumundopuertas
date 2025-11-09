@@ -157,7 +157,6 @@ const ModificarUsuario: React.FC = () => {
       const usuarioActual = localStorage.getItem("usuario");
       if (updated.usuario === usuarioActual && updated.permisos) {
         localStorage.setItem("permisos", JSON.stringify(updated.permisos));
-        console.log("✅ Permisos actualizados en localStorage:", updated.permisos);
       }
       
       setMensaje("Usuario modificado correctamente ✅");

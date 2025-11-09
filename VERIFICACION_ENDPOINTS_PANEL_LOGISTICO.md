@@ -66,3 +66,5 @@ Con el prefijo `/pedidos` del router, las URLs completas son:
 3. Verificar la conexión a MongoDB
 4. Asegurarse de que la colección `MOVIMIENTOS_LOGISTICOS` existe (se creará automáticamente al primer uso)
 
+
+

@@ -54,7 +54,6 @@ const PedidosHerreria: React.FC = () => {
       .catch(() => setError("Error al cargar los pedidos"))
       .finally(() => setLoading(false));
     fetchEmpleado(`${import.meta.env.VITE_API_URL}/empleados/all/`);
-    console.log("Pedidos cargados:", dataPedidos);
   }, []);
 
   // ...

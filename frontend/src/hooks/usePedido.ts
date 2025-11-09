@@ -30,7 +30,6 @@ export function usePedido() {
       });
       const result = await res.json();
       setDataPedidos(result);
-      console.log("Resultado de la API:", result);
       return { success: true, data: result, status: res.status };
     } catch (err: any) {
       const errorMessage = err.message || "Error desconocido";

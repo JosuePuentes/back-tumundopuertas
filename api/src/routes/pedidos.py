@@ -8124,3 +8124,491 @@ async def get_planificacion_produccion():
         import traceback
         print(f"TRACEBACK: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error al obtener planificación: {str(e)}")
+
+@router.get("/panel-control-logistico/items-produccion-por-estado/")
+async def get_items_produccion_por_estado():
+    """
+    Items en producción agrupados por estado_item
+    """
+    try:
+        items_por_estado = {}
+        
+        # Estados: 0=pendiente, 1=herreria, 2=masillar, 3=preparar
+        estados_nombres = {
+            0: "pendiente",
+            1: "herreria",
+            2: "masillar",
+            3: "preparar"
+        }
+        
+        for estado_num, estado_nombre in estados_nombres.items():
+            items = list(pedidos_collection.aggregate([
+                {"$unwind": "$items"},
+                {"$match": {"items.estado_item": estado_num}},
+                {"$group": {
+                    "_id": "$items.codigo",
+                    "item_id": {"$first": "$items.id"},
+                    "cantidad": {"$sum": "$items.cantidad"},
+                    "item_nombre": {"$first": "$items.nombre"},
+                    "item_descripcion": {"$first": "$items.descripcion"},
+                    "pedidos": {"$push": {
+                        "pedido_id": {"$toString": "$_id"},
+                        "cantidad": "$items.cantidad",
+                        "cliente_nombre": "$cliente_nombre"
+                    }}
+                }},
+                {"$sort": {"cantidad": -1}}
+            ]))
+            
+            # Enriquecer con datos del inventario
+            for item in items:
+                codigo = item.get("_id")
+                if codigo:
+                    item_inventario = items_collection.find_one({"codigo": codigo})
+                    if item_inventario:
+                        item["existencia_inventario"] = item_inventario.get("cantidad", 0)
+                        item["precio"] = item_inventario.get("precio", 0)
+            
+            items_por_estado[estado_nombre] = {
+                "estado": estado_num,
+                "estado_nombre": estado_nombre,
+                "items": items,
+                "total_items": len(items),
+                "total_cantidad": sum(i["cantidad"] for i in items)
+            }
+        
+        return {
+            "items_por_estado": items_por_estado,
+            "fecha_actualizacion": datetime.now().isoformat()
+        }
+    except Exception as e:
+        debug_log(f"ERROR ITEMS PRODUCCION POR ESTADO: {e}")
+        import traceback
+        debug_log(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener items por estado: {str(e)}")
+
+@router.get("/panel-control-logistico/asignaciones-terminadas/")
+async def get_asignaciones_terminadas(
+    fecha_inicio: Optional[str] = Query(None),
+    fecha_fin: Optional[str] = Query(None),
+    empleado_id: Optional[str] = Query(None)
+):
+    """
+    Asignaciones terminadas con detalles
+    """
+    try:
+        query = {}
+        
+        # Filtrar por empleado si se especifica
+        if empleado_id:
+            query["empleado_id"] = empleado_id
+        
+        # Filtrar por fechas si se especifican
+        if fecha_inicio or fecha_fin:
+            query["fecha"] = {}
+            if fecha_inicio:
+                query["fecha"]["$gte"] = fecha_inicio
+            if fecha_fin:
+                query["fecha"]["$lte"] = fecha_fin
+        
+        # Buscar movimientos de tipo "terminar_asignacion"
+        query["tipo_movimiento"] = "terminar_asignacion"
+        
+        asignaciones = list(movimientos_logisticos_collection.find(query).sort("fecha", -1).limit(1000))
+        
+        # Convertir ObjectId a string y enriquecer con datos
+        for asignacion in asignaciones:
+            asignacion["_id"] = str(asignacion["_id"])
+            
+            # Buscar datos del empleado si existe empleado_id
+            if asignacion.get("empleado_id"):
+                empleado = empleados_collection.find_one({"identificador": asignacion["empleado_id"]})
+                if empleado:
+                    asignacion["empleado_nombre"] = empleado.get("nombreCompleto", "N/A")
+                else:
+                    asignacion["empleado_nombre"] = "N/A"
+        
+        return {
+            "asignaciones_terminadas": asignaciones,
+            "total": len(asignaciones),
+            "fecha_actualizacion": datetime.now().isoformat()
+        }
+    except Exception as e:
+        debug_log(f"ERROR ASIGNACIONES TERMINADAS: {e}")
+        import traceback
+        debug_log(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener asignaciones terminadas: {str(e)}")
+
+@router.get("/panel-control-logistico/empleados-items-terminados/")
+async def get_empleados_items_terminados(
+    fecha_inicio: Optional[str] = Query(None),
+    fecha_fin: Optional[str] = Query(None)
+):
+    """
+    Empleados con cantidad de items terminados
+    """
+    try:
+        query = {
+            "tipo_movimiento": "terminar_asignacion"
+        }
+        
+        if fecha_inicio or fecha_fin:
+            query["fecha"] = {}
+            if fecha_inicio:
+                query["fecha"]["$gte"] = fecha_inicio
+            if fecha_fin:
+                query["fecha"]["$lte"] = fecha_fin
+        
+        # Agrupar por empleado
+        empleados_items = list(movimientos_logisticos_collection.aggregate([
+            {"$match": query},
+            {"$group": {
+                "_id": "$empleado_id",
+                "total_items_terminados": {"$sum": "$cantidad"},
+                "total_asignaciones": {"$sum": 1},
+                "items": {"$push": {
+                    "item_codigo": "$item_codigo",
+                    "item_nombre": "$item_nombre",
+                    "cantidad": "$cantidad",
+                    "fecha": "$fecha"
+                }}
+            }},
+            {"$sort": {"total_items_terminados": -1}}
+        ]))
+        
+        # Enriquecer con datos del empleado
+        for empleado_data in empleados_items:
+            empleado_id = empleado_data.get("_id")
+            if empleado_id:
+                empleado = empleados_collection.find_one({"identificador": empleado_id})
+                if empleado:
+                    empleado_data["empleado_nombre"] = empleado.get("nombreCompleto", "N/A")
+                    empleado_data["empleado_identificador"] = empleado.get("identificador", empleado_id)
+                else:
+                    empleado_data["empleado_nombre"] = "N/A"
+                    empleado_data["empleado_identificador"] = empleado_id
+        
+        return {
+            "empleados": empleados_items,
+            "total_empleados": len(empleados_items),
+            "fecha_actualizacion": datetime.now().isoformat()
+        }
+    except Exception as e:
+        debug_log(f"ERROR EMPLEADOS ITEMS TERMINADOS: {e}")
+        import traceback
+        debug_log(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener empleados con items terminados: {str(e)}")
+
+@router.get("/panel-control-logistico/items-por-ventas/")
+async def get_items_por_ventas(
+    fecha_inicio: Optional[str] = Query(None),
+    fecha_fin: Optional[str] = Query(None)
+):
+    """
+    Items vendidos con detalles de ventas
+    """
+    try:
+        match_query = {
+            "items.estado_item": {"$gte": 4},
+            "estado_general": {"$in": ["orden4", "orden5", "orden6"]}
+        }
+        
+        if fecha_inicio or fecha_fin:
+            match_query["fecha_creacion"] = {}
+            if fecha_inicio:
+                match_query["fecha_creacion"]["$gte"] = fecha_inicio
+            if fecha_fin:
+                match_query["fecha_creacion"]["$lte"] = fecha_fin
+        
+        items_ventas = list(pedidos_collection.aggregate([
+            {"$unwind": "$items"},
+            {"$match": match_query},
+            {"$group": {
+                "_id": "$items.codigo",
+                "item_id": {"$first": "$items.id"},
+                "cantidad_vendida": {"$sum": "$items.cantidad"},
+                "item_nombre": {"$first": "$items.nombre"},
+                "item_descripcion": {"$first": "$items.descripcion"},
+                "precio_promedio": {"$avg": "$items.precio"},
+                "total_ventas": {"$sum": {"$multiply": ["$items.cantidad", "$items.precio"]}},
+                "pedidos": {"$push": {
+                    "pedido_id": {"$toString": "$_id"},
+                    "cantidad": "$items.cantidad",
+                    "precio": "$items.precio",
+                    "cliente_nombre": "$cliente_nombre",
+                    "fecha_creacion": "$fecha_creacion"
+                }}
+            }},
+            {"$sort": {"cantidad_vendida": -1}}
+        ]))
+        
+        # Enriquecer con datos del inventario
+        for item in items_ventas:
+            codigo = item.get("_id")
+            if codigo:
+                item_inventario = items_collection.find_one({"codigo": codigo})
+                if item_inventario:
+                    item["existencia_actual"] = item_inventario.get("cantidad", 0)
+                    item["costo"] = item_inventario.get("costo", 0)
+        
+        return {
+            "items_ventas": items_ventas,
+            "total_items": len(items_ventas),
+            "total_cantidad_vendida": sum(i["cantidad_vendida"] for i in items_ventas),
+            "fecha_actualizacion": datetime.now().isoformat()
+        }
+    except Exception as e:
+        debug_log(f"ERROR ITEMS POR VENTAS: {e}")
+        import traceback
+        debug_log(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener items por ventas: {str(e)}")
+
+@router.get("/panel-control-logistico/inventario-por-sucursal/")
+async def get_inventario_por_sucursal():
+    """
+    Inventario agrupado por sucursal
+    """
+    try:
+        # Obtener todos los items activos
+        items = list(items_collection.find({"activo": True}, {
+            "codigo": 1,
+            "nombre": 1,
+            "descripcion": 1,
+            "cantidad": 1,
+            "existencia": 1,
+            "existencia2": 1,
+            "precio": 1,
+            "costo": 1
+        }))
+        
+        # Agrupar por sucursal
+        inventario_sucursal = {
+            "sucursal_1": {
+                "nombre": "Sucursal Principal",
+                "items": [],
+                "total_items": 0,
+                "total_valor": 0
+            },
+            "sucursal_2": {
+                "nombre": "Sucursal 2",
+                "items": [],
+                "total_items": 0,
+                "total_valor": 0
+            }
+        }
+        
+        for item in items:
+            codigo = item.get("codigo")
+            cantidad_sucursal1 = item.get("cantidad", 0) or item.get("existencia", 0)
+            cantidad_sucursal2 = item.get("existencia2", 0)
+            precio = item.get("precio", 0)
+            
+            # Sucursal 1
+            if cantidad_sucursal1 > 0:
+                inventario_sucursal["sucursal_1"]["items"].append({
+                    "codigo": codigo,
+                    "nombre": item.get("nombre", ""),
+                    "descripcion": item.get("descripcion", ""),
+                    "cantidad": cantidad_sucursal1,
+                    "precio": precio,
+                    "valor_total": cantidad_sucursal1 * precio
+                })
+                inventario_sucursal["sucursal_1"]["total_items"] += cantidad_sucursal1
+                inventario_sucursal["sucursal_1"]["total_valor"] += cantidad_sucursal1 * precio
+            
+            # Sucursal 2
+            if cantidad_sucursal2 > 0:
+                inventario_sucursal["sucursal_2"]["items"].append({
+                    "codigo": codigo,
+                    "nombre": item.get("nombre", ""),
+                    "descripcion": item.get("descripcion", ""),
+                    "cantidad": cantidad_sucursal2,
+                    "precio": precio,
+                    "valor_total": cantidad_sucursal2 * precio
+                })
+                inventario_sucursal["sucursal_2"]["total_items"] += cantidad_sucursal2
+                inventario_sucursal["sucursal_2"]["total_valor"] += cantidad_sucursal2 * precio
+        
+        return {
+            "inventario_por_sucursal": inventario_sucursal,
+            "fecha_actualizacion": datetime.now().isoformat()
+        }
+    except Exception as e:
+        debug_log(f"ERROR INVENTARIO POR SUCURSAL: {e}")
+        import traceback
+        debug_log(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener inventario por sucursal: {str(e)}")
+
+@router.get("/panel-control-logistico/sugerencia-produccion-mejorada/")
+async def get_sugerencia_produccion_mejorada():
+    """
+    Sugerencias mejoradas de producción con más detalles
+    """
+    try:
+        sugerencias = []
+        
+        # Obtener todos los items activos
+        items = list(items_collection.find({"activo": True}))
+        
+        for item in items:
+            codigo = item.get("codigo")
+            if not codigo:
+                continue
+            
+            existencia = item.get("cantidad", 0) or item.get("existencia", 0)
+            
+            # Calcular en producción por estado
+            estados_produccion = {}
+            for estado in [0, 1, 2, 3]:
+                items_produccion = list(pedidos_collection.aggregate([
+                    {"$unwind": "$items"},
+                    {"$match": {
+                        "items.codigo": codigo,
+                        "items.estado_item": estado
+                    }},
+                    {"$group": {
+                        "_id": None,
+                        "cantidad": {"$sum": "$items.cantidad"}
+                    }}
+                ]))
+                cantidad = items_produccion[0]["cantidad"] if items_produccion else 0
+                estados_produccion[estado] = cantidad
+            
+            total_en_produccion = sum(estados_produccion.values())
+            
+            # Calcular vendidas en últimos 30, 60 y 90 días
+            fecha_30 = (datetime.now() - timedelta(days=30)).isoformat()
+            fecha_60 = (datetime.now() - timedelta(days=60)).isoformat()
+            fecha_90 = (datetime.now() - timedelta(days=90)).isoformat()
+            
+            vendidas_30 = list(pedidos_collection.aggregate([
+                {"$unwind": "$items"},
+                {"$match": {
+                    "items.codigo": codigo,
+                    "items.estado_item": {"$gte": 4},
+                    "estado_general": {"$in": ["orden4", "orden5", "orden6"]},
+                    "fecha_creacion": {"$gte": fecha_30}
+                }},
+                {"$group": {"_id": None, "cantidad": {"$sum": "$items.cantidad"}}}
+            ]))
+            cantidad_vendidas_30 = vendidas_30[0]["cantidad"] if vendidas_30 else 0
+            
+            vendidas_60 = list(pedidos_collection.aggregate([
+                {"$unwind": "$items"},
+                {"$match": {
+                    "items.codigo": codigo,
+                    "items.estado_item": {"$gte": 4},
+                    "estado_general": {"$in": ["orden4", "orden5", "orden6"]},
+                    "fecha_creacion": {"$gte": fecha_60}
+                }},
+                {"$group": {"_id": None, "cantidad": {"$sum": "$items.cantidad"}}}
+            ]))
+            cantidad_vendidas_60 = vendidas_60[0]["cantidad"] if vendidas_60 else 0
+            
+            # Calcular existencia real
+            existencia_real = existencia - total_en_produccion
+            
+            # Calcular prioridad mejorada
+            prioridad = 0
+            if existencia_real <= 0:
+                prioridad = 3  # Alta
+            elif existencia_real <= 5:
+                prioridad = 2  # Media
+            elif cantidad_vendidas_30 > 0:
+                prioridad = 1  # Baja
+            
+            # Calcular cantidad sugerida basada en promedio de ventas
+            promedio_ventas_mensual = cantidad_vendidas_60 / 2 if cantidad_vendidas_60 > 0 else 0
+            cantidad_sugerida = max(promedio_ventas_mensual - existencia_real, 0) if existencia_real < promedio_ventas_mensual else 0
+            
+            # Solo agregar si tiene prioridad o está en producción
+            if prioridad > 0 or total_en_produccion > 0:
+                sugerencias.append({
+                    "item_id": str(item["_id"]),
+                    "codigo": codigo,
+                    "nombre": item.get("nombre", ""),
+                    "descripcion": item.get("descripcion", ""),
+                    "existencia_actual": existencia,
+                    "existencia_real": existencia_real,
+                    "en_produccion": {
+                        "total": total_en_produccion,
+                        "por_estado": estados_produccion
+                    },
+                    "vendidas": {
+                        "ultimos_30_dias": cantidad_vendidas_30,
+                        "ultimos_60_dias": cantidad_vendidas_60,
+                        "promedio_mensual": promedio_ventas_mensual
+                    },
+                    "prioridad": prioridad,
+                    "cantidad_sugerida": round(cantidad_sugerida, 2),
+                    "precio": item.get("precio", 0),
+                    "costo": item.get("costo", 0)
+                })
+        
+        # Ordenar por prioridad y ventas
+        sugerencias.sort(key=lambda x: (x["prioridad"], x["vendidas"]["ultimos_30_dias"]), reverse=True)
+        
+        return {
+            "sugerencias": sugerencias,
+            "total": len(sugerencias),
+            "fecha_actualizacion": datetime.now().isoformat()
+        }
+    except Exception as e:
+        debug_log(f"ERROR SUGERENCIA PRODUCCION MEJORADA: {e}")
+        import traceback
+        debug_log(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener sugerencias mejoradas: {str(e)}")
+
+@router.get("/panel-control-logistico/exportar-pdf/")
+async def exportar_pdf_panel_control(
+    tipo: str = Query(..., description="Tipo de exportación: resumen, items-produccion, ventas, inventario"),
+    fecha_inicio: Optional[str] = Query(None),
+    fecha_fin: Optional[str] = Query(None)
+):
+    """
+    Exportar datos del panel de control para PDF
+    """
+    try:
+        datos_exportar = {}
+        
+        if tipo == "resumen":
+            resumen = await get_resumen_panel_control_logistico()
+            datos_exportar = {
+                "tipo": "resumen",
+                "datos": resumen,
+                "fecha_exportacion": datetime.now().isoformat()
+            }
+        
+        elif tipo == "items-produccion":
+            items = await get_items_produccion()
+            datos_exportar = {
+                "tipo": "items-produccion",
+                "datos": items,
+                "fecha_exportacion": datetime.now().isoformat()
+            }
+        
+        elif tipo == "ventas":
+            items_ventas = await get_items_por_ventas(fecha_inicio, fecha_fin)
+            datos_exportar = {
+                "tipo": "ventas",
+                "datos": items_ventas,
+                "fecha_exportacion": datetime.now().isoformat()
+            }
+        
+        elif tipo == "inventario":
+            inventario = await get_inventario_por_sucursal()
+            datos_exportar = {
+                "tipo": "inventario",
+                "datos": inventario,
+                "fecha_exportacion": datetime.now().isoformat()
+            }
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Tipo de exportación no válido: {tipo}")
+        
+        return datos_exportar
+    except Exception as e:
+        debug_log(f"ERROR EXPORTAR PDF: {e}")
+        import traceback
+        debug_log(f"TRACEBACK: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error al exportar datos: {str(e)}")

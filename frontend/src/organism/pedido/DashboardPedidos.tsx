@@ -217,7 +217,12 @@ const DashboardPedidos: React.FC = () => {
     fetch(`${apiUrl}/pedidos/produccion/ruta`)
       .then((res) => res.json())
       .then((data) => setPedidos(data))
-      .catch(console.error);
+      .catch((err) => {
+        // Solo mostrar errores críticos en producción
+        if (!import.meta.env.PROD) {
+          console.error(err);
+        }
+      });
   };
 
   useEffect(() => {

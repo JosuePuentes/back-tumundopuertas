@@ -149,3 +149,6 @@ El backend devuelve los datos en formato camelCase:
 - ✅ Incluido `adicionales` en la función `transform_factura_to_camelcase`
 - ✅ Guardado de `adicionales` en la base de datos cuando se crean facturas
 
+
+
+
