@@ -682,13 +682,14 @@ async def get_pedidos_herreria(
 ):
     """Obtener ITEMS individuales para producción - Items pendientes (0) y en proceso (1-3)"""
     try:
-        # Buscar solo pedidos internos (excluir pedidos web)
+        # Buscar solo pedidos internos (excluir pedidos web y cancelados)
         # Incluir pedidos internos (tipo_pedido: "interno") y pedidos sin tipo_pedido (retrocompatibilidad)
         query = {
             "$or": [
                 {"tipo_pedido": {"$ne": "web"}},  # No es web
                 {"tipo_pedido": {"$exists": False}}  # No tiene tipo_pedido (pedidos antiguos)
-            ]
+            ],
+            "estado_general": {"$ne": "cancelado"}  # Excluir pedidos cancelados
         }
         pedidos = list(pedidos_collection.find(query, {
             "_id": 1,
@@ -705,17 +706,18 @@ async def get_pedidos_herreria(
         items_individuales = []
         
         for pedido in pedidos:
-            # Verificación adicional: saltar pedidos web por si acaso
+            # Verificación adicional: saltar pedidos web y cancelados por si acaso
             tipo_pedido = pedido.get("tipo_pedido")
-            if tipo_pedido == "web":
+            estado_general = pedido.get("estado_general", "")
+            if tipo_pedido == "web" or estado_general == "cancelado":
                 continue
             pedido_id = str(pedido["_id"])
             
-            # Filtrar items pendientes (0) y en proceso (1-3)
+            # Filtrar items pendientes (0) y en proceso (1-3), excluir cancelados (4)
             for item in pedido.get("items", []):
                 estado_item = item.get("estado_item", 0)  # Default 0
                 
-                if estado_item in [0, 1, 2, 3]:  # Pendientes y en proceso
+                if estado_item in [0, 1, 2, 3]:  # Pendientes y en proceso (excluir 4 = cancelado)
                     # Crear item individual con información del pedido
                     item_individual = {
                         "id": item.get("id", str(item.get("_id", ""))),
@@ -1776,8 +1778,8 @@ async def finalizar_pedido(
 
 @router.get("/produccion/ruta")
 async def get_pedidos_ruta_produccion():
-    # Devuelve todos los pedidos en estado_general orden1, orden2, orden3 (excluyendo pedidos web)
-    filtro = {"estado_general": {"$in": ["orden1", "orden2", "orden3","pendiente","orden4","orden5","orden6","entregado"]}}
+    # Devuelve todos los pedidos en estado_general orden1, orden2, orden3 (excluyendo pedidos web y cancelados)
+    filtro = {"estado_general": {"$in": ["orden1", "orden2", "orden3","pendiente","orden4","orden5","orden6","entregado"], "$ne": "cancelado"}}
     filtro = excluir_pedidos_web(filtro)
     
     # Proyección optimizada: solo campos necesarios
@@ -1812,7 +1814,9 @@ async def get_pedidos_por_estado(estado_general: list[str] = Query(..., descript
     Solo retorna pedidos con items pendientes (estado_item 0 o 1) para herrería
     """
     # Si solo se pasa uno, FastAPI lo convierte en lista de un elemento
-    filtro = {"estado_general": {"$in": estado_general}}
+    # Excluir pedidos cancelados de la lista de estados
+    estados_filtrados = [e for e in estado_general if e != "cancelado"]
+    filtro = {"estado_general": {"$in": estados_filtrados}}
     # Excluir pedidos web
     filtro = excluir_pedidos_web(filtro)
     # Filtrar solo pedidos que tienen items pendientes o en herrería (estado_item 0 o 1)
@@ -2510,12 +2514,13 @@ async def get_pedidos_por_fecha(fecha_inicio: str = None, fecha_fin: str = None)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Formato de fecha inválido: {str(e)}")
     
-    # Construir filtro base: excluir pedidos web
+    # Construir filtro base: excluir pedidos web y cancelados
     filtro_base = {
         "$or": [
             {"tipo_pedido": {"$ne": "web"}},
             {"tipo_pedido": {"$exists": False}}
-        ]
+        ],
+        "estado_general": {"$ne": "cancelado"}  # Excluir pedidos cancelados
     }
     
     # Si hay filtro de fecha, combinarlo
@@ -2544,9 +2549,10 @@ async def get_pedidos_por_fecha(fecha_inicio: str = None, fecha_fin: str = None)
     # Procesar y filtrar por fecha si es necesario (para casos donde fecha_creacion es datetime)
     pedidos_filtrados = []
     for pedido in pedidos:
-        # Verificación adicional: saltar pedidos web por si acaso
+        # Verificación adicional: saltar pedidos web y cancelados por si acaso
         tipo_pedido = pedido.get("tipo_pedido")
-        if tipo_pedido == "web":
+        estado_general = pedido.get("estado_general", "")
+        if tipo_pedido == "web" or estado_general == "cancelado":
             continue
         
         fecha_creacion = pedido.get("fecha_creacion")
@@ -4319,6 +4325,47 @@ async def cancelar_pedido(
         fecha_cancelacion = datetime.now().isoformat()
         usuario_cancelacion = user.get("username", "usuario_desconocido")
         
+        # Obtener historial de pagos antes de limpiarlo para revertir transacciones
+        historial_pagos_anterior = pedido.get("historial_pagos", [])
+        total_abonado_anterior = pedido.get("total_abonado", 0.0)
+        
+        # Revertir transacciones de métodos de pago relacionadas con este pedido
+        transacciones_eliminadas = 0
+        saldos_revertidos = 0
+        if historial_pagos_anterior:
+            # Buscar todas las transacciones relacionadas con este pedido
+            transacciones_pedido = list(transacciones_collection.find({"pedido_id": pedido_id}))
+            
+            for transaccion in transacciones_pedido:
+                try:
+                    metodo_pago_id = transaccion.get("metodo_pago_id")
+                    monto = transaccion.get("monto", 0.0)
+                    tipo = transaccion.get("tipo", "")
+                    
+                    # Solo revertir depósitos (pagos que aumentaron el saldo)
+                    if tipo == "deposito" and monto > 0 and metodo_pago_id:
+                        # Buscar el método de pago
+                        try:
+                            metodo_obj_id = ObjectId(metodo_pago_id)
+                            metodo_pago = metodos_pago_collection.find_one({"_id": metodo_obj_id})
+                            
+                            if metodo_pago:
+                                # Revertir el saldo (restar el monto que se había agregado)
+                                metodos_pago_collection.update_one(
+                                    {"_id": metodo_obj_id},
+                                    {"$inc": {"saldo": -float(monto)}}
+                                )
+                                saldos_revertidos += 1
+                                debug_log(f"DEBUG CANCELAR: Saldo revertido para método {metodo_pago.get('nombre', 'N/A')}: -{monto}")
+                        except Exception as e:
+                            debug_log(f"ERROR CANCELAR: Error al revertir saldo de método {metodo_pago_id}: {e}")
+                    
+                    # Eliminar la transacción
+                    transacciones_collection.delete_one({"_id": transaccion["_id"]})
+                    transacciones_eliminadas += 1
+                except Exception as e:
+                    debug_log(f"ERROR CANCELAR: Error al procesar transacción {transaccion.get('_id', 'N/A')}: {e}")
+        
         # Actualizar el estado_general del pedido y limpiar pagos
         result = pedidos_collection.update_one(
             {"_id": pedido_obj_id},
@@ -4372,7 +4419,10 @@ async def cancelar_pedido(
             "motivo_cancelacion": request.motivo_cancelacion,
             "cancelado_por": usuario_cancelacion,
             "items_actualizados": items_actualizados,
-            "items_desapareceran_herreria": items_actualizados
+            "items_desapareceran_herreria": items_actualizados,
+            "transacciones_eliminadas": transacciones_eliminadas,
+            "saldos_revertidos": saldos_revertidos,
+            "total_abonado_revertido": total_abonado_anterior
         }
         
     except HTTPException:
