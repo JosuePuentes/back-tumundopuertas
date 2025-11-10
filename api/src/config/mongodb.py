@@ -6,8 +6,18 @@ from .config import MONGO_URI
 dotenv_path = os.path.join(os.path.dirname(__file__), '../../.env')
 load_dotenv(dotenv_path)
 
-# Configuración de conexión a MongoDB
-client = MongoClient(MONGO_URI, tls=True, tlsAllowInvalidCertificates=True)
+# Configuración de conexión a MongoDB con timeouts
+# serverSelectionTimeoutMS: tiempo máximo para seleccionar un servidor (5 segundos)
+# connectTimeoutMS: tiempo máximo para establecer conexión (5 segundos)
+# socketTimeoutMS: tiempo máximo para operaciones de socket (30 segundos)
+client = MongoClient(
+    MONGO_URI, 
+    tls=True, 
+    tlsAllowInvalidCertificates=True,
+    serverSelectionTimeoutMS=5000,  # 5 segundos
+    connectTimeoutMS=5000,  # 5 segundos
+    socketTimeoutMS=30000  # 30 segundos
+)
 db = client["PROCESOS"]
 
 usuarios_collection = db["USUARIOS"]

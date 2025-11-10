@@ -27,22 +27,44 @@ async def register_admin(user: UserAdmin):
 
 @router.post("/login/")
 async def admin_login(admin: AdminLogin):
-    db_admin = usuarios_collection.find_one({"usuario": admin.usuario})
-    if not db_admin:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
-    
-    
-    if not verify_password(admin.password, db_admin["password"]):
-        raise HTTPException(status_code=401, detail="Contraseña incorrecta")
-    access_token = create_admin_access_token(db_admin)
-    print(f"User {admin.usuario} logged in with permissions: {db_admin['permisos']}")
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "permisos": db_admin["permisos"],
-        "usuario": db_admin["usuario"],
-        "identificador": db_admin["identificador"]
-    }
+    try:
+        print(f"DEBUG LOGIN: Intentando login para usuario: {admin.usuario}")
+        
+        # Buscar usuario con timeout implícito
+        db_admin = usuarios_collection.find_one({"usuario": admin.usuario})
+        
+        if not db_admin:
+            print(f"DEBUG LOGIN: Usuario no encontrado: {admin.usuario}")
+            raise HTTPException(status_code=401, detail="Usuario no encontrado")
+        
+        print(f"DEBUG LOGIN: Usuario encontrado, verificando contraseña...")
+        
+        # Verificar contraseña
+        if not verify_password(admin.password, db_admin["password"]):
+            print(f"DEBUG LOGIN: Contraseña incorrecta para usuario: {admin.usuario}")
+            raise HTTPException(status_code=401, detail="Contraseña incorrecta")
+        
+        print(f"DEBUG LOGIN: Contraseña correcta, generando token...")
+        
+        # Generar token
+        access_token = create_admin_access_token(db_admin)
+        
+        print(f"DEBUG LOGIN: Token generado. User {admin.usuario} logged in with permissions: {db_admin.get('permisos', [])}")
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "permisos": db_admin.get("permisos", []),
+            "usuario": db_admin.get("usuario", ""),
+            "identificador": db_admin.get("identificador", "")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR LOGIN: Error inesperado durante login: {str(e)}")
+        import traceback
+        print(f"TRACEBACK LOGIN: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor durante el login: {str(e)}")
 
 @router.post("/create-temp-admin/")
 async def create_temp_admin():
@@ -162,29 +184,47 @@ async def cliente_login(cliente: ClienteLogin):
     Login de clientes autenticados.
     Devuelve cliente_access_token en lugar de access_token.
     """
-    db_cliente = clientes_usuarios_collection.find_one({"usuario": cliente.usuario})
-    if not db_cliente:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
-    
-    if not db_cliente.get("activo", True):
-        raise HTTPException(status_code=403, detail="Cliente inactivo")
-    
-    if not verify_password(cliente.password, db_cliente["password"]):
-        raise HTTPException(status_code=401, detail="Contraseña incorrecta")
-    
-    # Generar token para cliente
-    cliente_access_token = create_cliente_access_token(db_cliente)
-    
-    print(f"Cliente {cliente.usuario} logged in successfully")
-    
-    return {
-        "cliente_access_token": cliente_access_token,
-        "token_type": "bearer",
-        "cliente_id": str(db_cliente["_id"]),
-        "usuario": db_cliente["usuario"],
-        "nombre": db_cliente["nombre"],
-        "rol": "cliente"
-    }
+    try:
+        print(f"DEBUG CLIENTE LOGIN: Intentando login para cliente: {cliente.usuario}")
+        
+        db_cliente = clientes_usuarios_collection.find_one({"usuario": cliente.usuario})
+        
+        if not db_cliente:
+            print(f"DEBUG CLIENTE LOGIN: Cliente no encontrado: {cliente.usuario}")
+            raise HTTPException(status_code=401, detail="Usuario no encontrado")
+        
+        if not db_cliente.get("activo", True):
+            print(f"DEBUG CLIENTE LOGIN: Cliente inactivo: {cliente.usuario}")
+            raise HTTPException(status_code=403, detail="Cliente inactivo")
+        
+        print(f"DEBUG CLIENTE LOGIN: Cliente encontrado y activo, verificando contraseña...")
+        
+        if not verify_password(cliente.password, db_cliente["password"]):
+            print(f"DEBUG CLIENTE LOGIN: Contraseña incorrecta para cliente: {cliente.usuario}")
+            raise HTTPException(status_code=401, detail="Contraseña incorrecta")
+        
+        print(f"DEBUG CLIENTE LOGIN: Contraseña correcta, generando token...")
+        
+        # Generar token para cliente
+        cliente_access_token = create_cliente_access_token(db_cliente)
+        
+        print(f"DEBUG CLIENTE LOGIN: Token generado. Cliente {cliente.usuario} logged in successfully")
+        
+        return {
+            "cliente_access_token": cliente_access_token,
+            "token_type": "bearer",
+            "cliente_id": str(db_cliente["_id"]),
+            "usuario": db_cliente.get("usuario", ""),
+            "nombre": db_cliente.get("nombre", ""),
+            "rol": "cliente"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR CLIENTE LOGIN: Error inesperado durante login: {str(e)}")
+        import traceback
+        print(f"TRACEBACK CLIENTE LOGIN: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor durante el login: {str(e)}")
 
 # ============================================================================
 # ENDPOINTS PARA RECUPERACIÓN DE CONTRASEÑA DE CLIENTES
