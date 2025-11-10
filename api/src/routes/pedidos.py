@@ -552,9 +552,24 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
             except Exception as e:
                 debug_log(f"ERROR CREAR PEDIDO [Item {idx}]: Error al actualizar inventario para item código='{codigo}': {e}")
     
-    # Si hay abonos iniciales en el historial_pagos, incrementar el saldo de los métodos de pago
+    # Si hay abonos iniciales en el historial_pagos, calcular total_abonado e incrementar el saldo de los métodos de pago
+    total_abonado_inicial = 0.0
     if pedido.historial_pagos:
         debug_log(f"DEBUG CREAR PEDIDO: Procesando {len(pedido.historial_pagos)} abonos iniciales")
+        # Calcular total_abonado sumando todos los montos del historial_pagos
+        for pago in pedido.historial_pagos:
+            monto_pago = getattr(pago, 'monto', None) if hasattr(pago, 'monto') else (pago.get('monto') if isinstance(pago, dict) else 0)
+            if monto_pago:
+                total_abonado_inicial += float(monto_pago)
+        
+        # Actualizar el pedido con el total_abonado calculado
+        if total_abonado_inicial > 0:
+            pedidos_collection.update_one(
+                {"_id": ObjectId(pedido_id)},
+                {"$set": {"total_abonado": total_abonado_inicial, "pago": "abonado" if total_abonado_inicial > 0 else "sin pago"}}
+            )
+            debug_log(f"DEBUG CREAR PEDIDO: Total abonado inicial calculado: {total_abonado_inicial}")
+        
         for pago in pedido.historial_pagos:
             if pago.metodo and pago.monto and pago.monto > 0:
                 debug_log(f"DEBUG CREAR PEDIDO: Procesando abono de {pago.monto} con método {pago.metodo}")
