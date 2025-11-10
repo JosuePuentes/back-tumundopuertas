@@ -440,33 +440,50 @@ async def get_estadisticas_dashboard():
     try:
         collections = get_collections()
         
-        # Estadísticas por módulo
-        estadisticas = {}
-        modulos = ["herreria", "masillar", "preparar", "listo_facturar"]
-        
-        for modulo in modulos:
-            total = collections["asignaciones"].count_documents({
-                "modulo": modulo,
-                "estado": {"$in": ["en_proceso", "pendiente"]}
-            })
-            
-            en_proceso = collections["asignaciones"].count_documents({
-                "modulo": modulo,
-                "estado": "en_proceso"
-            })
-            
-            pendientes = collections["asignaciones"].count_documents({
-                "modulo": modulo,
-                "estado": "pendiente"
-            })
-            
-            estadisticas[modulo] = {
-                "total": total,
-                "en_proceso": en_proceso,
-                "pendientes": pendientes
+        # OPTIMIZACIÓN: Usar aggregation pipeline en lugar de múltiples count_documents
+        # Esto reduce de 12 queries a 1 query
+        pipeline = [
+            {
+                "$match": {
+                    "modulo": {"$in": ["herreria", "masillar", "preparar", "listo_facturar"]},
+                    "estado": {"$in": ["en_proceso", "pendiente"]}
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "modulo": "$modulo",
+                        "estado": "$estado"
+                    },
+                    "count": {"$sum": 1}
+                }
             }
+        ]
         
-        # Estadísticas generales
+        resultados = list(collections["asignaciones"].aggregate(pipeline))
+        
+        # Inicializar estadísticas
+        estadisticas = {
+            "herreria": {"total": 0, "en_proceso": 0, "pendientes": 0},
+            "masillar": {"total": 0, "en_proceso": 0, "pendientes": 0},
+            "preparar": {"total": 0, "en_proceso": 0, "pendientes": 0},
+            "listo_facturar": {"total": 0, "en_proceso": 0, "pendientes": 0}
+        }
+        
+        # Procesar resultados de aggregation
+        for resultado in resultados:
+            modulo = resultado["_id"]["modulo"]
+            estado = resultado["_id"]["estado"]
+            count = resultado["count"]
+            
+            if modulo in estadisticas:
+                estadisticas[modulo]["total"] += count
+                if estado == "en_proceso":
+                    estadisticas[modulo]["en_proceso"] = count
+                elif estado == "pendiente":
+                    estadisticas[modulo]["pendientes"] = count
+        
+        # Estadísticas generales (misma lógica que antes)
         total_asignaciones = sum(stats["total"] for stats in estadisticas.values())
         total_en_proceso = sum(stats["en_proceso"] for stats in estadisticas.values())
         total_pendientes = sum(stats["pendientes"] for stats in estadisticas.values())
@@ -762,6 +779,9 @@ async def get_datos_reales_dashboard():
             },
             {
                 "$sort": {"orden": 1, "fecha_asignacion": -1}
+            },
+            {
+                "$limit": 500  # OPTIMIZACIÓN: Limitar resultados para mejor rendimiento
             }
         ]
         

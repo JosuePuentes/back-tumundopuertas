@@ -27,10 +27,28 @@ async def get_all_clientes():
     Obtener todos los clientes.
     Retorna los campos normalizados para compatibilidad con frontend.
     """
-    # Obtener todos los campos necesarios (sin proyección para tener acceso a todos los campos)
-    clientes = list(clientes_collection.find({}))
+    # OPTIMIZACIÓN: Proyección con solo los campos necesarios para normalización
+    projection = {
+        "_id": 1,
+        "nombre": 1,
+        "nombres": 1,
+        "cliente_nombre": 1,
+        "rif": 1,
+        "cedula": 1,
+        "direccion": 1,
+        "cliente_direccion": 1,
+        "telefono": 1,
+        "telefono_contacto": 1,
+        "cliente_telefono": 1
+    }
     
-    # Normalizar campos para compatibilidad con frontend
+    # OPTIMIZACIÓN: Limitar a 1000 clientes más recientes y ordenar por fecha descendente
+    # Si hay fecha_creacion, ordenar por ella, sino traer los primeros
+    clientes = list(clientes_collection.find({}, projection)
+                    .sort("_id", -1)  # Ordenar por _id descendente (más recientes primero)
+                    .limit(1000))
+    
+    # Normalizar campos para compatibilidad con frontend (misma lógica, sin cambios)
     clientes_normalizados = []
     for cliente in clientes:
         cliente_normalizado = {

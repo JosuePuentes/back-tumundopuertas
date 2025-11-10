@@ -200,13 +200,67 @@ async def get_all_pedidos():
                    .sort("fecha_creacion", -1)
                    .limit(1000))
     
+    # OPTIMIZACIÓN: Batch query para obtener todos los clientes de una vez (evita N+1)
+    cliente_ids = list(set(p.get("cliente_id") for p in pedidos if p.get("cliente_id")))
+    clientes_dict = {}
+    clientes_usuarios_dict = {}
+    
+    if cliente_ids:
+        try:
+            # Obtener clientes de clientes_collection
+            cliente_obj_ids = [ObjectId(cid) for cid in cliente_ids if ObjectId.is_valid(cid)]
+            if cliente_obj_ids:
+                clientes_list = list(clientes_collection.find(
+                    {"_id": {"$in": cliente_obj_ids}},
+                    {"_id": 1, "nombre": 1, "rif": 1, "cedula": 1, "telefono": 1, "telefono_contacto": 1}
+                ))
+                clientes_dict = {str(c["_id"]): c for c in clientes_list}
+            
+            # Obtener clientes de clientes_usuarios_collection
+            if cliente_obj_ids:
+                clientes_usuarios_list = list(clientes_usuarios_collection.find(
+                    {"_id": {"$in": cliente_obj_ids}},
+                    {"_id": 1, "nombre": 1, "rif": 1, "cedula": 1, "telefono": 1, "telefono_contacto": 1}
+                ))
+                clientes_usuarios_dict = {str(c["_id"]): c for c in clientes_usuarios_list}
+        except Exception as e:
+            debug_log(f"Advertencia: Error en batch query de clientes: {str(e)}")
+    
+    # Enriquecer pedidos en memoria (sin queries adicionales)
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
         # Normalizar adicionales: None o no existe → []
         if "adicionales" not in pedido or pedido["adicionales"] is None:
             pedido["adicionales"] = []
-        # Enriquecer con datos del cliente (cédula y teléfono)
-        enriquecer_pedido_con_datos_cliente(pedido)
+        
+        # Enriquecer con datos del cliente usando el diccionario (sin query adicional)
+        cliente_id = pedido.get("cliente_id")
+        if cliente_id:
+            cliente = clientes_dict.get(cliente_id) or clientes_usuarios_dict.get(cliente_id)
+            if cliente:
+                # Obtener nombre del cliente desde la BD
+                nombre_cliente = cliente.get("nombre", "")
+                if nombre_cliente:
+                    pedido["cliente_nombre"] = nombre_cliente
+                
+                # Obtener RIF del cliente desde la BD
+                rif_cliente = cliente.get("rif", "")
+                if rif_cliente:
+                    pedido["cliente_rif"] = rif_cliente
+                    # También actualizar cliente_cedula si no existe
+                    if "cliente_cedula" not in pedido or not pedido.get("cliente_cedula"):
+                        pedido["cliente_cedula"] = rif_cliente
+                
+                # Obtener cédula/RIF (retrocompatibilidad)
+                cedula = cliente.get("cedula") or cliente.get("rif", "")
+                if cedula and "cliente_cedula" not in pedido:
+                    pedido["cliente_cedula"] = cedula
+                
+                # Obtener teléfono
+                telefono = cliente.get("telefono") or cliente.get("telefono_contacto", "")
+                if telefono:
+                    pedido["cliente_telefono"] = telefono
+    
     return pedidos
 
 @router.get("/test-terminar")

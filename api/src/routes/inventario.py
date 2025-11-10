@@ -221,11 +221,14 @@ async def get_all_items(sucursal: Optional[str] = Query(None, description="Filtr
         "imagenes": 1
     }
     
+    # OPTIMIZACIÓN: Limitar a 2000 items más recientes
     # Filtrar items activos con precio > 0
     items = list(items_collection.find({
         "activo": True,
         "precio": {"$gt": 0}
-    }, projection))
+    }, projection)
+    .sort("_id", -1)  # Ordenar por _id descendente (más recientes primero)
+    .limit(2000))
     
     for item in items:
         item["_id"] = str(item["_id"])

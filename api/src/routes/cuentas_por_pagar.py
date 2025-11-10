@@ -45,7 +45,30 @@ async def get_all_cuentas_por_pagar(
                 raise HTTPException(status_code=400, detail="Estado debe ser 'pendiente' o 'pagada'")
             query["estado"] = estado
         
-        cuentas = list(cuentas_por_pagar_collection.find(query).sort("fecha_creacion", -1))
+        # OPTIMIZACIÓN: Proyección con solo los campos necesarios del modelo
+        projection = {
+            "_id": 1,
+            "proveedor_id": 1,
+            "proveedor_nombre": 1,
+            "proveedor_rif": 1,
+            "proveedor_telefono": 1,
+            "proveedor_direccion": 1,
+            "fecha_creacion": 1,
+            "fecha_vencimiento": 1,
+            "descripcion": 1,
+            "items": 1,
+            "monto_total": 1,
+            "monto_abonado": 1,
+            "saldo_pendiente": 1,
+            "estado": 1,
+            "historial_abonos": 1,
+            "notas": 1
+        }
+        
+        # OPTIMIZACIÓN: Limitar a 500 cuentas más recientes
+        cuentas = list(cuentas_por_pagar_collection.find(query, projection)
+                       .sort("fecha_creacion", -1)
+                       .limit(500))
         return [object_id_to_str(cuenta) for cuenta in cuentas]
     except HTTPException:
         raise
