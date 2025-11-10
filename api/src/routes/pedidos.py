@@ -2,6 +2,7 @@ from typing import List, Optional, Union
 from fastapi import APIRouter, HTTPException, Body, Depends, Query
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
+from pymongo import UpdateOne
 import os
 from ..config.mongodb import pedidos_collection, db, items_collection, clientes_collection, clientes_usuarios_collection, facturas_cliente_collection, movimientos_logisticos_collection
 transacciones_collection = db["transacciones"]
@@ -583,7 +584,6 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
             debug_log(f"ERROR CREAR PEDIDO: Error en batch query de inventario: {e}")
     
     # Procesar items y preparar updates en batch
-    from pymongo import UpdateOne
     bulk_operations = []
     
     for item_data in items_a_procesar:
