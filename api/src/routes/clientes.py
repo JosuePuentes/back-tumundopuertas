@@ -23,22 +23,26 @@ class ClienteUpdate(BaseModel):
 
 @router.get("/all")
 async def get_all_clientes():
-    # Proyección optimizada: solo campos necesarios
-    projection = {
-        "_id": 1,
-        "cliente_id": 1,
-        "cliente_nombre": 1,
-        "rif": 1,
-        "cliente_direccion": 1,
-        "cliente_telefono": 1,
-        "cliente_email": 1,
-        "activo": 1
-    }
+    """
+    Obtener todos los clientes.
+    Retorna los campos normalizados para compatibilidad con frontend.
+    """
+    # Obtener todos los campos necesarios (sin proyección para tener acceso a todos los campos)
+    clientes = list(clientes_collection.find({}))
     
-    clientes = list(clientes_collection.find({}, projection))
+    # Normalizar campos para compatibilidad con frontend
+    clientes_normalizados = []
     for cliente in clientes:
-        cliente["_id"] = str(cliente["_id"])
-    return clientes
+        cliente_normalizado = {
+            "_id": str(cliente["_id"]),
+            "nombre": cliente.get("nombre") or cliente.get("nombres") or cliente.get("cliente_nombre") or "",
+            "rif": cliente.get("rif") or cliente.get("cedula") or "",
+            "direccion": cliente.get("direccion") or cliente.get("cliente_direccion") or "",
+            "telefono": cliente.get("telefono") or cliente.get("telefono_contacto") or cliente.get("cliente_telefono") or "",
+        }
+        clientes_normalizados.append(cliente_normalizado)
+    
+    return clientes_normalizados
 
 @router.get("/id/{cliente_id}/")
 async def get_cliente(cliente_id: str):

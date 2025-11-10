@@ -115,8 +115,9 @@ def excluir_pedidos_tu_mundo_puerta(query: dict) -> dict:
 
 def enriquecer_pedido_con_datos_cliente(pedido: dict):
     """
-    Enriquece un pedido con datos del cliente (cédula y teléfono) desde la colección de clientes.
+    Enriquece un pedido con datos del cliente (nombre, RIF, cédula y teléfono) desde la colección de clientes.
     Si el cliente no existe, mantiene los valores por defecto.
+    Actualiza cliente_nombre y cliente_rif desde la BD para asegurar que siempre se muestren los datos correctos.
     """
     cliente_id = pedido.get("cliente_id")
     if not cliente_id:
@@ -132,19 +133,31 @@ def enriquecer_pedido_con_datos_cliente(pedido: dict):
             cliente = clientes_usuarios_collection.find_one({"_id": cliente_obj_id})
         
         if cliente:
-            # Obtener cédula/RIF
+            # Obtener nombre del cliente desde la BD
+            nombre_cliente = cliente.get("nombre", "")
+            if nombre_cliente:
+                pedido["cliente_nombre"] = nombre_cliente
+            
+            # Obtener RIF del cliente desde la BD
+            rif_cliente = cliente.get("rif", "")
+            if rif_cliente:
+                pedido["cliente_rif"] = rif_cliente
+                # También actualizar cliente_cedula si no existe
+                if "cliente_cedula" not in pedido or not pedido.get("cliente_cedula"):
+                    pedido["cliente_cedula"] = rif_cliente
+            
+            # Obtener cédula/RIF (retrocompatibilidad)
             cedula = cliente.get("cedula") or cliente.get("rif", "")
+            if cedula and "cliente_cedula" not in pedido:
+                pedido["cliente_cedula"] = cedula
+            
             # Obtener teléfono
             telefono = cliente.get("telefono") or cliente.get("telefono_contacto", "")
-            
-            # Agregar datos del cliente al pedido si no están presentes
-            if cedula:
-                pedido["cliente_cedula"] = cedula
             if telefono:
                 pedido["cliente_telefono"] = telefono
     except Exception as e:
         # Si hay error al convertir ObjectId o buscar, simplemente no agregar datos
-        print(f"Advertencia: No se pudo obtener datos del cliente {cliente_id}: {str(e)}")
+        debug_log(f"Advertencia: No se pudo obtener datos del cliente {cliente_id}: {str(e)}")
         pass
 
 @router.get("/all/")
