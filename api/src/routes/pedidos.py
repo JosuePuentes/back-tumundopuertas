@@ -189,7 +189,10 @@ async def get_all_pedidos():
         "items": 1,
         "seguimiento": 1,
         "adicionales": 1,
-        "tipo_pedido": 1
+        "tipo_pedido": 1,
+        "historial_pagos": 1,
+        "total_abonado": 1,
+        "pago": 1
     }
     
     # Limitar a 1000 pedidos más recientes y ordenar por fecha descendente
@@ -5560,9 +5563,20 @@ async def get_pagos_pedido(pedido_id: str):
                 detail="Los pagos de pedidos web solo pueden ser vistos desde el módulo de pedidos-web"
             )
         
-        # Obtener historial de pagos y total abonado
+        # Obtener historial de pagos
         historial_pagos = pedido.get("historial_pagos", [])
-        total_abonado = pedido.get("total_abonado", 0)
+        
+        # Calcular total_abonado SIEMPRE desde historial_pagos
+        # Sumar todos los pagos del historial (sin filtrar por estado)
+        total_abonado = sum(
+            float(pago.get("monto", 0)) 
+            for pago in historial_pagos 
+            if pago.get("monto") is not None
+        )
+        
+        # Si no hay historial_pagos pero hay total_abonado guardado, usar ese valor como fallback
+        if total_abonado == 0 and not historial_pagos:
+            total_abonado = float(pedido.get("total_abonado", 0))
         
         # Calcular total del pedido (items + adicionales)
         total_items = sum(item.get("precio", 0) * item.get("cantidad", 0) for item in pedido.get("items", []))
@@ -5577,18 +5591,6 @@ async def get_pagos_pedido(pedido_id: str):
                 total_adicionales += precio * cantidad
 
         total_pedido = total_items + total_adicionales
-        
-        # Calcular total_abonado desde historial_pagos si no coincide con el valor guardado
-        total_abonado_calculado = sum(
-            pago.get("monto", 0) 
-            for pago in historial_pagos 
-            if pago.get("estado") in ["abonado", "pagado"]
-        )
-        
-        # Usar el valor calculado si hay discrepancia
-        if total_abonado_calculado != total_abonado:
-            print(f"DEBUG PAGOS: Discrepancia en total_abonado. Guardado: {total_abonado}, Calculado: {total_abonado_calculado}. Usando calculado.")
-            total_abonado = total_abonado_calculado
         
         saldo_pendiente = total_pedido - total_abonado
         
