@@ -4388,6 +4388,80 @@ async def cancelar_pedido(
             }
         )
         
+        # Restaurar cantidades del inventario para items con estado_item == 4 (disponibles)
+        # Estos fueron los items que se restaron del inventario al crear el pedido
+        items_inventario_restaurados = 0
+        try:
+            items_pedido = pedido.get("items", [])
+            sucursal = pedido.get("sucursal", "sucursal1")
+            if sucursal not in ['sucursal1', 'sucursal2']:
+                sucursal = 'sucursal1'
+            
+            # Determinar qué campo de existencia usar según la sucursal
+            campo_existencia = "cantidad" if sucursal == "sucursal1" else "existencia2"
+            
+            for item in items_pedido:
+                # Restaurar todos los items del pedido al inventario
+                # Al cancelar un pedido, se devuelven todas las cantidades que se restaron al crearlo
+                # Solo se restaron del inventario los items con estado_item == 4 al crear el pedido,
+                # pero al cancelar, restauramos todos para asegurar que el inventario quede correcto
+                codigo = item.get("codigo")
+                cantidad = item.get("cantidad", 0)
+                item_id = item.get("id")
+                
+                if cantidad and cantidad > 0:
+                    try:
+                        # Buscar el item en el inventario por código o ID (misma lógica que al crear)
+                        item_inventario = None
+                        
+                        if codigo:
+                            codigo_limpio = str(codigo).strip()
+                            item_inventario = items_collection.find_one({"codigo": codigo_limpio})
+                            if not item_inventario:
+                                codigo_regex = codigo_limpio.replace(" ", "\\s*")
+                                item_inventario = items_collection.find_one({"codigo": {"$regex": f"^{codigo_regex}$", "$options": "i"}})
+                                if not item_inventario:
+                                    try:
+                                        if codigo_limpio.isdigit() or (codigo_limpio.replace('.', '', 1).isdigit()):
+                                            codigo_num = int(float(codigo_limpio))
+                                            item_inventario = items_collection.find_one({"codigo": str(codigo_num)})
+                                            if not item_inventario:
+                                                item_inventario = items_collection.find_one({"codigo": codigo_num})
+                                    except:
+                                        pass
+                        
+                        if not item_inventario and item_id:
+                            try:
+                                item_obj_id = ObjectId(item_id)
+                                item_inventario = items_collection.find_one({"_id": item_obj_id})
+                            except Exception:
+                                pass
+                        
+                        if item_inventario:
+                            # Si es sucursal1 y no existe "cantidad", usar "existencia" como fallback
+                            if sucursal == "sucursal1" and campo_existencia not in item_inventario:
+                                campo_existencia = "existencia"
+                            
+                            cantidad_actual = item_inventario.get(campo_existencia, 0.0)
+                            cantidad_a_restaurar = float(cantidad)
+                            
+                            # Restaurar la cantidad sumando al inventario
+                            nueva_cantidad = cantidad_actual + cantidad_a_restaurar
+                            items_collection.update_one(
+                                {"_id": item_inventario["_id"]},
+                                {"$set": {campo_existencia: nueva_cantidad}}
+                            )
+                            items_inventario_restaurados += 1
+                            print(f"DEBUG CANCELAR: Restaurada cantidad {cantidad_a_restaurar} para item {codigo} en {sucursal}. Nueva cantidad: {nueva_cantidad}")
+                    except Exception as e:
+                        print(f"ERROR CANCELAR: Error restaurando inventario para item {codigo}: {e}")
+            
+            print(f"DEBUG CANCELAR: Restauradas cantidades de {items_inventario_restaurados} items en inventario")
+        except Exception as e:
+            print(f"ERROR CANCELAR: Error restaurando inventario: {e}")
+            import traceback
+            print(f"TRACEBACK: {traceback.format_exc()}")
+        
         # Eliminar items de apartados_collection relacionados con este pedido
         apartados_eliminados = 0
         try:
@@ -4443,6 +4517,7 @@ async def cancelar_pedido(
             "cancelado_por": usuario_cancelacion,
             "items_actualizados": items_actualizados,
             "items_desapareceran_herreria": items_actualizados,
+            "items_inventario_restaurados": items_inventario_restaurados,
             "apartados_eliminados": apartados_eliminados,
             "transacciones_eliminadas": transacciones_eliminadas,
             "saldos_revertidos": saldos_revertidos,
