@@ -4,6 +4,7 @@ from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 from ..config.mongodb import pedidos_collection, db, items_collection
 from ..models.authmodels import Pedido
+from ..models.transaccionmodels import Transaccion
 from ..auth.auth import get_current_user
 from pydantic import BaseModel
 
@@ -14,6 +15,7 @@ class CancelarPedidoRequest(BaseModel):
     motivo_cancelacion: str
 
 metodos_pago_collection = db["metodos_pago"]
+transacciones_collection = db["transacciones"]
 empleados_collection = db["empleados"]
 items_collection = db["inventario"]  # La colección de items se llama "inventario"
 comisiones_collection = db["comisiones"]
@@ -230,6 +232,7 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                         print(f"DEBUG CREAR PEDIDO: Buscando por nombre: {pago.metodo}")
                     
                     if metodo_pago:
+                        metodo_pago_id = str(metodo_pago["_id"])
                         saldo_actual = metodo_pago.get("saldo", 0.0)
                         nuevo_saldo = saldo_actual + pago.monto
                         print(f"DEBUG CREAR PEDIDO: Incrementando saldo de {saldo_actual} a {nuevo_saldo} para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
@@ -239,6 +242,34 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
                             {"$set": {"saldo": nuevo_saldo}}
                         )
                         print(f"DEBUG CREAR PEDIDO: Resultado de actualización: {result_update.modified_count} documentos modificados")
+                        
+                        # Registrar la transacción en el historial del método de pago
+                        try:
+                            # Obtener información del pedido para el concepto
+                            cliente_nombre = pedido.cliente_nombre if hasattr(pedido, 'cliente_nombre') else "Cliente"
+                            pedido_id_short = pedido_id[-8:] if len(pedido_id) > 8 else pedido_id
+                            concepto = f"Pedido {pedido_id_short} - Cliente: {cliente_nombre} - Pago inicial al crear pedido"
+                            
+                            # Crear la transacción
+                            transaccion = Transaccion(
+                                metodo_pago_id=metodo_pago_id,
+                                tipo="deposito",
+                                monto=pago.monto,
+                                concepto=concepto
+                            )
+                            transaccion_dict = transaccion.dict(by_alias=True)
+                            # Eliminar el campo _id si existe y es None para que MongoDB genere uno automático
+                            if "_id" in transaccion_dict and transaccion_dict["_id"] is None:
+                                del transaccion_dict["_id"]
+                            
+                            print(f"DEBUG CREAR PEDIDO: Registrando transacción en historial: {transaccion_dict}")
+                            transacciones_collection.insert_one(transaccion_dict)
+                            print(f"DEBUG CREAR PEDIDO: Transacción registrada exitosamente en historial")
+                        except Exception as trans_error:
+                            print(f"DEBUG CREAR PEDIDO: Error al registrar transacción en historial: {trans_error}")
+                            import traceback
+                            print(f"DEBUG CREAR PEDIDO: Traceback transacción: {traceback.format_exc()}")
+                            # No lanzamos excepción para no interrumpir el flujo principal
                     else:
                         print(f"DEBUG CREAR PEDIDO: Método de pago '{pago.metodo}' no encontrado ni por ID ni por nombre")
                 except Exception as e:
@@ -793,29 +824,6 @@ async def get_item_estado(pedido_id: str, item_id: str):
         print(f"Error obteniendo estado del item: {e}")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
-@router.get("/all/")
-async def get_all_pedidos():
-    """Obtener todos los pedidos para el monitor - Versión simplificada"""
-    try:
-        # Método más simple y eficiente
-        pedidos = list(pedidos_collection.find({}, {
-            "_id": 1,
-            "numero_orden": 1,
-            "cliente_nombre": 1,
-            "fecha_creacion": 1,
-            "estado_general": 1,
-            "items": 1
-        }).limit(100))  # Limitar a 100 pedidos para mejor rendimiento
-        
-        # Convertir ObjectId a string
-        for pedido in pedidos:
-            pedido["_id"] = str(pedido["_id"])
-        
-        return pedidos
-        
-    except Exception as e:
-        print(f"Error en get_all_pedidos: {e}")
-        return []
 
 @router.get("/item-estado/{pedido_id}/{item_id}")
 async def get_item_estado(pedido_id: str, item_id: str):
@@ -3548,6 +3556,7 @@ async def actualizar_pago(
                 
                 print(f"DEBUG PAGO: Método encontrado: {metodo_pago is not None}")
                 if metodo_pago:
+                    metodo_pago_id = str(metodo_pago["_id"])
                     saldo_actual = metodo_pago.get("saldo", 0.0)
                     nuevo_saldo = saldo_actual + monto
                     print(f"DEBUG PAGO: Saldo actual: {saldo_actual}, Nuevo saldo: {nuevo_saldo} para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
@@ -3558,8 +3567,36 @@ async def actualizar_pago(
                     )
                     print(f"DEBUG PAGO: Resultado de actualización: {result_update.modified_count} documentos modificados")
                     
+                    # Registrar la transacción en el historial del método de pago
+                    try:
+                        # Obtener información del pedido para el concepto
+                        cliente_nombre = pedido.get("cliente_nombre", "Cliente")
+                        pedido_id_short = pedido_id[-8:] if len(pedido_id) > 8 else pedido_id
+                        concepto = f"Pedido {pedido_id_short} - Cliente: {cliente_nombre} - Abono desde /pagos"
+                        
+                        # Crear la transacción
+                        transaccion = Transaccion(
+                            metodo_pago_id=metodo_pago_id,
+                            tipo="deposito",
+                            monto=monto,
+                            concepto=concepto
+                        )
+                        transaccion_dict = transaccion.dict(by_alias=True)
+                        # Eliminar el campo _id si existe y es None para que MongoDB genere uno automático
+                        if "_id" in transaccion_dict and transaccion_dict["_id"] is None:
+                            del transaccion_dict["_id"]
+                        
+                        print(f"DEBUG PAGO: Registrando transacción en historial: {transaccion_dict}")
+                        transacciones_collection.insert_one(transaccion_dict)
+                        print(f"DEBUG PAGO: Transacción registrada exitosamente en historial")
+                    except Exception as trans_error:
+                        print(f"DEBUG PAGO: Error al registrar transacción en historial: {trans_error}")
+                        import traceback
+                        print(f"DEBUG PAGO: Traceback transacción: {traceback.format_exc()}")
+                        # No lanzamos excepción para no interrumpir el flujo principal
+                    
                     # Verificar que se actualizó correctamente
-                    metodo_verificado = metodos_pago_collection.find_one({"_id": ObjectId(metodo)})
+                    metodo_verificado = metodos_pago_collection.find_one({"_id": metodo_pago["_id"]})
                     print(f"DEBUG PAGO: Saldo verificado después de actualizar: {metodo_verificado.get('saldo', 'ERROR')}")
                 else:
                     print(f"DEBUG PAGO: Método de pago '{metodo}' no encontrado")
@@ -3714,6 +3751,8 @@ async def get_venta_diaria(
 
         # Procesar los abonos manualmente y aplicar filtro de fechas MEJORADO
         abonos = []
+        abonos_vistos = set()  # Para detectar duplicados
+        
         for abono in abonos_raw:
             # Aplicar filtro de fechas si se especificó
             if fecha_busqueda_mmddyyyy:
@@ -3757,11 +3796,24 @@ async def get_venta_diaria(
             metodo_id = abono.get("metodo_id")
             metodo_nombre = metodos_pago.get(str(metodo_id), metodos_pago.get(metodo_id, metodo_id))
             
+            # Crear clave única para detectar duplicados: pedido_id + fecha + monto + metodo
+            pedido_id_str = str(abono["pedido_id"])
+            fecha_abono_str = str(abono.get("fecha", ""))
+            monto_abono = abono.get("monto", 0)
+            clave_unica = f"{pedido_id_str}|{fecha_abono_str}|{monto_abono}|{metodo_nombre}"
+            
+            # Verificar si ya existe este abono (duplicado)
+            if clave_unica in abonos_vistos:
+                print(f"DEBUG VENTA DIARIA: Abono duplicado detectado y omitido: {clave_unica}")
+                continue
+            
+            abonos_vistos.add(clave_unica)
+            
             abono_procesado = {
-                "pedido_id": str(abono["pedido_id"]),
+                "pedido_id": pedido_id_str,
                 "cliente_nombre": abono.get("cliente_nombre"),
                 "fecha": abono.get("fecha"),
-                "monto": abono.get("monto", 0),
+                "monto": monto_abono,
                 "metodo": metodo_nombre
             }
             abonos.append(abono_procesado)
@@ -4122,12 +4174,33 @@ async def get_pagos_pedido(pedido_id: str):
         if not pedido:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
         
-        # Obtener historial de pagos y total abonado
+        # Obtener historial de pagos
         historial_pagos = pedido.get("historial_pagos", [])
-        total_abonado = pedido.get("total_abonado", 0)
         
-        # Calcular total del pedido
-        total_pedido = sum(item.get("precio", 0) * item.get("cantidad", 0) for item in pedido.get("items", []))
+        # Calcular total abonado desde historial_pagos (más confiable)
+        total_abonado_calculado = sum(pago.get("monto", 0) for pago in historial_pagos if pago.get("monto"))
+        
+        # Usar el total_abonado guardado si existe, sino usar el calculado
+        total_abonado_guardado = pedido.get("total_abonado", 0)
+        total_abonado = total_abonado_guardado if total_abonado_guardado > 0 else total_abonado_calculado
+        
+        # Si el total_abonado guardado no coincide con el calculado, usar el calculado (más preciso)
+        if abs(total_abonado_guardado - total_abonado_calculado) > 0.01:
+            print(f"DEBUG PAGOS: Total abonado guardado ({total_abonado_guardado}) no coincide con calculado ({total_abonado_calculado}), usando calculado")
+            total_abonado = total_abonado_calculado
+        
+        # Calcular total del pedido (items + adicionales)
+        total_items = sum(item.get("precio", 0) * item.get("cantidad", 0) for item in pedido.get("items", []))
+        
+        # Calcular total de adicionales
+        adicionales = pedido.get("adicionales", [])
+        if not isinstance(adicionales, list):
+            adicionales = []
+        total_adicionales = sum(
+            (ad.get("precio", 0) * (ad.get("cantidad", 1)) for ad in adicionales)
+        )
+        
+        total_pedido = total_items + total_adicionales
         saldo_pendiente = total_pedido - total_abonado
         
         return {
@@ -5145,3 +5218,494 @@ async def inicializar_estado_items():
     except Exception as e:
         print(f"Error inicializando estado_items: {e}")
         return {"error": str(e)}
+
+# ============================================
+# ENDPOINTS PANEL DE CONTROL LOGÍSTICO
+# ============================================
+
+@router.get("/panel-control-logistico/items-produccion-por-estado/")
+async def get_items_produccion_por_estado():
+    """
+    Obtener total de items en producción agrupados por estado (herreria, masillar, preparar)
+    """
+    try:
+        # Obtener todos los pedidos
+        pedidos = list(pedidos_collection.find({}))
+        
+        # Contadores por estado
+        herreria_count = 0
+        masillar_count = 0
+        preparar_count = 0
+        
+        # Procesar cada pedido
+        for pedido in pedidos:
+            items = pedido.get("items", [])
+            for item in items:
+                estado_item = item.get("estado_item", 0)
+                
+                # Solo contar items en producción (estado_item 1, 2, 3)
+                if estado_item == 1:  # Herrería
+                    cantidad = item.get("cantidad", 1)
+                    herreria_count += cantidad
+                elif estado_item == 2:  # Masillar
+                    cantidad = item.get("cantidad", 1)
+                    masillar_count += cantidad
+                elif estado_item == 3:  # Preparar
+                    cantidad = item.get("cantidad", 1)
+                    preparar_count += cantidad
+        
+        total = herreria_count + masillar_count + preparar_count
+        
+        return {
+            "herreria": {
+                "cantidad": herreria_count,
+                "estado": "Herrería"
+            },
+            "masillar": {
+                "cantidad": masillar_count,
+                "estado": "Masillar"
+            },
+            "preparar": {
+                "cantidad": preparar_count,
+                "estado": "Preparar"
+            },
+            "total": total
+        }
+        
+    except Exception as e:
+        print(f"Error en items-produccion-por-estado: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@router.get("/panel-control-logistico/asignaciones-terminadas/")
+async def get_asignaciones_terminadas(
+    modulo: Optional[str] = Query(None, description="Filtrar por módulo: herreria, masillar, preparar")
+):
+    """
+    Obtener todas las asignaciones terminadas agrupadas por estado
+    """
+    try:
+        pedidos = list(pedidos_collection.find({}))
+        
+        asignaciones_herreria = []
+        asignaciones_masillar = []
+        asignaciones_preparar = []
+        
+        for pedido in pedidos:
+            pedido_id = str(pedido["_id"])
+            seguimiento = pedido.get("seguimiento", [])
+            
+            for proceso in seguimiento:
+                orden = proceso.get("orden")
+                asignaciones_articulos = proceso.get("asignaciones_articulos", [])
+                
+                for asignacion in asignaciones_articulos:
+                    # Solo asignaciones terminadas (con fecha_fin)
+                    if asignacion.get("fecha_fin"):
+                        item_id = asignacion.get("itemId")
+                        empleado_id = asignacion.get("empleadoId")
+                        empleado_nombre = asignacion.get("nombreempleado", "Sin nombre")
+                        fecha_inicio = asignacion.get("fecha_inicio")
+                        fecha_fin = asignacion.get("fecha_fin")
+                        
+                        # Buscar información del item
+                        item_info = None
+                        for item in pedido.get("items", []):
+                            if str(item.get("id", "")) == str(item_id):
+                                item_info = {
+                                    "item_id": item_id,
+                                    "item_nombre": item.get("nombre", "Sin nombre"),
+                                    "codigo": item.get("codigo", ""),
+                                    "descripcion": item.get("descripcion", "")
+                                }
+                                break
+                        
+                        asignacion_data = {
+                            "pedido_id": pedido_id,
+                            "item_id": item_id,
+                            "item_nombre": item_info.get("item_nombre") if item_info else "Sin nombre",
+                            "codigo": item_info.get("codigo") if item_info else "",
+                            "empleado_id": empleado_id,
+                            "empleado_nombre": empleado_nombre,
+                            "fecha_inicio": fecha_inicio,
+                            "fecha_fin": fecha_fin,
+                            "modulo": "herreria" if orden == 1 else "masillar" if orden == 2 else "preparar" if orden == 3 else "desconocido"
+                        }
+                        
+                        # Agregar según el orden
+                        if orden == 1:
+                            asignaciones_herreria.append(asignacion_data)
+                        elif orden == 2:
+                            asignaciones_masillar.append(asignacion_data)
+                        elif orden == 3:
+                            asignaciones_preparar.append(asignacion_data)
+        
+        # Filtrar por módulo si se especifica
+        if modulo:
+            if modulo == "herreria":
+                return {
+                    "modulo": "herreria",
+                    "total": len(asignaciones_herreria),
+                    "asignaciones": asignaciones_herreria
+                }
+            elif modulo == "masillar":
+                return {
+                    "modulo": "masillar",
+                    "total": len(asignaciones_masillar),
+                    "asignaciones": asignaciones_masillar
+                }
+            elif modulo == "preparar":
+                return {
+                    "modulo": "preparar",
+                    "total": len(asignaciones_preparar),
+                    "asignaciones": asignaciones_preparar
+                }
+        
+        return {
+            "herreria": {
+                "total": len(asignaciones_herreria),
+                "asignaciones": asignaciones_herreria
+            },
+            "masillar": {
+                "total": len(asignaciones_masillar),
+                "asignaciones": asignaciones_masillar
+            },
+            "preparar": {
+                "total": len(asignaciones_preparar),
+                "asignaciones": asignaciones_preparar
+            },
+            "total_general": len(asignaciones_herreria) + len(asignaciones_masillar) + len(asignaciones_preparar)
+        }
+        
+    except Exception as e:
+        print(f"Error en asignaciones-terminadas: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@router.get("/panel-control-logistico/empleados-items-terminados/")
+async def get_empleados_items_terminados():
+    """
+    Obtener empleados con total de items terminados por estado
+    """
+    try:
+        pedidos = list(pedidos_collection.find({}))
+        
+        # Estructura: {empleado_id: {nombre, herreria: count, masillar: count, preparar: count}}
+        empleados_data = {}
+        
+        for pedido in pedidos:
+            seguimiento = pedido.get("seguimiento", [])
+            
+            for proceso in seguimiento:
+                orden = proceso.get("orden")
+                asignaciones_articulos = proceso.get("asignaciones_articulos", [])
+                
+                for asignacion in asignaciones_articulos:
+                    # Solo asignaciones terminadas
+                    if asignacion.get("fecha_fin"):
+                        empleado_id = asignacion.get("empleadoId")
+                        empleado_nombre = asignacion.get("nombreempleado", "Sin nombre")
+                        
+                        if empleado_id not in empleados_data:
+                            empleados_data[empleado_id] = {
+                                "empleado_id": empleado_id,
+                                "empleado_nombre": empleado_nombre,
+                                "herreria": 0,
+                                "masillar": 0,
+                                "preparar": 0,
+                                "total": 0
+                            }
+                        
+                        # Incrementar contador según el orden
+                        if orden == 1:
+                            empleados_data[empleado_id]["herreria"] += 1
+                        elif orden == 2:
+                            empleados_data[empleado_id]["masillar"] += 1
+                        elif orden == 3:
+                            empleados_data[empleado_id]["preparar"] += 1
+                        
+                        empleados_data[empleado_id]["total"] += 1
+        
+        # Convertir a lista y ordenar por total descendente
+        empleados_list = list(empleados_data.values())
+        empleados_list.sort(key=lambda x: x["total"], reverse=True)
+        
+        return {
+            "empleados": empleados_list,
+            "total_empleados": len(empleados_list)
+        }
+        
+    except Exception as e:
+        print(f"Error en empleados-items-terminados: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@router.get("/panel-control-logistico/items-por-ventas/")
+async def get_items_por_ventas(
+    fecha_inicio: Optional[str] = Query(None),
+    fecha_fin: Optional[str] = Query(None)
+):
+    """
+    Obtener items ordenados por ventas (más vendido a menos vendido) y por sucursal
+    """
+    try:
+        # Obtener todos los items del inventario
+        items = list(items_collection.find({}))
+        
+        # Obtener pedidos facturados (vendidos) en el rango de fechas
+        query = {}
+        if fecha_inicio and fecha_fin:
+            try:
+                fecha_inicio_dt = datetime.fromisoformat(fecha_inicio.replace('Z', '+00:00'))
+                fecha_fin_dt = datetime.fromisoformat(fecha_fin.replace('Z', '+00:00'))
+                query["fecha_creacion"] = {
+                    "$gte": fecha_inicio_dt,
+                    "$lte": fecha_fin_dt
+                }
+            except:
+                pass
+        
+        pedidos = list(pedidos_collection.find(query))
+        
+        # Contar ventas por item
+        ventas_por_item = {}  # {item_id: {ventas: count, nombre: str, codigo: str, descripcion: str, sucursal1: count, sucursal2: count}}
+        
+        for pedido in pedidos:
+            # Solo pedidos facturados o con items terminados (estado_item = 4)
+            items_pedido = pedido.get("items", [])
+            for item in items_pedido:
+                # Considerar vendido si está terminado (estado_item = 4)
+                if item.get("estado_item") == 4:
+                    item_id = str(item.get("id", ""))
+                    cantidad = item.get("cantidad", 1)
+                    
+                    if item_id not in ventas_por_item:
+                        ventas_por_item[item_id] = {
+                            "item_id": item_id,
+                            "item_nombre": item.get("nombre", "Sin nombre"),
+                            "codigo": item.get("codigo", ""),
+                            "descripcion": item.get("descripcion", ""),
+                            "ventas": 0,
+                            "sucursal1_creados": 0,
+                            "sucursal2_creados": 0
+                        }
+                    
+                    ventas_por_item[item_id]["ventas"] += cantidad
+        
+        # Agregar información de creación por sucursal desde el inventario
+        for item in items:
+            item_id = str(item.get("_id", ""))
+            if item_id in ventas_por_item:
+                # Sucursal 1 usa 'cantidad' o 'existencia'
+                cantidad_s1 = item.get("cantidad", 0) or item.get("existencia", 0)
+                cantidad_s2 = item.get("existencia2", 0)
+                
+                ventas_por_item[item_id]["sucursal1_creados"] = cantidad_s1
+                ventas_por_item[item_id]["sucursal2_creados"] = cantidad_s2
+        
+        # Convertir a lista y ordenar por ventas descendente
+        items_list = list(ventas_por_item.values())
+        items_list.sort(key=lambda x: x["ventas"], reverse=True)
+        
+        return {
+            "items": items_list,
+            "total_items": len(items_list),
+            "periodo": {
+                "fecha_inicio": fecha_inicio,
+                "fecha_fin": fecha_fin
+            }
+        }
+        
+    except Exception as e:
+        print(f"Error en items-por-ventas: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@router.get("/panel-control-logistico/inventario-por-sucursal/")
+async def get_inventario_por_sucursal():
+    """
+    Obtener total de items del inventario por sucursal
+    """
+    try:
+        items = list(items_collection.find({}))
+        
+        total_sucursal1 = 0
+        total_sucursal2 = 0
+        
+        for item in items:
+            # Sucursal 1 usa 'cantidad' o 'existencia'
+            cantidad_s1 = item.get("cantidad", 0) or item.get("existencia", 0)
+            cantidad_s2 = item.get("existencia2", 0) or 0
+            
+            total_sucursal1 += cantidad_s1
+            total_sucursal2 += cantidad_s2
+        
+        total_general = total_sucursal1 + total_sucursal2
+        
+        return {
+            "sucursal1": {
+                "nombre": "Sucursal 1",
+                "total_items": total_sucursal1
+            },
+            "sucursal2": {
+                "nombre": "Sucursal 2",
+                "total_items": total_sucursal2
+            },
+            "total_general": total_general
+        }
+        
+    except Exception as e:
+        print(f"Error en inventario-por-sucursal: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@router.get("/panel-control-logistico/sugerencia-produccion-mejorada/")
+async def get_sugerencia_produccion_mejorada(
+    dias: int = Query(7, description="Días para calcular sugerencia")
+):
+    """
+    Obtener sugerencias de producción mejoradas:
+    - Items con stock bajo vs ventas (para 7 días)
+    - Items con ventas 0 o bajas
+    """
+    try:
+        # Calcular fecha de inicio (hace X días)
+        fecha_fin = datetime.now()
+        fecha_inicio = fecha_fin - timedelta(days=dias)
+        
+        # Obtener items del inventario
+        items = list(items_collection.find({}))
+        
+        # Obtener pedidos en el rango de fechas para calcular ventas
+        pedidos = list(pedidos_collection.find({
+            "fecha_creacion": {
+                "$gte": fecha_inicio,
+                "$lte": fecha_fin
+            }
+        }))
+        
+        # Calcular ventas por item en el período
+        ventas_por_item = {}
+        for pedido in pedidos:
+            for item in pedido.get("items", []):
+                if item.get("estado_item") == 4:  # Terminado/vendido
+                    item_id = str(item.get("id", ""))
+                    cantidad = item.get("cantidad", 1)
+                    
+                    if item_id not in ventas_por_item:
+                        ventas_por_item[item_id] = 0
+                    ventas_por_item[item_id] += cantidad
+        
+        sugerencias = []
+        items_sin_ventas = []
+        
+        for item in items:
+            item_id = str(item.get("_id", ""))
+            item_nombre = item.get("nombre", "Sin nombre")
+            codigo = item.get("codigo", "")
+            descripcion = item.get("descripcion", "")
+            
+            # Obtener existencia actual
+            existencia_s1 = item.get("cantidad", 0) or item.get("existencia", 0)
+            existencia_s2 = item.get("existencia2", 0) or 0
+            existencia_total = existencia_s1 + existencia_s2
+            
+            # Ventas en el período
+            ventas_periodo = ventas_por_item.get(item_id, 0)
+            ventas_diarias = ventas_periodo / dias if dias > 0 else 0
+            
+            # Calcular necesidad para 7 días
+            necesidad_7_dias = ventas_diarias * 7
+            
+            # Determinar si necesita producción
+            necesita_produccion = False
+            prioridad = "baja"
+            razon = ""
+            
+            if existencia_total == 0 and ventas_periodo > 0:
+                necesita_produccion = True
+                prioridad = "alta"
+                razon = "Existencia en 0 con ventas en el período"
+            elif existencia_total < necesidad_7_dias:
+                necesita_produccion = True
+                if existencia_total == 0:
+                    prioridad = "alta"
+                elif existencia_total < necesidad_7_dias * 0.5:
+                    prioridad = "alta"
+                else:
+                    prioridad = "media"
+                razon = f"Stock bajo ({existencia_total}) vs demanda estimada ({necesidad_7_dias:.1f})"
+            elif ventas_periodo == 0:
+                # Item sin ventas
+                items_sin_ventas.append({
+                    "item_id": item_id,
+                    "item_nombre": item_nombre,
+                    "codigo": codigo,
+                    "descripcion": descripcion,
+                    "existencia_total": existencia_total,
+                    "dias_sin_ventas": dias
+                })
+            
+            if necesita_produccion:
+                unidades_sugeridas = max(0, necesidad_7_dias - existencia_total)
+                sugerencias.append({
+                    "item_id": item_id,
+                    "item_nombre": item_nombre,
+                    "codigo": codigo,
+                    "descripcion": descripcion,
+                    "existencia_actual": existencia_total,
+                    "ventas_periodo": ventas_periodo,
+                    "ventas_diarias": round(ventas_diarias, 2),
+                    "necesidad_7_dias": round(necesidad_7_dias, 1),
+                    "unidades_sugeridas": round(unidades_sugeridas, 0),
+                    "prioridad": prioridad,
+                    "razon": razon
+                })
+        
+        # Ordenar sugerencias por prioridad y unidades sugeridas
+        sugerencias.sort(key=lambda x: (
+            {"alta": 0, "media": 1, "baja": 2}[x["prioridad"]],
+            -x["unidades_sugeridas"]
+        ))
+        
+        return {
+            "sugerencias": sugerencias,
+            "items_sin_ventas": items_sin_ventas,
+            "total_sugerencias": len(sugerencias),
+            "total_sin_ventas": len(items_sin_ventas),
+            "periodo_dias": dias
+        }
+        
+    except Exception as e:
+        print(f"Error en sugerencia-produccion-mejorada: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@router.get("/panel-control-logistico/exportar-pdf/")
+async def exportar_panel_pdf(
+    fecha_inicio: Optional[str] = Query(None),
+    fecha_fin: Optional[str] = Query(None)
+):
+    """
+    Exportar todos los datos del panel en formato JSON para generar PDF
+    """
+    try:
+        # Obtener todos los datos
+        items_produccion = await get_items_produccion_por_estado()
+        asignaciones_terminadas = await get_asignaciones_terminadas()
+        empleados_terminados = await get_empleados_items_terminados()
+        items_ventas = await get_items_por_ventas(fecha_inicio, fecha_fin)
+        inventario_sucursal = await get_inventario_por_sucursal()
+        sugerencias = await get_sugerencia_produccion_mejorada(7)
+        
+        return {
+            "fecha_exportacion": datetime.now().isoformat(),
+            "periodo": {
+                "fecha_inicio": fecha_inicio,
+                "fecha_fin": fecha_fin
+            },
+            "items_produccion_por_estado": items_produccion,
+            "asignaciones_terminadas": asignaciones_terminadas,
+            "empleados_items_terminados": empleados_terminados,
+            "items_por_ventas": items_ventas,
+            "inventario_por_sucursal": inventario_sucursal,
+            "sugerencias_produccion": sugerencias
+        }
+        
+    except Exception as e:
+        print(f"Error en exportar-pdf: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
