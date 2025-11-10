@@ -444,7 +444,8 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
 
     # Generar asignaciones unitarias para herrería (orden 1) por cada unidad pendiente (estado_item == 0)
     try:
-        pedido_db = pedidos_collection.find_one({"_id": ObjectId(pedido_id)}) or pedido_dict
+        # OPTIMIZACIÓN: Usar pedido_dict directamente en lugar de hacer query adicional
+        pedido_db = pedido_dict
         seguimiento = pedido_db.get("seguimiento") or []
 
         # Ubicar proceso de herrería por orden 1 o por nombre
@@ -527,87 +528,125 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
             except Exception as e:
                 debug_log(f"ERROR REGISTRAR MOVIMIENTO CREAR PEDIDO: {e}")
     
+    # OPTIMIZACIÓN: Batch query para items del inventario (evita N+1 queries)
     # Restar cantidades del inventario SOLO para items con estado_item = 4 (disponibles)
     # Los items con estado_item = 0 (faltantes) NO se restan del inventario, van a producción
     debug_log(f"DEBUG CREAR PEDIDO: Procesando {len(pedido.items)} items para restar inventario")
+    
+    # Obtener la sucursal del pedido (por defecto sucursal1)
+    sucursal = getattr(pedido, 'sucursal', None) or pedido.dict().get('sucursal', 'sucursal1')
+    if sucursal not in ['sucursal1', 'sucursal2']:
+        sucursal = 'sucursal1'
+    
+    # Preparar datos para batch query
+    items_a_procesar = []
+    codigos_limpios = []
+    item_ids_validos = []
+    
     for idx, item in enumerate(pedido.items):
-        # Obtener valores de manera segura (puede ser objeto Pydantic o dict después de .dict())
         estado_item = getattr(item, 'estado_item', None) if hasattr(item, 'estado_item') else (item.get('estado_item') if isinstance(item, dict) else None)
         codigo = getattr(item, 'codigo', None) if hasattr(item, 'codigo') else (item.get('codigo') if isinstance(item, dict) else None)
         cantidad = getattr(item, 'cantidad', None) if hasattr(item, 'cantidad') else (item.get('cantidad') if isinstance(item, dict) else None)
         item_id = getattr(item, 'id', None) if hasattr(item, 'id') else (item.get('id') if isinstance(item, dict) else None)
         
-        debug_log(f"DEBUG CREAR PEDIDO [Item {idx}]: código='{codigo}', estado_item={estado_item}, cantidad={cantidad}, id='{item_id}'")
-        
-        # Solo restar del inventario si estado_item = 4 (disponible) y tiene cantidad
         if estado_item == 4 and cantidad and cantidad > 0:
-            debug_log(f"DEBUG CREAR PEDIDO [Item {idx}]: Item calificado para restar inventario (estado_item=4, cantidad={cantidad})")
+            items_a_procesar.append({
+                'idx': idx,
+                'codigo': codigo,
+                'item_id': item_id,
+                'cantidad': float(cantidad)
+            })
+            if codigo:
+                codigos_limpios.append(str(codigo).strip())
+            if item_id:
+                try:
+                    item_ids_validos.append(ObjectId(item_id))
+                except:
+                    pass
+    
+    # Batch query: buscar todos los items de una vez
+    items_inventario_dict = {}
+    if codigos_limpios or item_ids_validos:
+        try:
+            # Buscar por códigos (exacto primero)
+            query_codigos = {"codigo": {"$in": codigos_limpios}}
+            items_por_codigo = list(items_collection.find(query_codigos))
+            for item in items_por_codigo:
+                items_inventario_dict[str(item["codigo"]).strip()] = item
             
-            try:
-                # Buscar el item en el inventario por código o ID
-                item_inventario = None
+            # Buscar por IDs
+            if item_ids_validos:
+                items_por_id = list(items_collection.find({"_id": {"$in": item_ids_validos}}))
+                for item in items_por_id:
+                    items_inventario_dict[str(item["_id"])] = item
+        except Exception as e:
+            debug_log(f"ERROR CREAR PEDIDO: Error en batch query de inventario: {e}")
+    
+    # Procesar items y preparar updates en batch
+    from pymongo import UpdateOne
+    bulk_operations = []
+    
+    for item_data in items_a_procesar:
+        idx = item_data['idx']
+        codigo = item_data['codigo']
+        item_id = item_data['item_id']
+        cantidad = item_data['cantidad']
+        
+        try:
+            # Buscar item en el diccionario (ya obtenido con batch query)
+            item_inventario = None
+            if codigo:
+                codigo_limpio = str(codigo).strip()
+                item_inventario = items_inventario_dict.get(codigo_limpio)
+            
+            if not item_inventario and item_id:
+                item_inventario = items_inventario_dict.get(str(item_id))
+            
+            # Si aún no se encontró, intentar búsquedas adicionales (fallback)
+            if not item_inventario and codigo:
+                codigo_limpio = str(codigo).strip()
+                try:
+                    # Buscar con regex como fallback
+                    codigo_regex = codigo_limpio.replace(" ", "\\s*")
+                    item_inventario = items_collection.find_one({"codigo": {"$regex": f"^{codigo_regex}$", "$options": "i"}})
+                    if not item_inventario and (codigo_limpio.isdigit() or (codigo_limpio.replace('.', '', 1).isdigit())):
+                        codigo_num = int(float(codigo_limpio))
+                        item_inventario = items_collection.find_one({"codigo": str(codigo_num)}) or items_collection.find_one({"codigo": codigo_num})
+                except:
+                    pass
+            
+            if item_inventario:
+                # Determinar qué campo de existencia usar según la sucursal
+                campo_existencia = "cantidad" if sucursal == "sucursal1" else "existencia2"
+                if sucursal == "sucursal1" and campo_existencia not in item_inventario:
+                    campo_existencia = "existencia"
                 
-                # Intentar buscar por código primero (múltiples variantes)
-                if codigo:
-                    # Limpiar el código: quitar espacios al inicio y final
-                    codigo_limpio = str(codigo).strip()
-                    
-                    # 1. Buscar exacto
-                    item_inventario = items_collection.find_one({"codigo": codigo_limpio})
-                    if not item_inventario:
-                        # 2. Buscar con regex (insensible a mayúsculas/minúsculas y espacios)
-                        codigo_regex = codigo_limpio.replace(" ", "\\s*")
-                        item_inventario = items_collection.find_one({"codigo": {"$regex": f"^{codigo_regex}$", "$options": "i"}})
-                        if not item_inventario:
-                            # 3. Buscar como número si el código es numérico
-                            try:
-                                if codigo_limpio.isdigit() or (codigo_limpio.replace('.', '', 1).isdigit()):
-                                    codigo_num = int(float(codigo_limpio))
-                                    item_inventario = items_collection.find_one({"codigo": str(codigo_num)})
-                                    if not item_inventario:
-                                        item_inventario = items_collection.find_one({"codigo": codigo_num})
-                            except:
-                                pass
+                cantidad_actual = item_inventario.get(campo_existencia, 0.0)
+                cantidad_a_restar = cantidad
                 
-                # Si no se encontró por código, intentar por ID
-                if not item_inventario and item_id:
-                    try:
-                        item_obj_id = ObjectId(item_id)
-                        item_inventario = items_collection.find_one({"_id": item_obj_id})
-                    except Exception:
-                        pass
+                debug_log(f"DEBUG CREAR PEDIDO [Item {idx}]: Sucursal={sucursal}, Campo={campo_existencia}, Cantidad actual={cantidad_actual}, Cantidad a restar={cantidad_a_restar}")
                 
-                if item_inventario:
-                    # Obtener la sucursal del pedido (por defecto sucursal1)
-                    sucursal = getattr(pedido, 'sucursal', None) or pedido.dict().get('sucursal', 'sucursal1')
-                    if sucursal not in ['sucursal1', 'sucursal2']:
-                        sucursal = 'sucursal1'  # Valor por defecto si no es válido
-                    
-                    # Determinar qué campo de existencia usar según la sucursal
-                    # Sucursal 1 usa "cantidad" o "existencia", Sucursal 2 usa "existencia2"
-                    campo_existencia = "cantidad" if sucursal == "sucursal1" else "existencia2"
-                    
-                    # Si es sucursal1 y no existe "cantidad", usar "existencia" como fallback
-                    if sucursal == "sucursal1" and campo_existencia not in item_inventario:
-                        campo_existencia = "existencia"
-                    
-                    cantidad_actual = item_inventario.get(campo_existencia, 0.0)
-                    cantidad_a_restar = float(cantidad)
-                    
-                    debug_log(f"DEBUG CREAR PEDIDO [Item {idx}]: Sucursal={sucursal}, Campo={campo_existencia}, Cantidad actual={cantidad_actual}, Cantidad a restar={cantidad_a_restar}")
-                    
-                    if cantidad_a_restar > cantidad_actual:
-                        debug_log(f"WARNING CREAR PEDIDO [Item {idx}]: No hay suficiente existencia en {sucursal} para {item_inventario.get('codigo', 'N/A')}. Existencia: {cantidad_actual}, Requerida: {cantidad_a_restar}")
-                        # No lanzar error, solo registrar warning ya que el frontend ya validó
-                    
-                    # Restar la cantidad del inventario según la sucursal
-                    nueva_cantidad = max(0, cantidad_actual - cantidad_a_restar)
-                    items_collection.update_one(
+                if cantidad_a_restar > cantidad_actual:
+                    debug_log(f"WARNING CREAR PEDIDO [Item {idx}]: No hay suficiente existencia en {sucursal} para {item_inventario.get('codigo', 'N/A')}. Existencia: {cantidad_actual}, Requerida: {cantidad_a_restar}")
+                
+                # Preparar update para bulk operation
+                nueva_cantidad = max(0, cantidad_actual - cantidad_a_restar)
+                bulk_operations.append(
+                    UpdateOne(
                         {"_id": item_inventario["_id"]},
                         {"$set": {campo_existencia: nueva_cantidad}}
                     )
-            except Exception as e:
-                debug_log(f"ERROR CREAR PEDIDO [Item {idx}]: Error al actualizar inventario para item código='{codigo}': {e}")
+                )
+        except Exception as e:
+            debug_log(f"ERROR CREAR PEDIDO [Item {idx}]: Error al procesar item código='{codigo}': {e}")
+    
+    # Ejecutar todos los updates en batch (una sola operación)
+    if bulk_operations:
+        try:
+            items_collection.bulk_write(bulk_operations, ordered=False)
+            debug_log(f"DEBUG CREAR PEDIDO: Actualizados {len(bulk_operations)} items de inventario en batch")
+        except Exception as e:
+            debug_log(f"ERROR CREAR PEDIDO: Error en bulk update de inventario: {e}")
     
     # Si hay abonos iniciales en el historial_pagos, calcular total_abonado e incrementar el saldo de los métodos de pago
     total_abonado_inicial = 0.0
@@ -627,59 +666,90 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
             )
             debug_log(f"DEBUG CREAR PEDIDO: Total abonado inicial calculado: {total_abonado_inicial}")
         
+        # OPTIMIZACIÓN: Batch query para métodos de pago (evita N+1 queries)
+        metodo_ids = []
+        metodo_nombres = []
+        pagos_procesar = []
+        
         for pago in pedido.historial_pagos:
             if pago.metodo and pago.monto and pago.monto > 0:
-                debug_log(f"DEBUG CREAR PEDIDO: Procesando abono de {pago.monto} con método {pago.metodo}")
                 try:
-                    # Buscar el método de pago por _id o por nombre
-                    metodo_pago = None
+                    # Intentar convertir a ObjectId
+                    metodo_ids.append(ObjectId(pago.metodo))
+                except:
+                    # Si no es ObjectId, es nombre
+                    metodo_nombres.append(pago.metodo)
+                pagos_procesar.append(pago)
+        
+        # Batch query: obtener todos los métodos de pago de una vez
+        metodos_dict = {}
+        if metodo_ids:
+            metodos_por_id = list(metodos_pago_collection.find({"_id": {"$in": metodo_ids}}))
+            for metodo in metodos_por_id:
+                metodos_dict[str(metodo["_id"])] = metodo
+        
+        if metodo_nombres:
+            metodos_por_nombre = list(metodos_pago_collection.find({"nombre": {"$in": metodo_nombres}}))
+            for metodo in metodos_por_nombre:
+                metodos_dict[metodo["nombre"]] = metodo
+        
+        # Procesar pagos y preparar updates en batch
+        bulk_metodos_operations = []
+        transacciones_a_insertar = []
+        
+        for pago in pagos_procesar:
+            try:
+                metodo_pago = None
+                try:
+                    metodo_pago = metodos_dict.get(str(pago.metodo)) or metodos_dict.get(pago.metodo)
+                except:
+                    pass
+                
+                if metodo_pago:
+                    saldo_actual = metodo_pago.get("saldo", 0.0)
+                    nuevo_saldo = saldo_actual + pago.monto
+                    debug_log(f"DEBUG CREAR PEDIDO: Incrementando saldo de {saldo_actual} a {nuevo_saldo} para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
                     
-                    # Intentar buscar por ObjectId primero
-                    try:
-                        metodo_pago = metodos_pago_collection.find_one({"_id": ObjectId(pago.metodo)})
-                        debug_log(f"DEBUG CREAR PEDIDO: Buscando por ObjectId: {pago.metodo}")
-                    except:
-                        debug_log(f"DEBUG CREAR PEDIDO: No es ObjectId válido, buscando por nombre: {pago.metodo}")
-                    
-                    # Si no se encontró por ObjectId, buscar por nombre
-                    if not metodo_pago:
-                        metodo_pago = metodos_pago_collection.find_one({"nombre": pago.metodo})
-                        debug_log(f"DEBUG CREAR PEDIDO: Buscando por nombre: {pago.metodo}")
-                    
-                    if metodo_pago:
-                        saldo_actual = metodo_pago.get("saldo", 0.0)
-                        nuevo_saldo = saldo_actual + pago.monto
-                        debug_log(f"DEBUG CREAR PEDIDO: Incrementando saldo de {saldo_actual} a {nuevo_saldo} para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
-                        
-                        # Actualizar saldo usando $inc (operación atómica)
-                        result_update = metodos_pago_collection.update_one(
+                    # Preparar update para bulk operation
+                    bulk_metodos_operations.append(
+                        UpdateOne(
                             {"_id": metodo_pago["_id"]},
                             {"$inc": {"saldo": pago.monto}}
                         )
-                        debug_log(f"DEBUG CREAR PEDIDO: Resultado de actualización: {result_update.modified_count} documentos modificados")
-                        
-                        # Registrar transacción automáticamente (depósito)
-                        try:
-                            transaccion_deposito = {
-                                "metodo_pago_id": str(metodo_pago["_id"]),
-                                "tipo": "deposito",
-                                "monto": float(pago.monto),
-                                "concepto": pago.get("concepto") or f"Pago inicial de pedido {pedido_id}",
-                                "pedido_id": pedido_id,
-                                "fecha": datetime.utcnow().isoformat()
-                            }
-                            transacciones_collection.insert_one(transaccion_deposito)
-                            debug_log(f"DEBUG CREAR PEDIDO: Transacción de depósito registrada automáticamente para método '{metodo_pago.get('nombre', 'SIN_NOMBRE')}'")
-                        except Exception as trans_error:
-                            print(f"ERROR CREAR PEDIDO: Error al registrar transacción de depósito: {trans_error}")
-                            # No interrumpimos el flujo si falla el registro de transacción
-                            # pero logueamos el error para debugging
-                    else:
-                        debug_log(f"DEBUG CREAR PEDIDO: Método de pago '{pago.metodo}' no encontrado ni por ID ni por nombre")
-                except Exception as e:
-                    debug_log(f"DEBUG CREAR PEDIDO: Error al actualizar saldo: {e}")
-                    import traceback
-                    debug_log(f"DEBUG CREAR PEDIDO: Traceback: {traceback.format_exc()}")
+                    )
+                    
+                    # Preparar transacción para insertar en batch
+                    transaccion_deposito = {
+                        "metodo_pago_id": str(metodo_pago["_id"]),
+                        "tipo": "deposito",
+                        "monto": float(pago.monto),
+                        "concepto": pago.get("concepto") if hasattr(pago, 'get') else (getattr(pago, 'concepto', None) or f"Pago inicial de pedido {pedido_id}"),
+                        "pedido_id": pedido_id,
+                        "fecha": datetime.utcnow().isoformat()
+                    }
+                    transacciones_a_insertar.append(transaccion_deposito)
+                else:
+                    debug_log(f"DEBUG CREAR PEDIDO: Método de pago '{pago.metodo}' no encontrado")
+            except Exception as e:
+                debug_log(f"DEBUG CREAR PEDIDO: Error al procesar pago: {e}")
+                import traceback
+                debug_log(f"DEBUG CREAR PEDIDO: Traceback: {traceback.format_exc()}")
+        
+        # Ejecutar todos los updates de métodos de pago en batch
+        if bulk_metodos_operations:
+            try:
+                metodos_pago_collection.bulk_write(bulk_metodos_operations, ordered=False)
+                debug_log(f"DEBUG CREAR PEDIDO: Actualizados {len(bulk_metodos_operations)} métodos de pago en batch")
+            except Exception as e:
+                debug_log(f"ERROR CREAR PEDIDO: Error en bulk update de métodos de pago: {e}")
+        
+        # Insertar todas las transacciones en batch
+        if transacciones_a_insertar:
+            try:
+                transacciones_collection.insert_many(transacciones_a_insertar)
+                debug_log(f"DEBUG CREAR PEDIDO: Insertadas {len(transacciones_a_insertar)} transacciones en batch")
+            except Exception as e:
+                debug_log(f"ERROR CREAR PEDIDO: Error al insertar transacciones en batch: {e}")
     
     return {"message": "Pedido creado correctamente", "id": pedido_id, "cliente_nombre": pedido.cliente_nombre}
 
