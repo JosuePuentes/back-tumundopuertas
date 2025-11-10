@@ -5017,7 +5017,10 @@ async def get_venta_diaria(
             print(f"DEBUG VENTA DIARIA: === FIN EJEMPLOS ===")
 
         # Procesar los abonos manualmente y aplicar filtro de fechas MEJORADO
+        # Detección de duplicados usando clave única: pedido_id + fecha + monto + metodo
         abonos = []
+        abonos_vistos = set()  # Set para detectar duplicados
+        
         for abono in abonos_raw:
             # Aplicar filtro de fechas si se especificó
             if fecha_busqueda_mmddyyyy:
@@ -5061,11 +5064,24 @@ async def get_venta_diaria(
             metodo_id = abono.get("metodo_id")
             metodo_nombre = metodos_pago.get(str(metodo_id), metodos_pago.get(metodo_id, metodo_id))
             
+            # Crear clave única para detectar duplicados: pedido_id + fecha + monto + metodo
+            pedido_id_str = str(abono["pedido_id"])
+            fecha_abono_str = str(abono.get("fecha", ""))
+            monto_abono = abono.get("monto", 0)
+            clave_unica = (pedido_id_str, fecha_abono_str, monto_abono, metodo_nombre)
+            
+            # Omitir abonos duplicados
+            if clave_unica in abonos_vistos:
+                print(f"DEBUG VENTA DIARIA: Abono duplicado detectado y omitido: {clave_unica}")
+                continue
+            
+            abonos_vistos.add(clave_unica)
+            
             abono_procesado = {
-                "pedido_id": str(abono["pedido_id"]),
+                "pedido_id": pedido_id_str,
                 "cliente_nombre": abono.get("cliente_nombre"),
                 "fecha": abono.get("fecha"),
-                "monto": abono.get("monto", 0),
+                "monto": monto_abono,
                 "metodo": metodo_nombre
             }
             abonos.append(abono_procesado)
@@ -5454,6 +5470,19 @@ async def get_pagos_pedido(pedido_id: str):
                 total_adicionales += precio * cantidad
 
         total_pedido = total_items + total_adicionales
+        
+        # Calcular total_abonado desde historial_pagos si no coincide con el valor guardado
+        total_abonado_calculado = sum(
+            pago.get("monto", 0) 
+            for pago in historial_pagos 
+            if pago.get("estado") in ["abonado", "pagado"]
+        )
+        
+        # Usar el valor calculado si hay discrepancia
+        if total_abonado_calculado != total_abonado:
+            print(f"DEBUG PAGOS: Discrepancia en total_abonado. Guardado: {total_abonado}, Calculado: {total_abonado_calculado}. Usando calculado.")
+            total_abonado = total_abonado_calculado
+        
         saldo_pendiente = total_pedido - total_abonado
         
         return {
