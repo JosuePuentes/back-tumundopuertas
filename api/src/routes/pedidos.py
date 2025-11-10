@@ -4283,8 +4283,8 @@ async def cancelar_pedido(
     user: dict = Depends(get_current_user)
 ):
     """
-    Cancelar un pedido que esté en estado 'pendiente'
-    Solo permite cancelar pedidos que no hayan iniciado producción
+    Cancelar un pedido en cualquier estado.
+    Limpia todos los datos relacionados: abonos, items de herrería, apartados, etc.
     """
     try:
         # Validar ID del pedido
@@ -4302,20 +4302,20 @@ async def cancelar_pedido(
         if not pedido:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
         
-        # Verificar que el pedido esté en estado 'pendiente'
+        # Verificar que el pedido no esté ya cancelado
         estado_actual = pedido.get("estado_general", "")
-        if estado_actual != "pendiente":
+        if estado_actual == "cancelado":
             raise HTTPException(
                 status_code=400, 
-                detail=f"No se puede cancelar el pedido. Estado actual: {estado_actual}. Solo se pueden cancelar pedidos en estado 'pendiente'"
+                detail="El pedido ya está cancelado"
             )
         
-        # Verificar que no tenga asignaciones activas
+        # Cancelar todas las asignaciones activas en seguimiento
         seguimiento = pedido.get("seguimiento", [])
         if seguimiento is None:
             seguimiento = []
-        tiene_asignaciones_activas = False
         
+        # Actualizar todas las asignaciones activas a "cancelado"
         for proceso in seguimiento:
             if isinstance(proceso, dict):
                 asignaciones = proceso.get("asignaciones_articulos", [])
@@ -4323,16 +4323,8 @@ async def cancelar_pedido(
                     asignaciones = []
                 for asignacion in asignaciones:
                     if asignacion.get("estado") == "en_proceso":
-                        tiene_asignaciones_activas = True
-                        break
-                if tiene_asignaciones_activas:
-                    break
-        
-        if tiene_asignaciones_activas:
-            raise HTTPException(
-                status_code=400,
-                detail="No se puede cancelar el pedido porque tiene asignaciones activas en producción"
-            )
+                        asignacion["estado"] = "cancelado"
+                        asignacion["fecha_cancelacion"] = datetime.now().isoformat()
         
         # Actualizar el pedido con estado cancelado
         fecha_cancelacion = datetime.now().isoformat()
@@ -4396,6 +4388,17 @@ async def cancelar_pedido(
             }
         )
         
+        # Eliminar items de apartados_collection relacionados con este pedido
+        apartados_eliminados = 0
+        try:
+            apartados_pedido = list(apartados_collection.find({"pedido_id": pedido_id}))
+            for apartado in apartados_pedido:
+                apartados_collection.delete_one({"_id": apartado["_id"]})
+                apartados_eliminados += 1
+            print(f"DEBUG CANCELAR: Eliminados {apartados_eliminados} items de apartados_collection")
+        except Exception as e:
+            print(f"ERROR CANCELAR: Error eliminando apartados: {e}")
+        
         # Actualizar el estado_item de todos los items a 4 (terminado/cancelado)
         # Esto hará que desaparezcan de PedidosHerreria
         items_actualizados = 0
@@ -4416,6 +4419,13 @@ async def cancelar_pedido(
             if item_result.modified_count > 0:
                 items_actualizados += 1
         
+        # Actualizar seguimiento con asignaciones canceladas
+        if seguimiento:
+            pedidos_collection.update_one(
+                {"_id": pedido_obj_id},
+                {"$set": {"seguimiento": seguimiento}}
+            )
+        
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Pedido no encontrado para actualizar")
         
@@ -4433,6 +4443,7 @@ async def cancelar_pedido(
             "cancelado_por": usuario_cancelacion,
             "items_actualizados": items_actualizados,
             "items_desapareceran_herreria": items_actualizados,
+            "apartados_eliminados": apartados_eliminados,
             "transacciones_eliminadas": transacciones_eliminadas,
             "saldos_revertidos": saldos_revertidos,
             "total_abonado_revertido": total_abonado_anterior
@@ -4983,7 +4994,13 @@ async def get_venta_diaria(
                 raise HTTPException(status_code=400, detail=f"Formato de fecha inválido: {fecha_inicio}. Use YYYY-MM-DD o MM/DD/YYYY")
         
         # Pipeline simplificado sin filtros problemáticos
+        # Filtrar pedidos cancelados para que no aparezcan en resumen-venta-diaria
         pipeline = [
+            {
+                "$match": {
+                    "estado_general": {"$ne": "cancelado"}  # Excluir pedidos cancelados
+                }
+            },
             {"$unwind": "$historial_pagos"},
             {
                 "$project": {
