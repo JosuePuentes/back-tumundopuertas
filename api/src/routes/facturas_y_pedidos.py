@@ -182,9 +182,15 @@ async def crear_factura_confirmada(
         
         # Si el monto_total no viene, calcularlo incluyendo adicionales
         if monto_total is None:
-            # Calcular monto de items
+            # Calcular monto de items (considerando descuentos)
+            def calcular_precio_final_item(item: dict) -> float:
+                """Calcula el precio final de un item considerando el descuento"""
+                precio = float(item.get("precio", 0))
+                descuento = float(item.get("descuento", 0) or 0)
+                return max(0.0, precio - descuento)
+            
             monto_items = sum(
-                float(item.get("precio", 0)) * float(item.get("cantidad", 0))
+                calcular_precio_final_item(item) * float(item.get("cantidad", 0))
                 for item in items
             ) if items else 0.0
             

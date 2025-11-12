@@ -181,6 +181,7 @@ class PedidoItem(BaseModel):
     detalleitem: Optional[str] = ""
     imagenes: Optional[List[str]] = []
     estado_item: int = 0  # NUEVO: Estado inicial pendiente (0=pendiente, 1=herreria, 2=masillar, 3=preparar, 4=terminado)
+    descuento: Optional[float] = None  # Descuento opcional aplicado al item
 
 class AsignacionArticulo(BaseModel):
     itemId: str

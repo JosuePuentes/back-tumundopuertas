@@ -67,6 +67,21 @@ def excluir_pedidos_web(query: dict) -> dict:
         }
     return query
 
+def calcular_precio_final_item(item: dict) -> float:
+    """
+    Calcula el precio final de un item considerando el descuento.
+    
+    Args:
+        item: Diccionario con los datos del item (debe tener 'precio' y opcionalmente 'descuento')
+    
+    Returns:
+        float: Precio final = max(0, precio - descuento)
+    """
+    precio = float(item.get("precio", 0))
+    descuento = float(item.get("descuento", 0) or 0)
+    precio_final = max(0.0, precio - descuento)
+    return precio_final
+
 def excluir_pedidos_tu_mundo_puerta(query: dict) -> dict:
     """
     Agrega filtro para excluir pedidos de TU MUNDO PUERTA (RIF: J-507172554) de una consulta.
@@ -429,9 +444,25 @@ async def create_pedido(pedido: Pedido, user: dict = Depends(get_current_user)):
         print(f"[WARN] No se pudo evaluar salvaguarda por RIF: {e}")
     
     # Asegurar que cada item tenga estado_item si no viene del frontend
+    # Validar descuentos en items
     for item in pedido.items:
         if not hasattr(item, 'estado_item') or item.estado_item is None:
             item.estado_item = 0  # Estado pendiente
+        
+        # Validar que el descuento no exceda el precio
+        if hasattr(item, 'descuento') and item.descuento is not None:
+            descuento = float(item.descuento)
+            precio = float(item.precio)
+            if descuento < 0:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"El descuento no puede ser negativo para el item '{item.nombre}'"
+                )
+            if descuento > precio:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"El descuento ({descuento}) no puede exceder el precio ({precio}) para el item '{item.nombre}'"
+                )
     
     debug_log("Creando pedido:", pedido)
     
@@ -5147,6 +5178,7 @@ async def obtener_pagos(
                 "historial_pagos": 1,
                 "total_abonado": 1,
                 "items": 1, # Necesario para calcular el total del pedido en el frontend
+                "adicionales": 1,  # Necesario para calcular el total del pedido (items + adicionales)
             },
         )
     )
@@ -5643,8 +5675,11 @@ async def get_datos_impresion(pedido_id: str, current_user = Depends(get_current
         # Convertir ObjectId a string
         pedido["_id"] = str(pedido["_id"])
         
-        # Calcular saldo pendiente
-        total_pedido = sum(item.get("precio", 0) * item.get("cantidad", 0) for item in pedido.get("items", []))
+        # Calcular saldo pendiente (considerando descuentos)
+        total_pedido = sum(
+            calcular_precio_final_item(item) * float(item.get("cantidad", 0)) 
+            for item in pedido.get("items", [])
+        )
         total_abonado = pedido.get("total_abonado", 0)
         saldo_pendiente = total_pedido - total_abonado
         
@@ -5702,8 +5737,11 @@ async def get_pagos_pedido(pedido_id: str):
         if total_abonado == 0 and not historial_pagos:
             total_abonado = float(pedido.get("total_abonado", 0))
         
-        # Calcular total del pedido (items + adicionales)
-        total_items = sum(item.get("precio", 0) * item.get("cantidad", 0) for item in pedido.get("items", []))
+        # Calcular total del pedido (items + adicionales, considerando descuentos)
+        total_items = sum(
+            calcular_precio_final_item(item) * float(item.get("cantidad", 0)) 
+            for item in pedido.get("items", [])
+        )
 
         # Calcular total de adicionales
         adicionales = pedido.get("adicionales", [])
@@ -5784,9 +5822,9 @@ async def aprobar_abono_pendiente(
                 detail=f"El abono ya está aprobado o procesado. Estado actual: {estado_actual}"
             )
         
-        # Calcular el total del pedido (items + adicionales)
+        # Calcular el total del pedido (items + adicionales, considerando descuentos)
         monto_total_items = sum(
-            float(item.get("precio", 0)) * float(item.get("cantidad", 0))
+            calcular_precio_final_item(item) * float(item.get("cantidad", 0))
             for item in pedido.get("items", [])
         )
         
@@ -5912,9 +5950,9 @@ async def agregar_abono_pedido(
         if monto <= 0:
             raise HTTPException(status_code=400, detail="El monto debe ser mayor que 0")
         
-        # Calcular el total del pedido (items + adicionales)
+        # Calcular el total del pedido (items + adicionales, considerando descuentos)
         monto_total_items = sum(
-            float(item.get("precio", 0)) * float(item.get("cantidad", 0))
+            calcular_precio_final_item(item) * float(item.get("cantidad", 0))
             for item in pedido.get("items", [])
         )
         
@@ -7489,10 +7527,10 @@ async def recalcular_total_abonado(pedido_id: str):
         
         total_abonado_actual = float(pedido.get("total_abonado", 0))
         
-        # Calcular total del pedido
+        # Calcular total del pedido (considerando descuentos)
         items = pedido.get("items", [])
         monto_total_items = sum(
-            float(item.get("precio", 0)) * float(item.get("cantidad", 0))
+            calcular_precio_final_item(item) * float(item.get("cantidad", 0))
             for item in items
         )
         
@@ -7574,9 +7612,25 @@ async def create_pedido_cliente(pedido: Pedido, cliente: dict = Depends(get_curr
         pedido_dict["fecha_actualizacion"] = datetime.now().isoformat()
         
         # Asegurar estado_item inicial para cada item
+        # Validar descuentos en items
         for item in pedido_dict.get("items", []):
             if item.get("estado_item") is None:
                 item["estado_item"] = 0
+            
+            # Validar que el descuento no exceda el precio
+            if item.get("descuento") is not None:
+                descuento = float(item.get("descuento", 0))
+                precio = float(item.get("precio", 0))
+                if descuento < 0:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"El descuento no puede ser negativo para el item '{item.get('nombre', 'sin nombre')}'"
+                    )
+                if descuento > precio:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"El descuento ({descuento}) no puede exceder el precio ({precio}) para el item '{item.get('nombre', 'sin nombre')}'"
+                    )
         
         # Insertar el pedido
         result = pedidos_collection.insert_one(pedido_dict)
@@ -7636,9 +7690,9 @@ async def create_pedido_cliente(pedido: Pedido, cliente: dict = Depends(get_curr
         
         # Crear factura automáticamente para el pedido del cliente
         try:
-            # Calcular monto total del pedido (items + adicionales)
+            # Calcular monto total del pedido (items + adicionales, considerando descuentos)
             monto_total_items = sum(
-                float(item.get("precio", 0)) * float(item.get("cantidad", 0))
+                calcular_precio_final_item(item) * float(item.get("cantidad", 0))
                 for item in pedido_dict.get("items", [])
             )
             
