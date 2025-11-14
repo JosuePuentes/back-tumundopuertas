@@ -5541,16 +5541,19 @@ async def get_venta_diaria(
         ]
 
         debug_log(f"DEBUG VENTA DIARIA: Ejecutando pipeline con {len(pipeline)} etapas")
+        debug_log(f"DEBUG VENTA DIARIA: Filtros de fecha - inicio: {fecha_inicio_dt}, fin: {fecha_fin_dt}")
         abonos_raw = list(pedidos_collection.aggregate(pipeline))
-        debug_log(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_raw)} abonos raw")
+        debug_log(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_raw)} abonos raw en la BD")
         
         # Procesar los abonos manualmente y aplicar filtro de fechas CORREGIDO
         abonos = []
         abonos_vistos = set()  # Para detectar duplicados
         
         for abono in abonos_raw:
-            # Aplicar filtro de fechas si se especificó (RANGO COMPLETO)
-            if fecha_inicio_dt and fecha_fin_dt:
+            # Aplicar filtro de fechas SOLO si se especificó (RANGO COMPLETO)
+            aplicar_filtro_fecha = fecha_inicio_dt is not None and fecha_fin_dt is not None
+            
+            if aplicar_filtro_fecha:
                 fecha_abono = abono.get("fecha")
                 fecha_abono_dt = None
                 
@@ -5696,11 +5699,50 @@ async def get_venta_diaria(
             ingresos_por_metodo[metodo] += abono.get("monto", 0)
 
         debug_log(f"DEBUG VENTA DIARIA: Total ingresos: {total_ingresos}, Métodos: {len(ingresos_por_metodo)}")
+        debug_log(f"DEBUG VENTA DIARIA: Total abonos procesados: {len(abonos)}")
 
+        # Agrupar abonos por fecha para el formato que espera el frontend
+        ventas_por_fecha = {}
+        for abono in abonos:
+            fecha_abono = abono.get("fecha")
+            # Normalizar fecha a string YYYY-MM-DD
+            fecha_str = None
+            if isinstance(fecha_abono, datetime):
+                fecha_str = fecha_abono.strftime("%Y-%m-%d")
+            elif isinstance(fecha_abono, str):
+                # Intentar extraer fecha de string ISO
+                if 'T' in fecha_abono:
+                    fecha_str = fecha_abono.split('T')[0]
+                elif len(fecha_abono) >= 10:
+                    fecha_str = fecha_abono[:10]
+                else:
+                    fecha_str = str(fecha_abono)
+            else:
+                fecha_str = str(fecha_abono)
+            
+            if fecha_str not in ventas_por_fecha:
+                ventas_por_fecha[fecha_str] = 0
+            ventas_por_fecha[fecha_str] += abono.get("monto", 0)
+        
+        # Convertir a array para el frontend
+        ventas_diarias = [
+            {
+                "fecha": fecha,
+                "total_venta": total
+            }
+            for fecha, total in ventas_por_fecha.items()
+        ]
+        
+        # Ordenar por fecha descendente
+        ventas_diarias.sort(key=lambda x: x["fecha"], reverse=True)
+
+        # Devolver formato compatible con frontend (array) y también incluir datos completos
         return {
+            "ventas": ventas_diarias,  # Formato para el frontend
             "total_ingresos": total_ingresos,
-            "abonos": abonos,
+            "abonos": abonos,  # Todos los abonos detallados
             "ingresos_por_metodo": ingresos_por_metodo,
+            "total_abonos": len(abonos)
         }
         
     except Exception as e:
