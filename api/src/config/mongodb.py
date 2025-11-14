@@ -111,6 +111,36 @@ def init_pedidos_indexes():
     except Exception as e:
         if "already exists" in str(e).lower():
             pass  # Índice ya existe
+    
+    try:
+        # Índice compuesto para items.estado_item y fecha_creacion (optimización para herrería)
+        pedidos_collection.create_index(
+            [("items.estado_item", 1), ("fecha_creacion", -1)],
+            name="idx_items_estado_fecha"
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            pass  # Índice ya existe
+    
+    try:
+        # Índice para seguimiento.asignaciones_articulos (optimización para asignaciones)
+        pedidos_collection.create_index(
+            [("seguimiento.asignaciones_articulos.estado", 1)],
+            name="idx_seguimiento_estado"
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            pass  # Índice ya existe
+    
+    try:
+        # Índice compuesto para seguimiento (módulo y estado)
+        pedidos_collection.create_index(
+            [("seguimiento.orden", 1), ("seguimiento.asignaciones_articulos.estado", 1)],
+            name="idx_seguimiento_orden_estado"
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            pass  # Índice ya existe
 
 def init_clientes_indexes():
     """

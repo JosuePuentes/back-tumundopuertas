@@ -445,3 +445,5 @@ Estos endpoints ya están bien optimizados y pueden servir como referencia:
 
 **Nota:** Esta auditoría es solo de análisis. No se modificó ningún código. Todas las recomendaciones están listas para implementar cuando se apruebe.
 
+
+

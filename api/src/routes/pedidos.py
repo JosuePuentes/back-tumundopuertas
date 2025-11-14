@@ -4,7 +4,8 @@ from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 from pymongo import UpdateOne
 import os
-from ..config.mongodb import pedidos_collection, db, items_collection, clientes_collection, clientes_usuarios_collection, facturas_cliente_collection, movimientos_logisticos_collection
+from ..config.mongodb import pedidos_collection, db, items_collection, clientes_collection, clientes_usuarios_collection, facturas_cliente_collection, movimientos_logisticos_collection, empleados_collection
+from ..utils.cache import cache, CACHE_KEY_EMPLEADOS, CACHE_KEY_ASIGNACIONES, CACHE_KEY_ASIGNACIONES_MODULO
 transacciones_collection = db["transacciones"]
 from ..models.authmodels import Pedido
 from ..auth.auth import get_current_user, get_current_cliente
@@ -177,7 +178,11 @@ def enriquecer_pedido_con_datos_cliente(pedido: dict):
         pass
 
 @router.get("/all/")
-async def get_all_pedidos():
+async def get_all_pedidos(
+    skip: int = Query(0, ge=0, description="Número de resultados a saltar para paginación"),
+    limite: int = Query(100, ge=1, le=1000, description="Límite de resultados por página (1-1000)")
+):
+    """Obtener todos los pedidos con paginación optimizada"""
     # Obtener todos los pedidos, excluyendo los pedidos web (tipo_pedido: "web")
     # Incluir pedidos internos (tipo_pedido: "interno") y pedidos sin tipo_pedido (retrocompatibilidad)
     query = {
@@ -211,10 +216,14 @@ async def get_all_pedidos():
         "pago": 1
     }
     
-    # Limitar a 1000 pedidos más recientes y ordenar por fecha descendente
+    # Contar total de pedidos
+    total_pedidos = pedidos_collection.count_documents(query)
+    
+    # Obtener pedidos con paginación, ordenados por fecha descendente
     pedidos = list(pedidos_collection.find(query, projection)
                    .sort("fecha_creacion", -1)
-                   .limit(1000))
+                   .skip(skip)
+                   .limit(limite))
     
     # OPTIMIZACIÓN: Batch query para obtener todos los clientes de una vez (evita N+1)
     cliente_ids = list(set(p.get("cliente_id") for p in pedidos if p.get("cliente_id")))
@@ -277,7 +286,13 @@ async def get_all_pedidos():
                 if telefono:
                     pedido["cliente_telefono"] = telefono
     
-    return pedidos
+    return {
+        "pedidos": pedidos,
+        "total": total_pedidos,
+        "skip": skip,
+        "limite": limite,
+        "has_more": (skip + len(pedidos)) < total_pedidos
+    }
 
 @router.get("/test-terminar")
 async def test_terminar_endpoint():
@@ -794,8 +809,8 @@ async def update_subestados(
     estado_general: str = Body(None),
 ):
     # Validaciones iniciales
-    print(f"Pedido: {pedido_id}, Asignaciones: {asignaciones}, Estado General: {estado_general}, Tipo Fecha: {tipo_fecha}")
-    print(f"Numero orden recibido: {numero_orden}")
+    debug_log(f"Pedido: {pedido_id}, Asignaciones: {asignaciones}, Estado General: {estado_general}, Tipo Fecha: {tipo_fecha}")
+    debug_log(f"Numero orden recibido: {numero_orden}")
     pedido_id = ObjectId(pedido_id)
 
     if not pedido_id:
@@ -815,8 +830,8 @@ async def update_subestados(
         raise HTTPException(status_code=400, detail="El pedido no tiene seguimiento válido")
     
     # Debug: mostrar todos los órdenes disponibles
-    print(f"Órdenes disponibles en seguimiento: {[str(sub.get('orden')) for sub in seguimiento]}")
-    print(f"Buscando orden: {numero_orden}")
+    debug_log(f"Órdenes disponibles en seguimiento: {[str(sub.get('orden')) for sub in seguimiento]}")
+    debug_log(f"Buscando orden: {numero_orden}")
 
     actualizado = False
     error_subestado = None
@@ -864,106 +879,132 @@ async def options_herreria():
 @router.get("/herreria/")
 async def get_pedidos_herreria(
     ordenar: str = Query("fecha_desc", description="Ordenamiento: fecha_desc, fecha_asc, estado, cliente"),
-    limite: int = Query(100, ge=1, le=1000, description="Límite de resultados (1-1000)")
+    limite: int = Query(100, ge=1, le=1000, description="Límite de resultados (1-1000)"),
+    skip: int = Query(0, ge=0, description="Número de resultados a saltar para paginación")
 ):
-    """Obtener ITEMS individuales para producción - Items pendientes (0) y en proceso (1-3)"""
+    """Obtener ITEMS individuales para producción - Items pendientes (0) y en proceso (1-3) - OPTIMIZADO"""
     try:
-        # Buscar solo pedidos internos (excluir pedidos web y cancelados)
-        # Incluir pedidos internos (tipo_pedido: "interno") y pedidos sin tipo_pedido (retrocompatibilidad)
-        query = {
-            "$or": [
-                {"tipo_pedido": {"$ne": "web"}},  # No es web
-                {"tipo_pedido": {"$exists": False}}  # No tiene tipo_pedido (pedidos antiguos)
-            ],
-            "estado_general": {"$ne": "cancelado"}  # Excluir pedidos cancelados
-        }
-        pedidos = list(pedidos_collection.find(query, {
-            "_id": 1,
-            "numero_orden": 1,
-            "cliente_nombre": 1,
-            "fecha_creacion": 1,
-            "estado_general": 1,
-            "items": 1,
-            "seguimiento": 1,
-            "tipo_pedido": 1
-        }))
+        # Pipeline de agregación optimizado que usa índices
+        pipeline = [
+            {
+                "$match": {
+                    "$or": [
+                        {"tipo_pedido": {"$ne": "web"}},
+                        {"tipo_pedido": {"$exists": False}}
+                    ],
+                    "estado_general": {"$ne": "cancelado"},
+                    "items.estado_item": {"$in": [0, 1, 2, 3]}  # Filtrar en BD
+                }
+            },
+            {
+                "$unwind": "$items"
+            },
+            {
+                "$match": {
+                    "items.estado_item": {"$in": [0, 1, 2, 3]}
+                }
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "numero_orden": 1,
+                    "cliente_nombre": 1,
+                    "fecha_creacion": 1,
+                    "estado_general": 1,
+                    "item_id": {"$ifNull": ["$items.id", {"$toString": "$items._id"}]},
+                    "item_obj_id": {"$ifNull": ["$items._id", None]},
+                    "descripcion": "$items.descripcion",
+                    "nombre": "$items.nombre",
+                    "categoria": "$items.categoria",
+                    "precio": "$items.precio",
+                    "costo": "$items.costo",
+                    "costoProduccion": "$items.costoProduccion",
+                    "cantidad": "$items.cantidad",
+                    "detalleitem": "$items.detalleitem",
+                    "imagenes": "$items.imagenes",
+                    "estado_item": "$items.estado_item",
+                    "empleado_asignado": "$items.empleado_asignado",
+                    "nombre_empleado": "$items.nombre_empleado",
+                    "modulo_actual": "$items.modulo_actual",
+                    "fecha_asignacion": "$items.fecha_asignacion"
+                }
+            }
+        ]
         
-        # Convertir a items individuales
-        items_individuales = []
-        
-        for pedido in pedidos:
-            # Verificación adicional: saltar pedidos web y cancelados por si acaso
-            tipo_pedido = pedido.get("tipo_pedido")
-            estado_general = pedido.get("estado_general", "")
-            if tipo_pedido == "web" or estado_general == "cancelado":
-                continue
-            pedido_id = str(pedido["_id"])
-            
-            # Filtrar items pendientes (0) y en proceso (1-3), excluir cancelados (4)
-            for item in pedido.get("items", []):
-                estado_item = item.get("estado_item", 0)  # Default 0
-                
-                if estado_item in [0, 1, 2, 3]:  # Pendientes y en proceso (excluir 4 = cancelado)
-                    # Crear item individual con información del pedido
-                    item_individual = {
-                        "id": item.get("id", str(item.get("_id", ""))),
-                        "pedido_id": pedido_id,
-                        "item_id": str(item.get("_id", item.get("id", ""))),
-                        "numero_orden": pedido.get("numero_orden", ""),
-                        "cliente_nombre": pedido.get("cliente_nombre", ""),
-                        "fecha_creacion": pedido.get("fecha_creacion", ""),
-                        "estado_general_pedido": pedido.get("estado_general", ""),
-                        "descripcion": item.get("descripcion", ""),
-                        "nombre": item.get("nombre", ""),
-                        "categoria": item.get("categoria", ""),
-                        "precio": item.get("precio", 0),
-                        "costo": item.get("costo", 0),
-                        "costoProduccion": item.get("costoProduccion", 0),
-                        "cantidad": item.get("cantidad", 1),
-                        "detalleitem": item.get("detalleitem", ""),
-                        "imagenes": item.get("imagenes", []),
-                        "estado_item": estado_item,
-                        "empleado_asignado": item.get("empleado_asignado"),
-                        "nombre_empleado": item.get("nombre_empleado"),
-                        "modulo_actual": item.get("modulo_actual"),
-                        "fecha_asignacion": item.get("fecha_asignacion")
-                    }
-                    items_individuales.append(item_individual)
-        
-        # Ordenar los items según el parámetro
+        # Ordenamiento según parámetro
+        sort_field = {}
         if ordenar == "fecha_desc":
-            # Ordenar por fecha de creación descendente (más recientes primero)
-            items_individuales.sort(key=lambda x: x.get("fecha_creacion", ""), reverse=True)
+            sort_field = {"fecha_creacion": -1}
         elif ordenar == "fecha_asc":
-            # Ordenar por fecha de creación ascendente (más antiguos primero)
-            items_individuales.sort(key=lambda x: x.get("fecha_creacion", ""), reverse=False)
+            sort_field = {"fecha_creacion": 1}
         elif ordenar == "estado":
-            # Ordenar por estado_item
-            items_individuales.sort(key=lambda x: x.get("estado_item", 0))
+            sort_field = {"estado_item": 1}
         elif ordenar == "cliente":
-            # Ordenar por nombre del cliente
-            items_individuales.sort(key=lambda x: x.get("cliente_nombre", ""))
+            sort_field = {"cliente_nombre": 1}
+        else:
+            sort_field = {"fecha_creacion": -1}
         
-        # Aplicar límite después del ordenamiento
-        total_items = len(items_individuales)
-        items_limitados = items_individuales[:limite]
+        pipeline.append({"$sort": sort_field})
+        
+        # Contar total antes de limitar
+        count_pipeline = pipeline + [{"$count": "total"}]
+        total_result = list(pedidos_collection.aggregate(count_pipeline))
+        total_items = total_result[0]["total"] if total_result else 0
+        
+        # Aplicar paginación
+        pipeline.append({"$skip": skip})
+        pipeline.append({"$limit": limite})
+        
+        # Ejecutar agregación
+        items_docs = list(pedidos_collection.aggregate(pipeline))
+        
+        # Formatear resultados
+        items_individuales = []
+        for doc in items_docs:
+            item_individual = {
+                "id": doc.get("item_id", ""),
+                "pedido_id": str(doc["_id"]),
+                "item_id": str(doc.get("item_obj_id", doc.get("item_id", ""))),
+                "numero_orden": doc.get("numero_orden", ""),
+                "cliente_nombre": doc.get("cliente_nombre", ""),
+                "fecha_creacion": doc.get("fecha_creacion", ""),
+                "estado_general_pedido": doc.get("estado_general", ""),
+                "descripcion": doc.get("descripcion", ""),
+                "nombre": doc.get("nombre", ""),
+                "categoria": doc.get("categoria", ""),
+                "precio": doc.get("precio", 0),
+                "costo": doc.get("costo", 0),
+                "costoProduccion": doc.get("costoProduccion", 0),
+                "cantidad": doc.get("cantidad", 1),
+                "detalleitem": doc.get("detalleitem", ""),
+                "imagenes": doc.get("imagenes", []),
+                "estado_item": doc.get("estado_item", 0),
+                "empleado_asignado": doc.get("empleado_asignado"),
+                "nombre_empleado": doc.get("nombre_empleado"),
+                "modulo_actual": doc.get("modulo_actual"),
+                "fecha_asignacion": doc.get("fecha_asignacion")
+            }
+            items_individuales.append(item_individual)
         
         return {
-            "items": items_limitados,
+            "items": items_individuales,
             "total_items": total_items,
-            "items_mostrados": len(items_limitados),
+            "items_mostrados": len(items_individuales),
             "limite_aplicado": limite,
+            "skip": skip,
+            "has_more": (skip + len(items_individuales)) < total_items,
             "ordenamiento": ordenar,
             "message": "Items individuales para producción"
         }
         
     except Exception as e:
-        print(f"Error en get_pedidos_herreria: {e}")
-        return {
-            "items": [],
-            "total_items": 0,
-            "error": str(e)
-        }
+        debug_log(f"Error en get_pedidos_herreria: {e}")
+        import traceback
+        debug_log(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al obtener items de herrería: {str(e)}"
+        )
 
 @router.put("/inicializar-estado-items/")
 async def inicializar_estado_items():
@@ -1515,17 +1556,20 @@ async def terminar_asignacion(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error terminando asignación: {e}")
+        debug_log(f"Error terminando asignación: {e}")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
 @router.get("/item-estado/{pedido_id}/{item_id}")
 async def get_item_estado(pedido_id: str, item_id: str):
     """
-    Obtener el estado específico de un item
+    Obtener el estado específico de un item - OPTIMIZADO
     """
     try:
-        # Buscar el pedido
-        pedido = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+        # Proyección optimizada: solo campos necesarios
+        pedido = pedidos_collection.find_one(
+            {"_id": ObjectId(pedido_id)},
+            {"items": 1}  # Solo necesitamos items
+        )
         if not pedido:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
         
@@ -1565,7 +1609,100 @@ async def get_item_estado(pedido_id: str, item_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error obteniendo estado del item: {e}")
+        debug_log(f"Error obteniendo estado del item: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+class ItemEstadoRequest(BaseModel):
+    pedido_id: str
+    item_id: str
+
+class BatchItemEstadoRequest(BaseModel):
+    items: List[ItemEstadoRequest]
+
+@router.post("/item-estado/batch")
+async def get_item_estado_batch(request: BatchItemEstadoRequest):
+    """
+    Endpoint batch para obtener estados de múltiples items de una vez.
+    Optimiza cuando el frontend necesita consultar varios items.
+    """
+    try:
+        if not request.items or len(request.items) == 0:
+            return {"items": []}
+        
+        # Agrupar por pedido_id para optimizar queries
+        pedidos_dict = {}
+        for item_req in request.items:
+            pedido_id = item_req.pedido_id
+            if pedido_id not in pedidos_dict:
+                pedidos_dict[pedido_id] = []
+            pedidos_dict[pedido_id].append(item_req.item_id)
+        
+        # Obtener todos los pedidos necesarios en batch
+        pedido_ids = [ObjectId(pid) for pid in pedidos_dict.keys() if ObjectId.is_valid(pid)]
+        pedidos = list(pedidos_collection.find(
+            {"_id": {"$in": pedido_ids}},
+            {"_id": 1, "items": 1}
+        ))
+        
+        # Crear diccionario de pedidos
+        pedidos_map = {str(p["_id"]): p for p in pedidos}
+        
+        # Mapeo de estados a descripciones
+        estado_descripcion = {
+            1: "Pendiente - Herrería",
+            2: "En proceso - Masillar/Pintar", 
+            3: "En proceso - Manillar",
+            4: "Terminado - Listo para facturar"
+        }
+        
+        # Procesar cada item solicitado
+        resultados = []
+        for item_req in request.items:
+            pedido_id = item_req.pedido_id
+            item_id = item_req.item_id
+            
+            pedido = pedidos_map.get(pedido_id)
+            if not pedido:
+                resultados.append({
+                    "pedido_id": pedido_id,
+                    "item_id": item_id,
+                    "error": "Pedido no encontrado"
+                })
+                continue
+            
+            # Buscar el item específico
+            item_encontrado = None
+            for item in pedido.get("items", []):
+                if item.get("id") == item_id:
+                    item_encontrado = item
+                    break
+            
+            if not item_encontrado:
+                resultados.append({
+                    "pedido_id": pedido_id,
+                    "item_id": item_id,
+                    "error": "Item no encontrado"
+                })
+                continue
+            
+            estado_item = item_encontrado.get("estado_item", 1)
+            resultados.append({
+                "pedido_id": pedido_id,
+                "item_id": item_id,
+                "estado_item": estado_item,
+                "descripcion_estado": estado_descripcion.get(estado_item, "Estado desconocido"),
+                "visible_en_herreria": estado_item <= 3,
+                "empleado_asignado": item_encontrado.get("empleado_asignado"),
+                "nombre_empleado": item_encontrado.get("nombre_empleado"),
+                "modulo_actual": item_encontrado.get("modulo_actual"),
+                "fecha_asignacion": item_encontrado.get("fecha_asignacion"),
+                "fecha_terminacion": item_encontrado.get("fecha_terminacion")
+            })
+        
+        return {"items": resultados, "total": len(resultados)}
+        
+    except Exception as e:
+        debug_log(f"Error obteniendo estados batch de items: {e}")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
 # NOTA: Este endpoint duplicado será ignorado por FastAPI (usa el primero)
@@ -2882,8 +3019,156 @@ async def get_asignaciones_modulo_produccion(modulo: str):
         }
         
     except Exception as e:
-        print(f"ERROR MODULO: Error al obtener asignaciones: {e}")
+        debug_log(f"ERROR MODULO: Error al obtener asignaciones: {e}")
         raise HTTPException(status_code=500, detail=f"Error al obtener asignaciones del módulo: {str(e)}")
+
+@router.get("/asignaciones/")
+async def get_asignaciones_activas(
+    modulo: Optional[str] = Query(None, description="Filtrar por módulo: herreria, masillar, preparar, listo_facturar"),
+    estado: Optional[str] = Query(None, description="Filtrar por estado: pendiente, en_proceso, terminado"),
+    fecha_desde: Optional[str] = Query(None, description="Filtrar desde fecha (YYYY-MM-DD)"),
+    fecha_hasta: Optional[str] = Query(None, description="Filtrar hasta fecha (YYYY-MM-DD)"),
+    skip: int = Query(0, ge=0, description="Número de resultados a saltar para paginación"),
+    limite: int = Query(100, ge=1, le=1000, description="Límite de resultados por página (1-1000)")
+):
+    """
+    Endpoint optimizado para obtener solo asignaciones activas (pendientes y en_proceso).
+    Evita que el frontend procese todos los pedidos.
+    Incluye filtros en el backend y usa caché para mejor rendimiento.
+    """
+    try:
+        # Verificar caché primero (TTL de 2 minutos)
+        cache_key = f"{CACHE_KEY_ASIGNACIONES}_modulo_{modulo}_estado_{estado}_fecha_{fecha_desde}_{fecha_hasta}_skip_{skip}_limite_{limite}"
+        cached_result = cache.get(cache_key)
+        if cached_result:
+            debug_log("Cache hit para asignaciones activas")
+            return cached_result
+        
+        # Pipeline de agregación optimizado
+        pipeline = [
+            {
+                "$match": {
+                    "seguimiento": {
+                        "$elemMatch": {
+                            "asignaciones_articulos": {"$exists": True, "$ne": []}
+                        }
+                    },
+                    "estado_general": {"$ne": "cancelado"}  # Excluir pedidos cancelados
+                }
+            },
+            {
+                "$unwind": "$seguimiento"
+            },
+            {
+                "$match": {
+                    "seguimiento.asignaciones_articulos": {"$exists": True, "$ne": []}
+                }
+            },
+            {
+                "$unwind": "$seguimiento.asignaciones_articulos"
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "numero_orden": 1,
+                    "cliente_nombre": 1,
+                    "pedido_id": "$_id",
+                    "item_id": "$seguimiento.asignaciones_articulos.itemId",
+                    "empleado_id": "$seguimiento.asignaciones_articulos.empleadoId",
+                    "empleado_nombre": "$seguimiento.asignaciones_articulos.nombreempleado",
+                    "modulo": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$eq": ["$seguimiento.orden", 1]}, "then": "herreria"},
+                                {"case": {"$eq": ["$seguimiento.orden", 2]}, "then": "masillar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 3]}, "then": "preparar"},
+                                {"case": {"$eq": ["$seguimiento.orden", 4]}, "then": "listo_facturar"}
+                            ],
+                            "default": "desconocido"
+                        }
+                    },
+                    "estado": "$seguimiento.asignaciones_articulos.estado",
+                    "estado_subestado": "$seguimiento.asignaciones_articulos.estado_subestado",
+                    "fecha_asignacion": "$seguimiento.asignaciones_articulos.fecha_inicio",
+                    "fecha_fin": "$seguimiento.asignaciones_articulos.fecha_fin",
+                    "descripcionitem": "$seguimiento.asignaciones_articulos.descripcionitem",
+                    "detalleitem": "$seguimiento.asignaciones_articulos.detalleitem",
+                    "costo_produccion": "$seguimiento.asignaciones_articulos.costoproduccion",
+                    "imagenes": "$seguimiento.asignaciones_articulos.imagenes",
+                    "orden": "$seguimiento.orden"
+                }
+            },
+            {
+                "$match": {
+                    "estado": {"$in": ["en_proceso", "pendiente"]},  # Solo activas
+                    "modulo": {"$ne": "desconocido"}
+                }
+            }
+        ]
+        
+        # Aplicar filtros opcionales
+        match_filters = {}
+        if modulo:
+            match_filters["modulo"] = modulo
+        if estado:
+            match_filters["estado"] = estado
+        if fecha_desde or fecha_hasta:
+            fecha_filter = {}
+            if fecha_desde:
+                fecha_filter["$gte"] = datetime.fromisoformat(fecha_desde)
+            if fecha_hasta:
+                fecha_filter["$lte"] = datetime.fromisoformat(fecha_hasta + "T23:59:59")
+            if fecha_filter:
+                match_filters["fecha_asignacion"] = fecha_filter
+        
+        if match_filters:
+            pipeline.append({"$match": match_filters})
+        
+        # Ordenar
+        pipeline.append({"$sort": {"orden": 1, "fecha_asignacion": -1}})
+        
+        # Contar total antes de limitar
+        count_pipeline = pipeline + [{"$count": "total"}]
+        total_result = list(pedidos_collection.aggregate(count_pipeline))
+        total_asignaciones = total_result[0]["total"] if total_result else 0
+        
+        # Aplicar paginación
+        pipeline.append({"$skip": skip})
+        pipeline.append({"$limit": limite})
+        
+        # Ejecutar agregación
+        asignaciones = list(pedidos_collection.aggregate(pipeline))
+        
+        # Convertir ObjectId a string para JSON
+        for asignacion in asignaciones:
+            asignacion["pedido_id"] = str(asignacion["pedido_id"])
+            asignacion["item_id"] = str(asignacion["item_id"])
+            if asignacion.get("_id"):
+                asignacion["_id"] = str(asignacion["_id"])
+        
+        result = {
+            "asignaciones": asignaciones,
+            "total": total_asignaciones,
+            "skip": skip,
+            "limite": limite,
+            "has_more": (skip + len(asignaciones)) < total_asignaciones,
+            "filtros": {
+                "modulo": modulo,
+                "estado": estado,
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta
+            },
+            "success": True
+        }
+        
+        # Guardar en caché (TTL de 2 minutos = 120 segundos)
+        cache.set(cache_key, result, ttl_seconds=120)
+        
+        return result
+        
+    except Exception as e:
+        debug_log(f"Error al obtener asignaciones activas: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener asignaciones: {str(e)}")
 
 @router.get("/asignaciones/todas")
 async def get_todas_asignaciones_produccion():
@@ -5199,51 +5484,42 @@ async def get_venta_diaria(
     filtrando por rango de fechas si se especifica.
     """
     try:
-        print(f"DEBUG VENTA DIARIA: Iniciando consulta con fechas {fecha_inicio} a {fecha_fin}")
+        debug_log(f"DEBUG VENTA DIARIA: Iniciando consulta con fechas {fecha_inicio} a {fecha_fin}")
         
-        # Obtener todos los métodos de pago primero
-        metodos_pago = {}
-        for metodo in metodos_pago_collection.find({}):
-            metodos_pago[str(metodo["_id"])] = metodo["nombre"]
-            metodos_pago[metodo["nombre"]] = metodo["nombre"]
+        # Convertir fechas de búsqueda a objetos datetime para comparación de rango
+        fecha_inicio_dt = None
+        fecha_fin_dt = None
         
-        print(f"DEBUG VENTA DIARIA: Cargados {len(metodos_pago)} métodos de pago")
-        
-        # Convertir fecha de búsqueda al formato MM/DD/YYYY que está en la BD
-        fecha_busqueda_mmddyyyy = None
         if fecha_inicio and fecha_fin:
             try:
-                # Intentar diferentes formatos de fecha
-                fecha_obj = None
-                
-                # Formato 1: YYYY-MM-DD
+                # Parsear fecha_inicio
                 try:
-                    fecha_obj = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-                    print(f"DEBUG VENTA DIARIA: Fecha parseada como YYYY-MM-DD: {fecha_inicio}")
+                    fecha_inicio_dt = datetime.strptime(fecha_inicio, "%Y-%m-%d")
                 except ValueError:
-                    pass
-                
-                # Formato 2: MM/DD/YYYY
-                if fecha_obj is None:
                     try:
-                        fecha_obj = datetime.strptime(fecha_inicio, "%m/%d/%Y")
-                        print(f"DEBUG VENTA DIARIA: Fecha parseada como MM/DD/YYYY: {fecha_inicio}")
+                        fecha_inicio_dt = datetime.strptime(fecha_inicio, "%m/%d/%Y")
                     except ValueError:
-                        pass
+                        raise ValueError(f"No se pudo parsear fecha_inicio: {fecha_inicio}")
                 
-                if fecha_obj is None:
-                    raise ValueError(f"No se pudo parsear la fecha: {fecha_inicio}")
+                # Parsear fecha_fin y establecer hora al final del día (23:59:59)
+                try:
+                    fecha_fin_dt = datetime.strptime(fecha_fin, "%Y-%m-%d")
+                except ValueError:
+                    try:
+                        fecha_fin_dt = datetime.strptime(fecha_fin, "%m/%d/%Y")
+                    except ValueError:
+                        raise ValueError(f"No se pudo parsear fecha_fin: {fecha_fin}")
                 
-                # Convertir a formato MM/DD/YYYY para buscar en la BD
-                fecha_busqueda_mmddyyyy = fecha_obj.strftime("%m/%d/%Y")
-                print(f"DEBUG VENTA DIARIA: Buscando fecha en formato MM/DD/YYYY: {fecha_busqueda_mmddyyyy}")
+                # Establecer hora de fecha_fin al final del día para incluir todo el día
+                fecha_fin_dt = fecha_fin_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+                
+                debug_log(f"DEBUG VENTA DIARIA: Rango de fechas: {fecha_inicio_dt} a {fecha_fin_dt}")
                 
             except ValueError as e:
-                print(f"ERROR VENTA DIARIA: Error parsing fechas: {e}")
-                raise HTTPException(status_code=400, detail=f"Formato de fecha inválido: {fecha_inicio}. Use YYYY-MM-DD o MM/DD/YYYY")
+                debug_log(f"ERROR VENTA DIARIA: Error parsing fechas: {e}")
+                raise HTTPException(status_code=400, detail=f"Formato de fecha inválido: {str(e)}. Use YYYY-MM-DD o MM/DD/YYYY")
         
         # Pipeline simplificado sin filtros problemáticos
-        # Filtrar pedidos cancelados para que no aparezcan en resumen-venta-diaria
         pipeline = [
             {
                 "$match": {
@@ -5258,87 +5534,105 @@ async def get_venta_diaria(
                     "cliente_nombre": "$cliente_nombre",
                     "fecha": "$historial_pagos.fecha",
                     "monto": "$historial_pagos.monto",
-                    "metodo_id": "$historial_pagos.metodo"
+                    "metodo": "$historial_pagos.metodo"  # CORREGIDO: usar "metodo" no "metodo_id"
                 }
             },
             {"$sort": {"fecha": -1}},
         ]
 
-        print(f"DEBUG VENTA DIARIA: Ejecutando pipeline con {len(pipeline)} etapas")
+        debug_log(f"DEBUG VENTA DIARIA: Ejecutando pipeline con {len(pipeline)} etapas")
         abonos_raw = list(pedidos_collection.aggregate(pipeline))
-        print(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_raw)} abonos raw")
+        debug_log(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_raw)} abonos raw")
         
-        # DEBUG: Mostrar ejemplos de fechas reales en la BD
-        if abonos_raw:
-            print(f"DEBUG VENTA DIARIA: === EJEMPLOS DE FECHAS EN LA BD ===")
-            for i, abono in enumerate(abonos_raw[:5]):  # Solo los primeros 5
-                fecha = abono.get("fecha")
-                print(f"DEBUG VENTA DIARIA: Abono {i+1}: fecha={fecha} (tipo: {type(fecha)})")
-                if isinstance(fecha, str):
-                    print(f"DEBUG VENTA DIARIA:   - String completo: '{fecha}'")
-                    print(f"DEBUG VENTA DIARIA:   - Primeros 10 chars: '{fecha[:10]}'")
-                elif isinstance(fecha, datetime):
-                    print(f"DEBUG VENTA DIARIA:   - Datetime: {fecha}")
-                    print(f"DEBUG VENTA DIARIA:   - ISO string: {fecha.isoformat()}")
-            print(f"DEBUG VENTA DIARIA: === FIN EJEMPLOS ===")
-
-        # Procesar los abonos manualmente y aplicar filtro de fechas MEJORADO
-        # Detección de duplicados usando clave única: pedido_id + fecha + monto + metodo
+        # Procesar los abonos manualmente y aplicar filtro de fechas CORREGIDO
         abonos = []
-        abonos_vistos = set()  # Set para detectar duplicados
+        abonos_vistos = set()  # Para detectar duplicados
         
         for abono in abonos_raw:
-            # Aplicar filtro de fechas si se especificó
-            if fecha_busqueda_mmddyyyy:
+            # Aplicar filtro de fechas si se especificó (RANGO COMPLETO)
+            if fecha_inicio_dt and fecha_fin_dt:
                 fecha_abono = abono.get("fecha")
-                fecha_coincide = False
+                fecha_abono_dt = None
                 
+                # Convertir fecha_abono a datetime para comparación
                 if isinstance(fecha_abono, datetime):
-                    # Si es datetime, convertir a string para comparar
-                    fecha_str = fecha_abono.strftime("%m/%d/%Y")
-                    print(f"DEBUG VENTA DIARIA: Datetime {fecha_abono} -> {fecha_str}")
-                    fecha_coincide = fecha_str == fecha_busqueda_mmddyyyy
-                    
+                    fecha_abono_dt = fecha_abono
                 elif isinstance(fecha_abono, str):
-                    # Si es string, buscar diferentes patrones
-                    fecha_str = str(fecha_abono)
-                    print(f"DEBUG VENTA DIARIA: String fecha: '{fecha_str}'")
-                    
-                    # Patrón 1: Buscar MM/DD/YYYY directamente
-                    if fecha_busqueda_mmddyyyy in fecha_str:
-                        fecha_coincide = True
-                        print(f"DEBUG VENTA DIARIA: Encontrado patrón MM/DD/YYYY")
-                    
-                    # Patrón 2: Si es formato ISO (YYYY-MM-DD), convertir y comparar
-                    elif len(fecha_str) >= 10 and fecha_str[4] == '-' and fecha_str[7] == '-':
-                        try:
-                            fecha_iso = datetime.strptime(fecha_str[:10], "%Y-%m-%d")
-                            fecha_mmddyyyy = fecha_iso.strftime("%m/%d/%Y")
-                            fecha_coincide = fecha_mmddyyyy == fecha_busqueda_mmddyyyy
-                            print(f"DEBUG VENTA DIARIA: ISO {fecha_str[:10]} -> {fecha_mmddyyyy}")
-                        except ValueError:
-                            print(f"DEBUG VENTA DIARIA: Error parseando ISO: {fecha_str[:10]}")
-                
-                print(f"DEBUG VENTA DIARIA: Comparando '{fecha_abono}' con '{fecha_busqueda_mmddyyyy}' -> {fecha_coincide}")
-                
-                if not fecha_coincide:
-                    print(f"DEBUG VENTA DIARIA: Fecha no coincide, saltando")
+                    # Intentar parsear como ISO (YYYY-MM-DDTHH:MM:SS...)
+                    try:
+                        # Si tiene formato ISO completo
+                        if 'T' in fecha_abono:
+                            fecha_abono_dt = datetime.fromisoformat(fecha_abono.replace('Z', '+00:00'))
+                        # Si es solo fecha YYYY-MM-DD
+                        elif len(fecha_abono) >= 10 and fecha_abono[4] == '-' and fecha_abono[7] == '-':
+                            fecha_abono_dt = datetime.strptime(fecha_abono[:10], "%Y-%m-%d")
+                        # Si es formato MM/DD/YYYY
+                        elif '/' in fecha_abono:
+                            fecha_abono_dt = datetime.strptime(fecha_abono, "%m/%d/%Y")
+                        else:
+                            debug_log(f"DEBUG VENTA DIARIA: Formato de fecha desconocido: {fecha_abono}")
+                            continue
+                    except (ValueError, AttributeError) as e:
+                        debug_log(f"DEBUG VENTA DIARIA: Error parseando fecha '{fecha_abono}': {e}")
+                        continue
+                else:
+                    debug_log(f"DEBUG VENTA DIARIA: Tipo de fecha no reconocido: {type(fecha_abono)}")
                     continue
+                
+                # Comparar si la fecha está dentro del rango
+                if fecha_abono_dt:
+                    # Normalizar a UTC si es necesario (solo comparar la fecha, no la hora)
+                    fecha_abono_solo_fecha = fecha_abono_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                    fecha_inicio_solo_fecha = fecha_inicio_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                    fecha_fin_solo_fecha = fecha_fin_dt.replace(hour=0, minute=0, second=0, microsecond=0)
                     
-                print(f"DEBUG VENTA DIARIA: ¡Fecha encontrada! {fecha_abono}")
+                    # Verificar si está en el rango
+                    esta_en_rango = fecha_inicio_solo_fecha <= fecha_abono_solo_fecha <= fecha_fin_solo_fecha
+                    
+                    debug_log(f"DEBUG VENTA DIARIA: Comparando fecha abono {fecha_abono_solo_fecha.date()} con rango [{fecha_inicio_solo_fecha.date()}, {fecha_fin_solo_fecha.date()}] -> {esta_en_rango}")
+                    
+                    if not esta_en_rango:
+                        continue
             
-            metodo_id = abono.get("metodo_id")
-            metodo_nombre = metodos_pago.get(str(metodo_id), metodos_pago.get(metodo_id, metodo_id))
+            # Obtener el método de pago (puede ser ObjectId o nombre)
+            metodo_raw = abono.get("metodo")
+            metodo_nombre = "Desconocido"
+            
+            if metodo_raw:
+                # Intentar obtener el nombre del método de pago
+                # Primero intentar como ObjectId
+                try:
+                    metodo_obj = metodos_pago_collection.find_one({"_id": ObjectId(metodo_raw)})
+                    if metodo_obj:
+                        metodo_nombre = metodo_obj.get("nombre", str(metodo_raw))
+                    else:
+                        # Si no se encuentra por ObjectId, buscar por nombre
+                        metodo_obj = metodos_pago_collection.find_one({"nombre": str(metodo_raw)})
+                        if metodo_obj:
+                            metodo_nombre = metodo_obj.get("nombre", str(metodo_raw))
+                        else:
+                            # Si no se encuentra, usar el valor directamente (puede ser un nombre)
+                            metodo_nombre = str(metodo_raw)
+                except:
+                    # Si no es ObjectId válido, buscar por nombre
+                    metodo_obj = metodos_pago_collection.find_one({"nombre": str(metodo_raw)})
+                    if metodo_obj:
+                        metodo_nombre = metodo_obj.get("nombre", str(metodo_raw))
+                    else:
+                        # Si no se encuentra, usar el valor directamente (puede ser un nombre)
+                        metodo_nombre = str(metodo_raw)
+            else:
+                debug_log(f"DEBUG VENTA DIARIA: Abono sin método: {abono}")
             
             # Crear clave única para detectar duplicados: pedido_id + fecha + monto + metodo
             pedido_id_str = str(abono["pedido_id"])
             fecha_abono_str = str(abono.get("fecha", ""))
             monto_abono = abono.get("monto", 0)
-            clave_unica = (pedido_id_str, fecha_abono_str, monto_abono, metodo_nombre)
+            clave_unica = f"{pedido_id_str}|{fecha_abono_str}|{monto_abono}|{metodo_nombre}"
             
-            # Omitir abonos duplicados
+            # Verificar si ya existe este abono (duplicado)
             if clave_unica in abonos_vistos:
-                print(f"DEBUG VENTA DIARIA: Abono duplicado detectado y omitido: {clave_unica}")
+                debug_log(f"DEBUG VENTA DIARIA: Abono duplicado detectado y omitido: {clave_unica}")
                 continue
             
             abonos_vistos.add(clave_unica)
@@ -5352,7 +5646,7 @@ async def get_venta_diaria(
             }
             abonos.append(abono_procesado)
 
-        print(f"DEBUG VENTA DIARIA: Procesados {len(abonos)} abonos")
+        debug_log(f"DEBUG VENTA DIARIA: Procesados {len(abonos)} abonos")
 
         # Calcular totales
         total_ingresos = sum(abono.get("monto", 0) for abono in abonos)
@@ -5364,7 +5658,7 @@ async def get_venta_diaria(
                 ingresos_por_metodo[metodo] = 0
             ingresos_por_metodo[metodo] += abono.get("monto", 0)
 
-        print(f"DEBUG VENTA DIARIA: Total ingresos: {total_ingresos}, Métodos: {len(ingresos_por_metodo)}")
+        debug_log(f"DEBUG VENTA DIARIA: Total ingresos: {total_ingresos}, Métodos: {len(ingresos_por_metodo)}")
 
         return {
             "total_ingresos": total_ingresos,
@@ -5373,10 +5667,10 @@ async def get_venta_diaria(
         }
         
     except Exception as e:
-        print(f"ERROR VENTA DIARIA: Error completo: {str(e)}")
-        print(f"ERROR VENTA DIARIA: Tipo de error: {type(e).__name__}")
+        debug_log(f"ERROR VENTA DIARIA: Error completo: {str(e)}")
+        debug_log(f"ERROR VENTA DIARIA: Tipo de error: {type(e).__name__}")
         import traceback
-        print(f"ERROR VENTA DIARIA: Traceback: {traceback.format_exc()}")
+        debug_log(f"ERROR VENTA DIARIA: Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error en la consulta a la DB: {str(e)}")
 
 @router.get("/venta-diaria", include_in_schema=False)

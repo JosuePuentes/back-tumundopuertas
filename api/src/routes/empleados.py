@@ -30,6 +30,17 @@ async def test_empleados_endpoint():
 
 @router.get("/all/")
 async def get_all_empleados():
+    """
+    Obtener todos los empleados con caché (TTL: 5 minutos).
+    Los empleados cambian poco, por lo que el caché mejora significativamente el rendimiento.
+    """
+    from ..utils.cache import cache, CACHE_KEY_EMPLEADOS
+    
+    # Verificar caché primero (TTL de 5 minutos = 300 segundos)
+    cached_empleados = cache.get(CACHE_KEY_EMPLEADOS)
+    if cached_empleados:
+        return cached_empleados
+    
     # Proyección optimizada: solo campos necesarios
     projection = {
         "_id": 1,
@@ -81,6 +92,9 @@ async def get_all_empleados():
                 empleado.get("cargo"), 
                 empleado.get("nombreCompleto")
             )
+    
+    # Guardar en caché (TTL de 5 minutos = 300 segundos)
+    cache.set(CACHE_KEY_EMPLEADOS, empleados, ttl_seconds=300)
     
     return empleados
 
