@@ -5563,23 +5563,39 @@ async def get_venta_diaria(
                 elif isinstance(fecha_abono, str):
                     # Intentar parsear como ISO (YYYY-MM-DDTHH:MM:SS...)
                     try:
-                        # Si tiene formato ISO completo
+                        # Si tiene formato ISO completo con T
                         if 'T' in fecha_abono:
-                            # Manejar diferentes formatos ISO
-                            if fecha_abono.endswith('Z'):
-                                # Formato con Z (UTC)
-                                fecha_abono_dt = datetime.fromisoformat(fecha_abono.replace('Z', '+00:00'))
-                                # Convertir a naive (sin timezone)
-                                fecha_abono_dt = fecha_abono_dt.astimezone(timezone.utc).replace(tzinfo=None)
-                            elif '+' in fecha_abono or fecha_abono.count('-') > 2:
-                                # Formato con timezone explícito
-                                fecha_abono_dt = datetime.fromisoformat(fecha_abono)
-                                # Convertir a naive (sin timezone)
-                                if fecha_abono_dt.tzinfo is not None:
+                            # Intentar parsear con fromisoformat (Python 3.7+)
+                            try:
+                                # Manejar diferentes formatos ISO
+                                if fecha_abono.endswith('Z'):
+                                    # Formato con Z (UTC)
+                                    fecha_abono_dt = datetime.fromisoformat(fecha_abono.replace('Z', '+00:00'))
+                                    # Convertir a naive (sin timezone)
                                     fecha_abono_dt = fecha_abono_dt.astimezone(timezone.utc).replace(tzinfo=None)
-                            else:
-                                # ISO sin timezone
-                                fecha_abono_dt = datetime.fromisoformat(fecha_abono)
+                                elif '+' in fecha_abono or (fecha_abono.count('-') > 2 and ':' in fecha_abono.split('T')[1] if len(fecha_abono.split('T')) > 1 else False):
+                                    # Formato con timezone explícito (ej: +00:00, -05:00)
+                                    fecha_abono_dt = datetime.fromisoformat(fecha_abono)
+                                    # Convertir a naive (sin timezone)
+                                    if fecha_abono_dt.tzinfo is not None:
+                                        fecha_abono_dt = fecha_abono_dt.astimezone(timezone.utc).replace(tzinfo=None)
+                                else:
+                                    # ISO sin timezone (ej: "2025-11-14T20:08:24.456103")
+                                    # fromisoformat puede fallar con microsegundos, usar parseo manual
+                                    try:
+                                        fecha_abono_dt = datetime.fromisoformat(fecha_abono)
+                                    except ValueError:
+                                        # Fallback: parsear manualmente solo la parte de fecha
+                                        fecha_str_clean = fecha_abono.split('T')[0]  # Solo la fecha YYYY-MM-DD
+                                        fecha_abono_dt = datetime.strptime(fecha_str_clean, "%Y-%m-%d")
+                            except (ValueError, AttributeError) as e:
+                                # Fallback: parsear manualmente solo la parte de fecha
+                                try:
+                                    fecha_str_clean = fecha_abono.split('T')[0]  # Solo la fecha YYYY-MM-DD
+                                    fecha_abono_dt = datetime.strptime(fecha_str_clean, "%Y-%m-%d")
+                                except ValueError:
+                                    debug_log(f"DEBUG VENTA DIARIA: Error parseando fecha ISO '{fecha_abono}': {e}")
+                                    continue
                         # Si es solo fecha YYYY-MM-DD
                         elif len(fecha_abono) >= 10 and fecha_abono[4] == '-' and fecha_abono[7] == '-':
                             fecha_abono_dt = datetime.strptime(fecha_abono[:10], "%Y-%m-%d")
@@ -5598,17 +5614,16 @@ async def get_venta_diaria(
                 
                 # Comparar si la fecha está dentro del rango
                 if fecha_abono_dt:
-                    # Normalizar todas las fechas a naive (sin timezone) para comparar
-                    # Si la fecha tiene timezone, convertir a UTC y luego quitar el timezone
+                    # Asegurar que fecha_abono_dt es naive (sin timezone)
                     if fecha_abono_dt.tzinfo is not None:
                         fecha_abono_dt = fecha_abono_dt.astimezone(timezone.utc).replace(tzinfo=None)
                     
-                    # Normalizar a solo fecha (sin hora) para comparación
+                    # Normalizar todas las fechas a solo fecha (sin hora) para comparación
                     fecha_abono_solo_fecha = fecha_abono_dt.replace(hour=0, minute=0, second=0, microsecond=0)
                     fecha_inicio_solo_fecha = fecha_inicio_dt.replace(hour=0, minute=0, second=0, microsecond=0)
                     fecha_fin_solo_fecha = fecha_fin_dt.replace(hour=0, minute=0, second=0, microsecond=0)
                     
-                    # Verificar si está en el rango
+                    # Verificar si está en el rango (inclusive en ambos extremos)
                     esta_en_rango = fecha_inicio_solo_fecha <= fecha_abono_solo_fecha <= fecha_fin_solo_fecha
                     
                     debug_log(f"DEBUG VENTA DIARIA: Comparando fecha abono {fecha_abono_solo_fecha.date()} con rango [{fecha_inicio_solo_fecha.date()}, {fecha_fin_solo_fecha.date()}] -> {esta_en_rango}")
