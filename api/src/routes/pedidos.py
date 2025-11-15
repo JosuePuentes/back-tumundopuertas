@@ -5832,14 +5832,9 @@ async def get_venta_diaria(
         # Ordenar por fecha descendente
         ventas_diarias.sort(key=lambda x: x["fecha"], reverse=True)
 
-        # Devolver formato compatible con frontend (array) y también incluir datos completos
-        return {
-            "ventas": ventas_diarias,  # Formato para el frontend
-            "total_ingresos": total_ingresos,
-            "abonos": abonos,  # Todos los abonos detallados
-            "ingresos_por_metodo": ingresos_por_metodo,
-            "total_abonos": len(abonos)
-        }
+        # Devolver array directamente para compatibilidad con frontend
+        # El frontend espera un array de objetos { fecha, total_venta }
+        return ventas_diarias
         
     except Exception as e:
         debug_log(f"ERROR VENTA DIARIA: Error completo: {str(e)}")
