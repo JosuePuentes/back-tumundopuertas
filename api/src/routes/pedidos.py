@@ -4660,6 +4660,11 @@ async def get_pedidos_por_estados(
         # Normalizar adicionales: None o no existe → []
         if "adicionales" not in pedido or pedido["adicionales"] is None:
             pedido["adicionales"] = []
+        # Normalizar historial_pagos: asegurar que siempre sea un array
+        if "historial_pagos" not in pedido or pedido["historial_pagos"] is None:
+            pedido["historial_pagos"] = []
+        elif not isinstance(pedido["historial_pagos"], list):
+            pedido["historial_pagos"] = []
         # Enriquecer con datos del cliente (cédula y teléfono)
         enriquecer_pedido_con_datos_cliente(pedido)
     return pedidos
@@ -5577,11 +5582,12 @@ async def get_venta_diaria(
             # Aplicar filtro de fechas SOLO si se especificó (RANGO COMPLETO)
             aplicar_filtro_fecha = fecha_inicio_dt is not None and fecha_fin_dt is not None
             
-            if aplicar_filtro_fecha:
-                fecha_abono = abono.get("fecha")
-                fecha_abono_dt = None
-                
-                # Convertir fecha_abono a datetime para comparación
+            # Siempre intentar parsear la fecha (necesaria para agrupar por fecha y filtrar)
+            fecha_abono = abono.get("fecha")
+            fecha_abono_dt = None
+            
+            # Convertir fecha_abono a datetime para comparación
+            if fecha_abono:
                 if isinstance(fecha_abono, datetime):
                     fecha_abono_dt = fecha_abono
                     # Si tiene timezone, convertir a naive (sin timezone)
@@ -5611,14 +5617,37 @@ async def get_venta_diaria(
                                     # Este es el formato que usa datetime.utcnow().isoformat()
                                     try:
                                         # Intentar parsear con fromisoformat (Python 3.7+)
-                                        fecha_abono_dt = datetime.fromisoformat(fecha_abono)
+                                        # Primero normalizar microsegundos si hay más de 6 dígitos
+                                        fecha_normalizada = fecha_abono
+                                        if '.' in fecha_abono and 'T' in fecha_abono:
+                                            # Separar fecha/hora y microsegundos
+                                            partes = fecha_abono.split('.')
+                                            if len(partes) == 2:
+                                                parte_fecha_hora = partes[0]
+                                                parte_microsegundos = partes[1]
+                                                # Limitar microsegundos a 6 dígitos máximo
+                                                if len(parte_microsegundos) > 6:
+                                                    parte_microsegundos = parte_microsegundos[:6]
+                                                fecha_normalizada = f"{parte_fecha_hora}.{parte_microsegundos}"
+                                        
+                                        fecha_abono_dt = datetime.fromisoformat(fecha_normalizada)
                                         debug_log(f"DEBUG VENTA DIARIA: Fecha ISO parseada exitosamente: {fecha_abono} -> {fecha_abono_dt}")
-                                    except ValueError as e:
+                                    except (ValueError, AttributeError) as e:
                                         # Fallback: parsear manualmente solo la parte de fecha
                                         debug_log(f"DEBUG VENTA DIARIA: fromisoformat falló para '{fecha_abono}', usando fallback. Error: {e}")
-                                        fecha_str_clean = fecha_abono.split('T')[0]  # Solo la fecha YYYY-MM-DD
-                                        fecha_abono_dt = datetime.strptime(fecha_str_clean, "%Y-%m-%d")
-                                        debug_log(f"DEBUG VENTA DIARIA: Fecha parseada con fallback: {fecha_str_clean} -> {fecha_abono_dt}")
+                                        try:
+                                            # Intentar parsear manualmente la fecha y hora
+                                            if 'T' in fecha_abono:
+                                                fecha_parte = fecha_abono.split('T')[0]  # YYYY-MM-DD
+                                                hora_parte = fecha_abono.split('T')[1].split('.')[0]  # HH:MM:SS
+                                                fecha_abono_dt = datetime.strptime(f"{fecha_parte} {hora_parte}", "%Y-%m-%d %H:%M:%S")
+                                            else:
+                                                fecha_str_clean = fecha_abono.split('T')[0]  # Solo la fecha YYYY-MM-DD
+                                                fecha_abono_dt = datetime.strptime(fecha_str_clean, "%Y-%m-%d")
+                                            debug_log(f"DEBUG VENTA DIARIA: Fecha parseada con fallback: {fecha_abono} -> {fecha_abono_dt}")
+                                        except ValueError as e2:
+                                            debug_log(f"DEBUG VENTA DIARIA: Error en fallback también: {e2}")
+                                            continue
                             except (ValueError, AttributeError) as e:
                                 # Fallback: parsear manualmente solo la parte de fecha
                                 try:
@@ -5643,7 +5672,8 @@ async def get_venta_diaria(
                     debug_log(f"DEBUG VENTA DIARIA: Tipo de fecha no reconocido: {type(fecha_abono)}")
                     continue
                 
-                # Comparar si la fecha está dentro del rango
+            # Aplicar filtro de fechas SOLO si se especificó y se pudo parsear la fecha
+            if aplicar_filtro_fecha:
                 if fecha_abono_dt:
                     # Asegurar que fecha_abono_dt es naive (sin timezone)
                     if fecha_abono_dt.tzinfo is not None:
@@ -5664,6 +5694,10 @@ async def get_venta_diaria(
                         continue
                     else:
                         debug_log(f"DEBUG VENTA DIARIA: Abono DENTRO del rango, incluyendo. Fecha: {fecha_abono_solo_fecha.date()}")
+                else:
+                    # Si no se pudo parsear la fecha y hay filtro, omitir el abono
+                    debug_log(f"DEBUG VENTA DIARIA: No se pudo parsear fecha '{fecha_abono}' y hay filtro activo, omitiendo abono")
+                    continue
             
             # Obtener el método de pago (puede ser ObjectId, nombre, o None)
             metodo_raw = abono.get("metodo")

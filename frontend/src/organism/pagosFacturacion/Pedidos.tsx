@@ -191,7 +191,12 @@ const Pedidos: React.FC = () => {
       );
       if (!res.ok) throw new Error("Error al obtener pedidos");
       const data = await res.json();
-      setPedidos(data);
+      // Asegurar que data sea un array y normalizar historial_pagos
+      const pedidosNormalizados = Array.isArray(data) ? data.map((pedido: any) => ({
+        ...pedido,
+        historial_pagos: Array.isArray(pedido.historial_pagos) ? pedido.historial_pagos : []
+      })) : [];
+      setPedidos(pedidosNormalizados);
     } catch (err: any) {
       setError(err.message || "Error desconocido");
     } finally {
