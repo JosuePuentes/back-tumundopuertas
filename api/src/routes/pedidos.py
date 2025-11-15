@@ -5683,40 +5683,57 @@ async def get_venta_diaria(
                             fecha_abono_dt = datetime.strptime(fecha_abono, "%m/%d/%Y")
                         else:
                             debug_log(f"DEBUG VENTA DIARIA: Formato de fecha desconocido: {fecha_abono}")
-                            continue
+                            # Si no hay filtro de fechas, intentar extraer solo la parte de fecha
+                            if not aplicar_filtro_fecha and 'T' in fecha_abono:
+                                try:
+                                    fecha_str_clean = fecha_abono.split('T')[0]
+                                    fecha_abono_dt = datetime.strptime(fecha_str_clean, "%Y-%m-%d")
+                                except:
+                                    pass  # Si falla, fecha_abono_dt seguirá siendo None
                     except (ValueError, AttributeError) as e:
                         debug_log(f"DEBUG VENTA DIARIA: Error parseando fecha '{fecha_abono}': {e}")
-                        continue
+                        # Si no hay filtro de fechas, intentar extraer solo la parte de fecha
+                        if not aplicar_filtro_fecha and isinstance(fecha_abono, str) and 'T' in fecha_abono:
+                            try:
+                                fecha_str_clean = fecha_abono.split('T')[0]
+                                fecha_abono_dt = datetime.strptime(fecha_str_clean, "%Y-%m-%d")
+                            except:
+                                pass  # Si falla, fecha_abono_dt seguirá siendo None
+                        elif aplicar_filtro_fecha:
+                            # Solo omitir si hay filtro de fechas activo
+                            continue
                 else:
                     debug_log(f"DEBUG VENTA DIARIA: Tipo de fecha no reconocido: {type(fecha_abono)}")
-                    continue
+                    # Si no hay filtro de fechas, continuar procesando (la fecha será None pero el abono se incluirá)
+                    if aplicar_filtro_fecha:
+                        continue
                 
             # Aplicar filtro de fechas SOLO si se especificó y se pudo parsear la fecha
             if aplicar_filtro_fecha:
-                if fecha_abono_dt:
-                    # Asegurar que fecha_abono_dt es naive (sin timezone)
-                    if fecha_abono_dt.tzinfo is not None:
-                        fecha_abono_dt = fecha_abono_dt.astimezone(timezone.utc).replace(tzinfo=None)
-                    
-                    # Normalizar todas las fechas a solo fecha (sin hora) para comparación
-                    fecha_abono_solo_fecha = fecha_abono_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-                    fecha_inicio_solo_fecha = fecha_inicio_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-                    fecha_fin_solo_fecha = fecha_fin_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-                    
-                    # Verificar si está en el rango (inclusive en ambos extremos)
-                    esta_en_rango = fecha_inicio_solo_fecha <= fecha_abono_solo_fecha <= fecha_fin_solo_fecha
-                    
-                    debug_log(f"DEBUG VENTA DIARIA: Comparando fecha abono {fecha_abono_solo_fecha.date()} (original: {fecha_abono}) con rango [{fecha_inicio_solo_fecha.date()}, {fecha_fin_solo_fecha.date()}] -> {esta_en_rango}")
-                    
-                    if not esta_en_rango:
-                        debug_log(f"DEBUG VENTA DIARIA: Abono FUERA del rango, omitiendo. Fecha: {fecha_abono_solo_fecha.date()}, Rango: [{fecha_inicio_solo_fecha.date()}, {fecha_fin_solo_fecha.date()}]")
-                        continue
-                    else:
-                        debug_log(f"DEBUG VENTA DIARIA: Abono DENTRO del rango, incluyendo. Fecha: {fecha_abono_solo_fecha.date()}")
-                else:
+                if not fecha_abono_dt:
                     # Si no se pudo parsear la fecha y hay filtro, omitir el abono
                     debug_log(f"DEBUG VENTA DIARIA: No se pudo parsear fecha '{fecha_abono}' y hay filtro activo, omitiendo abono")
                     continue
+                
+                # Asegurar que fecha_abono_dt es naive (sin timezone)
+                if fecha_abono_dt.tzinfo is not None:
+                    fecha_abono_dt = fecha_abono_dt.astimezone(timezone.utc).replace(tzinfo=None)
+                
+                # Normalizar todas las fechas a solo fecha (sin hora) para comparación
+                fecha_abono_solo_fecha = fecha_abono_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                fecha_inicio_solo_fecha = fecha_inicio_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                fecha_fin_solo_fecha = fecha_fin_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                
+                # Verificar si está en el rango (inclusive en ambos extremos)
+                esta_en_rango = fecha_inicio_solo_fecha <= fecha_abono_solo_fecha <= fecha_fin_solo_fecha
+                
+                debug_log(f"DEBUG VENTA DIARIA: Comparando fecha abono {fecha_abono_solo_fecha.date()} (original: {fecha_abono}) con rango [{fecha_inicio_solo_fecha.date()}, {fecha_fin_solo_fecha.date()}] -> {esta_en_rango}")
+                
+                if not esta_en_rango:
+                    debug_log(f"DEBUG VENTA DIARIA: Abono FUERA del rango, omitiendo. Fecha: {fecha_abono_solo_fecha.date()}, Rango: [{fecha_inicio_solo_fecha.date()}, {fecha_fin_solo_fecha.date()}]")
+                    continue
+                else:
+                    debug_log(f"DEBUG VENTA DIARIA: Abono DENTRO del rango, incluyendo. Fecha: {fecha_abono_solo_fecha.date()}")
             
             # Obtener el método de pago (puede ser ObjectId, nombre, o None)
             metodo_raw = abono.get("metodo")
@@ -5774,6 +5791,11 @@ async def get_venta_diaria(
         debug_log(f"DEBUG VENTA DIARIA: Procesados {len(abonos)} abonos de {len(abonos_raw)} encontrados en BD")
         if len(abonos) < len(abonos_raw):
             debug_log(f"DEBUG VENTA DIARIA: ⚠️ Se filtraron {len(abonos_raw) - len(abonos)} abonos (probablemente por filtro de fechas)")
+        elif len(abonos) == 0 and len(abonos_raw) > 0:
+            debug_log(f"DEBUG VENTA DIARIA: ❌ PROBLEMA CRÍTICO: Se encontraron {len(abonos_raw)} abonos en BD pero NINGUNO se procesó")
+            debug_log(f"DEBUG VENTA DIARIA: Primeros 3 abonos raw para debug:")
+            for i, abono in enumerate(abonos_raw[:3]):
+                debug_log(f"  Abono raw {i+1}: fecha={abono.get('fecha')} (tipo: {type(abono.get('fecha')).__name__}), monto={abono.get('monto')}, metodo={abono.get('metodo')}")
         
         # Debug específico para abonos del 14/11 después del procesamiento
         abonos_14_nov_procesados = [a for a in abonos if '2025-11-14' in str(a.get('fecha', ''))]
@@ -5832,9 +5854,14 @@ async def get_venta_diaria(
         # Ordenar por fecha descendente
         ventas_diarias.sort(key=lambda x: x["fecha"], reverse=True)
 
-        # Devolver array directamente para compatibilidad con frontend
-        # El frontend espera un array de objetos { fecha, total_venta }
-        return ventas_diarias
+        # Devolver formato compatible con frontend (array) y también incluir datos completos
+        return {
+            "ventas": ventas_diarias,  # Formato para el frontend
+            "total_ingresos": total_ingresos,
+            "abonos": abonos,  # Todos los abonos detallados
+            "ingresos_por_metodo": ingresos_por_metodo,
+            "total_abonos": len(abonos)
+        }
         
     except Exception as e:
         debug_log(f"ERROR VENTA DIARIA: Error completo: {str(e)}")
