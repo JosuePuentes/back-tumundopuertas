@@ -45,16 +45,35 @@ const MonitorPedidos: React.FC = () => {
   const fetchPedidos = useCallback(async () => {
     setLoading(true);
     try {
-      let url = `${apiUrl}/pedidos/filtrar/por-fecha/?`;
+      let url: string;
+      
+      // Si hay fechas, usar el endpoint de filtrado por fecha
       if (fechaInicio && fechaFin) {
-        url += `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
+        url = `${apiUrl}/pedidos/filtrar/por-fecha/?fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
+      } else {
+        // Si no hay fechas, usar el endpoint /all/ que retorna todos los pedidos ordenados por fecha
+        url = `${apiUrl}/pedidos/all/?limite=1000`;
       }
+      
+      console.log("🔍 Cargando pedidos desde:", url);
       const res = await fetch(url);
+      
+      if (!res.ok) {
+        throw new Error(`Error al cargar pedidos: ${res.status} ${res.statusText}`);
+      }
+      
       const data = await res.json();
-      setPedidos(Array.isArray(data) ? data : []);
-    } catch {}
-    setLoading(false);
-    setShouldSearch(false);
+      const pedidosArray = Array.isArray(data) ? data : (data.pedidos || []);
+      
+      console.log("✅ Pedidos recibidos:", pedidosArray.length);
+      setPedidos(pedidosArray);
+    } catch (error) {
+      console.error("❌ Error al cargar pedidos:", error);
+      setPedidos([]);
+    } finally {
+      setLoading(false);
+      setShouldSearch(false);
+    }
   }, [apiUrl, fechaInicio, fechaFin]);
 
   // Carga inicial automática
