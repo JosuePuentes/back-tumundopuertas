@@ -5255,9 +5255,11 @@ async def actualizar_pago(
     update = {"$set": {"pago": pago}}
     registro = None
     if monto is not None:
+        # Asegurar que el monto sea float (no string)
+        monto_float = float(monto) if monto is not None else 0.0
         registro = {
             "fecha": datetime.utcnow().isoformat(),
-            "monto": monto,
+            "monto": monto_float,  # Asegurar que sea float
             "estado": pago,
         }
         if metodo:
@@ -5270,6 +5272,7 @@ async def actualizar_pago(
                 # Si no es ObjectId, mantener como string (puede ser nombre o ID string)
                 registro["metodo"] = str(metodo) if metodo else None
             debug_log(f"DEBUG PAGO: Método guardado en registro: {registro['metodo']}")
+        debug_log(f"DEBUG PAGO: Registro completo a guardar: {registro}")
         update["$push"] = {"historial_pagos": registro}
 
     try:
@@ -5282,6 +5285,16 @@ async def actualizar_pago(
             {"_id": ObjectId(pedido_id)},
             update
         )
+        
+        # Verificar que el abono se guardó correctamente
+        if registro and result.modified_count > 0:
+            pedido_verificado = pedidos_collection.find_one({"_id": ObjectId(pedido_id)})
+            if pedido_verificado:
+                historial = pedido_verificado.get("historial_pagos", [])
+                debug_log(f"DEBUG PAGO: Abono guardado. Total abonos en historial: {len(historial)}")
+                if len(historial) > 0:
+                    ultimo_abono = historial[-1]
+                    debug_log(f"DEBUG PAGO: Último abono guardado: fecha={ultimo_abono.get('fecha')}, monto={ultimo_abono.get('monto')}, metodo={ultimo_abono.get('metodo')}")
 
         # Si es un pedido de cliente (tipo "cliente"), actualizar también la factura en facturas_cliente
         if pedido.get("tipo") == "cliente" and monto is not None and monto > 0:
@@ -5532,12 +5545,17 @@ async def get_venta_diaria(
                 raise HTTPException(status_code=400, detail=f"Formato de fecha inválido: {str(e)}. Use YYYY-MM-DD o MM/DD/YYYY")
         
         # Pipeline simplificado - INCLUYE TODOS los abonos, incluso sin método
+        # Excluir pedidos web también
+        match_filter = {
+            "estado_general": {"$ne": "cancelado"},  # Excluir pedidos cancelados
+            "historial_pagos": {"$exists": True, "$ne": []}  # Solo pedidos con historial_pagos
+        }
+        # Aplicar exclusión de pedidos web
+        match_filter = excluir_pedidos_web(match_filter)
+        
         pipeline = [
             {
-                "$match": {
-                    "estado_general": {"$ne": "cancelado"},  # Excluir pedidos cancelados
-                    "historial_pagos": {"$exists": True, "$ne": []}  # Solo pedidos con historial_pagos
-                }
+                "$match": match_filter
             },
             {"$unwind": "$historial_pagos"},
             {
@@ -5552,6 +5570,8 @@ async def get_venta_diaria(
             },
             {"$sort": {"fecha": -1}},
         ]
+        
+        debug_log(f"DEBUG VENTA DIARIA: Pipeline match filter: {match_filter}")
 
         debug_log(f"DEBUG VENTA DIARIA: Ejecutando pipeline con {len(pipeline)} etapas")
         debug_log(f"DEBUG VENTA DIARIA: Filtros de fecha solicitados - inicio: {fecha_inicio}, fin: {fecha_fin}")
@@ -5566,13 +5586,12 @@ async def get_venta_diaria(
                 fecha_abono = abono.get('fecha')
                 debug_log(f"  Abono {i+1}: fecha={fecha_abono} (tipo: {type(fecha_abono).__name__}), monto={abono.get('monto')}, metodo={abono.get('metodo')}, pedido_id={abono.get('pedido_id')}")
             
-            # Buscar específicamente abonos del 14/11/2025
-            if fecha_inicio and "2025-11-14" in fecha_inicio:
-                debug_log(f"DEBUG VENTA DIARIA: Buscando abonos del 14/11/2025 específicamente:")
-                abonos_14_nov = [a for a in abonos_raw if '2025-11-14' in str(a.get('fecha', ''))]
-                debug_log(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_14_nov)} abonos con '2025-11-14' en la fecha")
+            # Buscar específicamente abonos del 14/11/2025 (siempre, para debug)
+            abonos_14_nov = [a for a in abonos_raw if '2025-11-14' in str(a.get('fecha', ''))]
+            if len(abonos_14_nov) > 0:
+                debug_log(f"DEBUG VENTA DIARIA: ⚠️ Encontrados {len(abonos_14_nov)} abonos con '2025-11-14' en la fecha (ANTES del filtro)")
                 for i, abono in enumerate(abonos_14_nov[:10]):
-                    debug_log(f"  Abono 14/11 {i+1}: fecha={abono.get('fecha')}, monto={abono.get('monto')}, metodo={abono.get('metodo')}")
+                    debug_log(f"  Abono 14/11 {i+1}: fecha={abono.get('fecha')} (tipo: {type(abono.get('fecha')).__name__}), monto={abono.get('monto')}, metodo={abono.get('metodo')}, pedido_id={abono.get('pedido_id')}")
         
         # Procesar los abonos manualmente y aplicar filtro de fechas CORREGIDO
         abonos = []
@@ -5755,6 +5774,15 @@ async def get_venta_diaria(
         debug_log(f"DEBUG VENTA DIARIA: Procesados {len(abonos)} abonos de {len(abonos_raw)} encontrados en BD")
         if len(abonos) < len(abonos_raw):
             debug_log(f"DEBUG VENTA DIARIA: ⚠️ Se filtraron {len(abonos_raw) - len(abonos)} abonos (probablemente por filtro de fechas)")
+        
+        # Debug específico para abonos del 14/11 después del procesamiento
+        abonos_14_nov_procesados = [a for a in abonos if '2025-11-14' in str(a.get('fecha', ''))]
+        if len(abonos_14_nov_procesados) > 0:
+            debug_log(f"DEBUG VENTA DIARIA: ✅ Después del procesamiento: {len(abonos_14_nov_procesados)} abonos del 14/11/2025")
+            for i, abono in enumerate(abonos_14_nov_procesados[:5]):
+                debug_log(f"  Abono procesado 14/11 {i+1}: fecha={abono.get('fecha')}, monto={abono.get('monto')}, metodo={abono.get('metodo')}")
+        elif len(abonos_14_nov) > 0:
+            debug_log(f"DEBUG VENTA DIARIA: ❌ PROBLEMA: Se encontraron {len(abonos_14_nov)} abonos del 14/11 en BD pero NINGUNO pasó el filtro/procesamiento")
 
         # Calcular totales
         total_ingresos = sum(abono.get("monto", 0) for abono in abonos)
