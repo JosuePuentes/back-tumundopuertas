@@ -5519,11 +5519,12 @@ async def get_venta_diaria(
                 debug_log(f"ERROR VENTA DIARIA: Error parsing fechas: {e}")
                 raise HTTPException(status_code=400, detail=f"Formato de fecha inválido: {str(e)}. Use YYYY-MM-DD o MM/DD/YYYY")
         
-        # Pipeline simplificado sin filtros problemáticos
+        # Pipeline simplificado - INCLUYE TODOS los abonos, incluso sin método
         pipeline = [
             {
                 "$match": {
-                    "estado_general": {"$ne": "cancelado"}  # Excluir pedidos cancelados
+                    "estado_general": {"$ne": "cancelado"},  # Excluir pedidos cancelados
+                    "historial_pagos": {"$exists": True, "$ne": []}  # Solo pedidos con historial_pagos
                 }
             },
             {"$unwind": "$historial_pagos"},
@@ -5534,16 +5535,23 @@ async def get_venta_diaria(
                     "cliente_nombre": "$cliente_nombre",
                     "fecha": "$historial_pagos.fecha",
                     "monto": "$historial_pagos.monto",
-                    "metodo": "$historial_pagos.metodo"  # CORREGIDO: usar "metodo" no "metodo_id"
+                    "metodo": {"$ifNull": ["$historial_pagos.metodo", None]}  # Incluir null si no existe
                 }
             },
             {"$sort": {"fecha": -1}},
         ]
 
         debug_log(f"DEBUG VENTA DIARIA: Ejecutando pipeline con {len(pipeline)} etapas")
-        debug_log(f"DEBUG VENTA DIARIA: Filtros de fecha - inicio: {fecha_inicio_dt}, fin: {fecha_fin_dt}")
+        debug_log(f"DEBUG VENTA DIARIA: Filtros de fecha solicitados - inicio: {fecha_inicio}, fin: {fecha_fin}")
+        debug_log(f"DEBUG VENTA DIARIA: Filtros de fecha procesados - inicio: {fecha_inicio_dt}, fin: {fecha_fin_dt}")
         abonos_raw = list(pedidos_collection.aggregate(pipeline))
         debug_log(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_raw)} abonos raw en la BD")
+        
+        # Debug: mostrar algunos ejemplos de abonos encontrados
+        if abonos_raw and len(abonos_raw) > 0:
+            debug_log(f"DEBUG VENTA DIARIA: Primeros 3 abonos encontrados:")
+            for i, abono in enumerate(abonos_raw[:3]):
+                debug_log(f"  Abono {i+1}: fecha={abono.get('fecha')}, monto={abono.get('monto')}, metodo={abono.get('metodo')}, pedido_id={abono.get('pedido_id')}")
         
         # Procesar los abonos manualmente y aplicar filtro de fechas CORREGIDO
         abonos = []
@@ -5629,16 +5637,20 @@ async def get_venta_diaria(
                     # Verificar si está en el rango (inclusive en ambos extremos)
                     esta_en_rango = fecha_inicio_solo_fecha <= fecha_abono_solo_fecha <= fecha_fin_solo_fecha
                     
-                    debug_log(f"DEBUG VENTA DIARIA: Comparando fecha abono {fecha_abono_solo_fecha.date()} con rango [{fecha_inicio_solo_fecha.date()}, {fecha_fin_solo_fecha.date()}] -> {esta_en_rango}")
+                    debug_log(f"DEBUG VENTA DIARIA: Comparando fecha abono {fecha_abono_solo_fecha.date()} (original: {fecha_abono}) con rango [{fecha_inicio_solo_fecha.date()}, {fecha_fin_solo_fecha.date()}] -> {esta_en_rango}")
                     
                     if not esta_en_rango:
+                        debug_log(f"DEBUG VENTA DIARIA: Abono FUERA del rango, omitiendo. Fecha: {fecha_abono_solo_fecha.date()}, Rango: [{fecha_inicio_solo_fecha.date()}, {fecha_fin_solo_fecha.date()}]")
                         continue
+                    else:
+                        debug_log(f"DEBUG VENTA DIARIA: Abono DENTRO del rango, incluyendo. Fecha: {fecha_abono_solo_fecha.date()}")
             
-            # Obtener el método de pago (puede ser ObjectId o nombre)
+            # Obtener el método de pago (puede ser ObjectId, nombre, o None)
             metodo_raw = abono.get("metodo")
             metodo_nombre = "Desconocido"
             
-            if metodo_raw:
+            # Procesar método incluso si es None (para abonos sin método)
+            if metodo_raw is not None and metodo_raw != "":
                 # Intentar obtener el nombre del método de pago
                 # Primero intentar como ObjectId
                 try:
@@ -5686,7 +5698,9 @@ async def get_venta_diaria(
             }
             abonos.append(abono_procesado)
 
-        debug_log(f"DEBUG VENTA DIARIA: Procesados {len(abonos)} abonos")
+        debug_log(f"DEBUG VENTA DIARIA: Procesados {len(abonos)} abonos de {len(abonos_raw)} encontrados en BD")
+        if len(abonos) < len(abonos_raw):
+            debug_log(f"DEBUG VENTA DIARIA: ⚠️ Se filtraron {len(abonos_raw) - len(abonos)} abonos (probablemente por filtro de fechas)")
 
         # Calcular totales
         total_ingresos = sum(abono.get("monto", 0) for abono in abonos)
