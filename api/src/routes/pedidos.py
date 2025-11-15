@@ -5256,7 +5256,14 @@ async def actualizar_pago(
             "estado": pago,
         }
         if metodo:
-            registro["metodo"] = metodo
+            # Normalizar el método de pago: convertir a string si es ObjectId, o mantener como string
+            try:
+                # Si es un ObjectId válido, convertirlo a string
+                metodo_obj_id = ObjectId(metodo)
+                registro["metodo"] = str(metodo_obj_id)
+            except:
+                # Si no es ObjectId, mantener como string (puede ser nombre o ID string)
+                registro["metodo"] = str(metodo) if metodo else None
             debug_log(f"DEBUG PAGO: Método guardado en registro: {registro['metodo']}")
         update["$push"] = {"historial_pagos": registro}
 
@@ -5549,9 +5556,18 @@ async def get_venta_diaria(
         
         # Debug: mostrar algunos ejemplos de abonos encontrados
         if abonos_raw and len(abonos_raw) > 0:
-            debug_log(f"DEBUG VENTA DIARIA: Primeros 3 abonos encontrados:")
-            for i, abono in enumerate(abonos_raw[:3]):
-                debug_log(f"  Abono {i+1}: fecha={abono.get('fecha')}, monto={abono.get('monto')}, metodo={abono.get('metodo')}, pedido_id={abono.get('pedido_id')}")
+            debug_log(f"DEBUG VENTA DIARIA: Primeros 5 abonos encontrados en BD:")
+            for i, abono in enumerate(abonos_raw[:5]):
+                fecha_abono = abono.get('fecha')
+                debug_log(f"  Abono {i+1}: fecha={fecha_abono} (tipo: {type(fecha_abono).__name__}), monto={abono.get('monto')}, metodo={abono.get('metodo')}, pedido_id={abono.get('pedido_id')}")
+            
+            # Buscar específicamente abonos del 14/11/2025
+            if fecha_inicio and "2025-11-14" in fecha_inicio:
+                debug_log(f"DEBUG VENTA DIARIA: Buscando abonos del 14/11/2025 específicamente:")
+                abonos_14_nov = [a for a in abonos_raw if '2025-11-14' in str(a.get('fecha', ''))]
+                debug_log(f"DEBUG VENTA DIARIA: Encontrados {len(abonos_14_nov)} abonos con '2025-11-14' en la fecha")
+                for i, abono in enumerate(abonos_14_nov[:10]):
+                    debug_log(f"  Abono 14/11 {i+1}: fecha={abono.get('fecha')}, monto={abono.get('monto')}, metodo={abono.get('metodo')}")
         
         # Procesar los abonos manualmente y aplicar filtro de fechas CORREGIDO
         abonos = []
@@ -5592,13 +5608,17 @@ async def get_venta_diaria(
                                         fecha_abono_dt = fecha_abono_dt.astimezone(timezone.utc).replace(tzinfo=None)
                                 else:
                                     # ISO sin timezone (ej: "2025-11-14T20:08:24.456103")
-                                    # fromisoformat puede fallar con microsegundos, usar parseo manual
+                                    # Este es el formato que usa datetime.utcnow().isoformat()
                                     try:
+                                        # Intentar parsear con fromisoformat (Python 3.7+)
                                         fecha_abono_dt = datetime.fromisoformat(fecha_abono)
-                                    except ValueError:
+                                        debug_log(f"DEBUG VENTA DIARIA: Fecha ISO parseada exitosamente: {fecha_abono} -> {fecha_abono_dt}")
+                                    except ValueError as e:
                                         # Fallback: parsear manualmente solo la parte de fecha
+                                        debug_log(f"DEBUG VENTA DIARIA: fromisoformat falló para '{fecha_abono}', usando fallback. Error: {e}")
                                         fecha_str_clean = fecha_abono.split('T')[0]  # Solo la fecha YYYY-MM-DD
                                         fecha_abono_dt = datetime.strptime(fecha_str_clean, "%Y-%m-%d")
+                                        debug_log(f"DEBUG VENTA DIARIA: Fecha parseada con fallback: {fecha_str_clean} -> {fecha_abono_dt}")
                             except (ValueError, AttributeError) as e:
                                 # Fallback: parsear manualmente solo la parte de fecha
                                 try:
