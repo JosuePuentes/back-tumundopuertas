@@ -5952,6 +5952,82 @@ async def debug_venta_diaria_simple():
     except Exception as e:
         return {"error": str(e), "type": type(e).__name__}
 
+@router.get("/debug-abonos-modulo-pagos")
+async def debug_abonos_modulo_pagos():
+    """Endpoint de debug específico para los 3 abonos del módulo de pagos que no aparecen"""
+    try:
+        # IDs de los 3 pedidos con abonos del módulo de pagos del 14/11
+        pedidos_ids = [
+            "68d430f5526e022bb6282553",  # CARLOS CASANOVA
+            "69090f02deeccc8d5508fad4",  # ALBA GARCIA
+            "68f7fd7c2bdd82651dc9c9f3"   # JOHANA HERNANDEZ
+        ]
+        
+        resultado = {}
+        
+        for pedido_id_str in pedidos_ids:
+            try:
+                pedido_obj_id = ObjectId(pedido_id_str)
+                pedido = pedidos_collection.find_one({"_id": pedido_obj_id})
+                
+                if pedido:
+                    historial = pedido.get("historial_pagos", [])
+                    abonos_14_nov = [a for a in historial if '2025-11-14' in str(a.get('fecha', ''))]
+                    
+                    resultado[pedido_id_str] = {
+                        "cliente": pedido.get("cliente_nombre"),
+                        "estado_general": pedido.get("estado_general"),
+                        "tipo_pedido": pedido.get("tipo_pedido"),
+                        "total_abonos": len(historial),
+                        "abonos_14_nov": len(abonos_14_nov),
+                        "abonos_detalle": abonos_14_nov
+                    }
+                else:
+                    resultado[pedido_id_str] = {"error": "Pedido no encontrado"}
+            except Exception as e:
+                resultado[pedido_id_str] = {"error": str(e)}
+        
+        # También verificar si el pipeline los encuentra
+        match_filter = {
+            "estado_general": {"$ne": "cancelado"},
+            "historial_pagos": {"$exists": True, "$ne": []}
+        }
+        match_filter = excluir_pedidos_web(match_filter)
+        
+        pipeline = [
+            {"$match": match_filter},
+            {"$unwind": "$historial_pagos"},
+            {
+                "$project": {
+                    "_id": 0,
+                    "pedido_id": "$_id",
+                    "cliente_nombre": "$cliente_nombre",
+                    "fecha": "$historial_pagos.fecha",
+                    "monto": "$historial_pagos.monto",
+                    "metodo": {"$ifNull": ["$historial_pagos.metodo", None]}
+                }
+            },
+            {"$match": {"fecha": {"$regex": "2025-11-14"}}}
+        ]
+        
+        abonos_pipeline = list(pedidos_collection.aggregate(pipeline))
+        resultado["pipeline_encontrados"] = len(abonos_pipeline)
+        resultado["abonos_pipeline"] = [
+            {
+                "pedido_id": str(a.get("pedido_id")),
+                "cliente": a.get("cliente_nombre"),
+                "fecha": str(a.get("fecha")),
+                "monto": a.get("monto"),
+                "metodo": str(a.get("metodo")) if a.get("metodo") else None
+            }
+            for a in abonos_pipeline
+        ]
+        
+        return resultado
+        
+    except Exception as e:
+        return {"error": str(e), "type": type(e).__name__}
+
 @router.get("/debug-fechas-abonos")
 async def debug_fechas_abonos():
     """Endpoint para ver las fechas de los abonos más recientes"""
