@@ -2134,7 +2134,9 @@ from fastapi import Query
 async def get_pedidos_por_estado(estado_general: list[str] = Query(..., description="Uno o varios estados separados por coma")):
     """
     Obtener pedidos por estado general - OPTIMIZADO
-    Solo retorna pedidos con items pendientes (estado_item 0 o 1) para herrería
+    Devuelve todos los items con todos sus campos, incluyendo estado_item.
+    Para orden4 (Facturación): devuelve todos los pedidos con todos sus items.
+    Para otros estados: mantiene el filtro de items pendientes (estado_item 0 o 1) para herrería.
     """
     # Si solo se pasa uno, FastAPI lo convierte en lista de un elemento
     # Excluir pedidos cancelados de la lista de estados
@@ -2142,12 +2144,18 @@ async def get_pedidos_por_estado(estado_general: list[str] = Query(..., descript
     filtro = {"estado_general": {"$in": estados_filtrados}}
     # Excluir pedidos web
     filtro = excluir_pedidos_web(filtro)
-    # Filtrar solo pedidos que tienen items pendientes o en herrería (estado_item 0 o 1)
-    filtro["items"] = {
-        "$elemMatch": {
-            "estado_item": {"$in": [0, 1]}  # Solo items pendientes o en herrería
+    
+    # Si se consulta orden4 (Facturación), NO filtrar por estado_item
+    # Devolver todos los pedidos con todos sus items
+    es_facturacion = "orden4" in estados_filtrados
+    
+    if not es_facturacion:
+        # Para otros estados, filtrar solo pedidos que tienen items pendientes o en herrería (estado_item 0 o 1)
+        filtro["items"] = {
+            "$elemMatch": {
+                "estado_item": {"$in": [0, 1]}  # Solo items pendientes o en herrería
+            }
         }
-    }
     
     # Proyección optimizada: solo campos necesarios
     projection = {
@@ -2168,13 +2176,18 @@ async def get_pedidos_por_estado(estado_general: list[str] = Query(..., descript
                    .sort("fecha_creacion", -1)
                    .limit(500))
     
-    # Filtrar items en memoria para mostrar solo los relevantes (estado_item 0 o 1)
+    # Procesar items según el estado
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
-        # Filtrar items: solo mostrar los que tienen estado_item 0 o 1
         items_originales = pedido.get("items", [])
-        items_filtrados = [item for item in items_originales if item.get("estado_item", 0) in [0, 1]]
-        pedido["items"] = items_filtrados
+        
+        if es_facturacion:
+            # Para facturación: devolver TODOS los items con TODOS sus campos, incluyendo estado_item
+            pedido["items"] = items_originales
+        else:
+            # Para otros estados: filtrar items para mostrar solo los relevantes (estado_item 0 o 1)
+            items_filtrados = [item for item in items_originales if item.get("estado_item", 0) in [0, 1]]
+            pedido["items"] = items_filtrados
         
         # Normalizar adicionales: None o no existe → []
         if "adicionales" not in pedido or pedido["adicionales"] is None:
@@ -2183,8 +2196,9 @@ async def get_pedidos_por_estado(estado_general: list[str] = Query(..., descript
         # NO enriquecer con datos del cliente para mejorar rendimiento (comentado temporalmente)
         # enriquecer_pedido_con_datos_cliente(pedido)
     
-    # Filtrar pedidos que quedaron sin items después del filtrado
-    pedidos = [p for p in pedidos if len(p.get("items", [])) > 0]
+    # Filtrar pedidos que quedaron sin items (solo para estados que no sean facturación)
+    if not es_facturacion:
+        pedidos = [p for p in pedidos if len(p.get("items", [])) > 0]
     
     return pedidos
 
