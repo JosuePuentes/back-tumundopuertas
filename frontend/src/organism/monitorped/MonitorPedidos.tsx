@@ -15,6 +15,7 @@ interface Pedido {
     descripcion: string;
     cantidad: number;
     costoProduccion?: string;
+    estado_item?: number; // 0=pendiente, 1=herreria, 2=masillar, 3=preparar, 4=terminado
   }>;
 }
 
@@ -24,7 +25,7 @@ const MonitorPedidos: React.FC = () => {
   const [search, setSearch] = useState("");
   const [fechaInicio, setFechaInicio] = useState<string>("");
   const [fechaFin, setFechaFin] = useState<string>("");
-  const [shouldSearch, setShouldSearch] = useState(false);
+  const [shouldSearch, setShouldSearch] = useState(true); // Cargar automáticamente al iniciar
   const apiUrl = import.meta.env.VITE_API_URL || "https://localhost:8002";
 
   const ordenMap: Record<string, string> = {
@@ -74,6 +75,21 @@ const MonitorPedidos: React.FC = () => {
       setPedidos((prev) => prev.map((p) => p._id === pedidoId ? { ...p, estado_general: estadoSeleccionado[pedidoId] } : p));
     } catch {}
     setActualizando("");
+  };
+
+  // Función para calcular el porcentaje de completado basado en estado_item
+  const calcularPorcentajeCompletado = (pedido: Pedido): number => {
+    const items = pedido.items || [];
+    if (items.length === 0) return 0;
+    
+    // Contar items completados (estado_item = 4)
+    const itemsCompletados = items.filter((item) => {
+      const estadoItem = item.estado_item ?? 0;
+      return estadoItem >= 4;
+    }).length;
+    
+    // Porcentaje = (items completados / total items) * 100
+    return Math.round((itemsCompletados / items.length) * 100);
   };
 
   const pedidosFiltrados = pedidos.filter(
@@ -147,6 +163,16 @@ const MonitorPedidos: React.FC = () => {
                   <div className="mb-2 text-base font-bold text-blue-700">
                     Estado general: <span className="font-normal text-blue-900">{ordenMap[pedido.estado_general] || pedido.estado_general}</span>
                   </div>
+                  {(() => {
+                    const porcentaje = calcularPorcentajeCompletado(pedido);
+                    return (
+                      <div className="mb-2 text-base font-bold">
+                        Progreso: <span className={`font-normal ${porcentaje === 100 ? 'text-green-700 font-bold' : 'text-gray-700'}`}>
+                          {porcentaje}% ({pedido.items?.filter((item) => (item.estado_item ?? 0) >= 4).length || 0}/{pedido.items?.length || 0} items completados)
+                        </span>
+                      </div>
+                    );
+                  })()}
                   {pedido.fecha_creacion && (
                     <div className="text-base text-gray-700">
                       Fecha: {new Date(pedido.fecha_creacion).toLocaleDateString()}
@@ -156,14 +182,21 @@ const MonitorPedidos: React.FC = () => {
                     <div className="mt-2">
                       <div className="font-semibold mb-1">Items:</div>
                       <ul className="list-disc ml-6">
-                        {pedido.items.map((item, idx) => (
-                          <li key={idx} className="mb-1">
-                            <span className="font-bold">{item.nombre}</span> - {item.descripcion} <span className="text-gray-600">x{item.cantidad}</span>
-                            {item.costoProduccion && (
-                              <span className="ml-2 text-green-700 font-semibold">${item.costoProduccion}</span>
-                            )}
-                          </li>
-                        ))}
+                        {pedido.items.map((item, idx) => {
+                          const estadoItem = item.estado_item ?? 0;
+                          const estaCompletado = estadoItem >= 4;
+                          return (
+                            <li key={idx} className="mb-1">
+                              <span className="font-bold">{item.nombre}</span> - {item.descripcion} <span className="text-gray-600">x{item.cantidad}</span>
+                              <span className={`ml-2 px-2 py-0.5 rounded text-xs font-semibold ${estaCompletado ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                {estadoItem}/4
+                              </span>
+                              {item.costoProduccion && (
+                                <span className="ml-2 text-green-700 font-semibold">${item.costoProduccion}</span>
+                              )}
+                            </li>
+                          );
+                        })}
                       </ul>
                     </div>
                   )}

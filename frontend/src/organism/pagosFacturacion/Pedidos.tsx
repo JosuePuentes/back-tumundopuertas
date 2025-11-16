@@ -135,6 +135,13 @@ interface PedidoItem {
   id: string;
   precio: number;
   cantidad: number;
+  descuento?: number;
+  estado_item?: number; // 0=pendiente, 1=herreria, 2=masillar, 3=preparar, 4=terminado
+}
+
+interface Adicional {
+  precio: number;
+  cantidad?: number;
 }
 
 interface RegistroPago {
@@ -150,7 +157,9 @@ interface Pedido {
   fecha_creacion?: string;
   pago?: string; // "sin pago" | "abonado" | "pagado"
   items?: PedidoItem[];
+  adicionales?: Adicional[];
   historial_pagos?: RegistroPago[];
+  total_abonado?: number;
 }
 
 const ESTADOS = [
@@ -213,10 +222,10 @@ const Pedidos: React.FC = () => {
     <Card className="w-full shadow-md rounded-2xl max-w-5xl mx-auto px-1 sm:px-4">
       <CardHeader className="px-2 sm:px-6">
         <CardTitle className="text-lg sm:text-xl font-bold text-gray-800">
-          Pedidos en Proceso
+          Pedidos Listos para Facturación
         </CardTitle>
         <p className="text-xs sm:text-sm text-gray-500">
-          Estados: orden1 a orden6 y pendiente
+          Solo se muestran pedidos con todos los items completados (estado_item = 4/4)
         </p>
         <div className="mt-2 text-xs sm:text-sm text-green-700 font-semibold">
           Suma de pagos realizados: {sumaPagos.toLocaleString("es-MX", { style: "currency", currency: "MXN" })}
@@ -290,17 +299,49 @@ const Pedidos: React.FC = () => {
               </TableHeader>
               <TableBody>
                 {pedidos
-                  .filter((pedido) =>
-                    clienteFiltro.trim() === ""
+                  .filter((pedido) => {
+                    // Filtro por cliente
+                    const pasaFiltroCliente = clienteFiltro.trim() === ""
                       ? true
-                      : (pedido.cliente_nombre || "").toLowerCase().includes(clienteFiltro.trim().toLowerCase())
-                  )
+                      : (pedido.cliente_nombre || "").toLowerCase().includes(clienteFiltro.trim().toLowerCase());
+                    
+                    if (!pasaFiltroCliente) return false;
+                    
+                    // FILTRO PRINCIPAL: Solo mostrar pedidos donde TODOS los items tienen estado_item = 4 (100% completados)
+                    const items = pedido.items || [];
+                    if (items.length === 0) return false; // No mostrar pedidos sin items
+                    
+                    // Verificar que todos los items estén completados (estado_item = 4)
+                    const todosItemsCompletados = items.every((item) => {
+                      const estadoItem = item.estado_item ?? 0;
+                      return estadoItem >= 4; // estado_item = 4 significa completado
+                    });
+                    
+                    return todosItemsCompletados;
+                  })
                   .map((pedido) => {
-                  // Calcular el total del pedido
-                  const total = (pedido.items || []).reduce(
-                    (acc, item) => acc + (item.precio || 0) * (item.cantidad || 0),
+                  // Calcular el total del pedido incluyendo adicionales y descuentos
+                  const totalItems = (pedido.items || []).reduce(
+                    (acc, item) => {
+                      const precioBase = item.precio || 0;
+                      const descuento = item.descuento || 0;
+                      const precioConDescuento = Math.max(0, precioBase - descuento);
+                      return acc + (precioConDescuento * (item.cantidad || 0));
+                    },
                     0
                   );
+                  const totalAdicionales = (pedido.adicionales || []).reduce(
+                    (sum, ad) => sum + ((ad.precio || 0) * (ad.cantidad || 1)),
+                    0
+                  );
+                  const total = totalItems + totalAdicionales;
+                  
+                  // Calcular el monto abonado
+                  const montoAbonado = pedido.total_abonado || (pedido.historial_pagos || []).reduce(
+                    (acc, pago) => acc + (pago.monto || 0),
+                    0
+                  );
+                  
                   return (
                     <TableRow key={pedido._id} className="hover:bg-gray-50">
                       <TableCell className="font-medium break-all max-w-[120px]">
@@ -328,12 +369,16 @@ const Pedidos: React.FC = () => {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col gap-1">
-                          {pedido.historial_pagos && pedido.historial_pagos.length > 0 && (
+                          {montoAbonado > 0 && (
                             <span className="text-xs text-green-700 font-semibold">
-                              Pagos: {pedido.historial_pagos.reduce((a, pago) => a + (pago.monto || 0), 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" })}
+                              Pagos: {montoAbonado.toLocaleString("es-MX", { style: "currency", currency: "MXN" })}
                             </span>
                           )}
-                        {total.toLocaleString("es-MX", { style: "currency", currency: "MXN" })}
+                          {total > 0 && (
+                            <span className="text-xs font-semibold">
+                              Total: {total.toLocaleString("es-MX", { style: "currency", currency: "MXN" })}
+                            </span>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -349,3 +394,4 @@ const Pedidos: React.FC = () => {
 };
 
 export default Pedidos;
+
