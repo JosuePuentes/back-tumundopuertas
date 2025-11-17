@@ -5579,7 +5579,8 @@ async def get_venta_diaria(
                     "cliente_nombre": "$cliente_nombre",
                     "fecha": "$historial_pagos.fecha",
                     "monto": "$historial_pagos.monto",
-                    "metodo": {"$ifNull": ["$historial_pagos.metodo", None]}  # Incluir null si no existe
+                    "metodo": {"$ifNull": ["$historial_pagos.metodo", None]},  # Incluir null si no existe
+                    "nombre_quien_envia": {"$ifNull": ["$historial_pagos.nombre_quien_envia", None]}  # Incluir nombre_quien_envia
                 }
             },
             {"$sort": {"fecha": -1}},
@@ -5798,7 +5799,8 @@ async def get_venta_diaria(
                 "cliente_nombre": abono.get("cliente_nombre"),
                 "fecha": abono.get("fecha"),
                 "monto": monto_abono,
-                "metodo": metodo_nombre
+                "metodo": metodo_nombre,
+                "nombre_quien_envia": abono.get("nombre_quien_envia")  # Incluir nombre_quien_envia
             }
             abonos.append(abono_procesado)
 
