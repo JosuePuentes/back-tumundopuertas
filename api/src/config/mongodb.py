@@ -294,3 +294,36 @@ def init_clientes_indexes_adicionales():
             print("ℹ️  Índice de texto en clientes.cliente_nombre ya existe")
         else:
             print(f"⚠️  Error al crear índice de texto en clientes.cliente_nombre: {e}")
+
+def init_facturas_confirmadas_indexes():
+    """
+    Inicializar índices para optimizar queries de facturas confirmadas.
+    """
+    facturas_confirmadas_collection = db["facturas_confirmadas"]
+    
+    try:
+        # Índice único en pedidoId (garantiza un solo registro por pedido)
+        facturas_confirmadas_collection.create_index(
+            [("pedidoId", 1)],
+            unique=True,
+            name="idx_factura_pedido_id_unique"
+        )
+        print("✅ Índice único creado en facturas_confirmadas.pedidoId")
+    except Exception as e:
+        if "already exists" in str(e).lower() or "duplicate key" in str(e).lower():
+            print("ℹ️  Índice único en facturas_confirmadas.pedidoId ya existe")
+        else:
+            print(f"⚠️  Error al crear índice en facturas_confirmadas.pedidoId: {e}")
+    
+    try:
+        # Índice para fecha_facturacion (ordenamiento frecuente)
+        facturas_confirmadas_collection.create_index(
+            [("fecha_facturacion", -1)],
+            name="idx_factura_fecha_facturacion_desc"
+        )
+        print("✅ Índice creado en facturas_confirmadas.fecha_facturacion")
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            print("ℹ️  Índice en facturas_confirmadas.fecha_facturacion ya existe")
+        else:
+            print(f"⚠️  Error al crear índice en facturas_confirmadas.fecha_facturacion: {e}")

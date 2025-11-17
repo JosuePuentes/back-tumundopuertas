@@ -195,7 +195,8 @@ async def startup_event():
         init_pedidos_indexes,
         init_empleados_indexes,
         init_inventario_indexes,
-        init_clientes_indexes_adicionales
+        init_clientes_indexes_adicionales,
+        init_facturas_confirmadas_indexes
     )
     print("🔧 Inicializando índices de MongoDB...")
     init_clientes_indexes()
@@ -203,4 +204,5 @@ async def startup_event():
     init_empleados_indexes()
     init_inventario_indexes()
     init_clientes_indexes_adicionales()
+    init_facturas_confirmadas_indexes()
     print("✅ Inicialización de índices completada")
