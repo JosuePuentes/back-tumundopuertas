@@ -2168,7 +2168,10 @@ async def get_pedidos_por_estado(estado_general: list[str] = Query(..., descript
         "estado_general": 1,
         "items": 1,
         "seguimiento": 1,
-        "adicionales": 1
+        "adicionales": 1,
+        "historial_pagos": 1,  # Necesario para el módulo de pagos
+        "total_abonado": 1,  # Necesario para el módulo de pagos
+        "pago": 1  # Necesario para el módulo de pagos
     }
     
     # Limitar a 500 pedidos más recientes y ordenar por fecha descendente
@@ -2176,7 +2179,8 @@ async def get_pedidos_por_estado(estado_general: list[str] = Query(..., descript
                    .sort("fecha_creacion", -1)
                    .limit(500))
     
-    # Procesar items según el estado
+    # Procesar items según el estado y calcular saldo pendiente
+    pedidos_con_saldo = []
     for pedido in pedidos:
         pedido["_id"] = str(pedido["_id"])
         items_originales = pedido.get("items", [])
@@ -2193,14 +2197,53 @@ async def get_pedidos_por_estado(estado_general: list[str] = Query(..., descript
         if "adicionales" not in pedido or pedido["adicionales"] is None:
             pedido["adicionales"] = []
         
+        # Calcular total_pedido (considerando descuentos) y total_abonado
+        total_items = sum(
+            calcular_precio_final_item(item) * float(item.get("cantidad", 0)) 
+            for item in items_originales  # Usar items originales para el cálculo completo
+        )
+        
+        # Calcular total de adicionales
+        adicionales = pedido.get("adicionales", [])
+        total_adicionales = 0
+        if adicionales and isinstance(adicionales, list):
+            for adicional in adicionales:
+                cantidad = adicional.get("cantidad", 1)
+                precio = adicional.get("precio", 0)
+                total_adicionales += precio * cantidad
+        
+        total_pedido = total_items + total_adicionales
+        
+        # Calcular total_abonado desde historial_pagos
+        historial_pagos = pedido.get("historial_pagos", [])
+        total_abonado = sum(
+            float(pago.get("monto", 0)) 
+            for pago in historial_pagos 
+            if pago.get("monto") is not None
+        )
+        
+        # Si no hay historial_pagos pero hay total_abonado guardado, usar ese valor como fallback
+        if total_abonado == 0 and not historial_pagos:
+            total_abonado = float(pedido.get("total_abonado", 0))
+        
+        saldo_pendiente = total_pedido - total_abonado
+        
+        # SOLO incluir pedidos con saldo pendiente (total_pedido > total_abonado)
+        # Esto asegura que solo aparezcan pedidos que aún deben dinero
+        if saldo_pendiente > 0:
+            pedido["total_pedido"] = total_pedido
+            pedido["total_abonado"] = total_abonado
+            pedido["saldo_pendiente"] = saldo_pendiente
+            pedidos_con_saldo.append(pedido)
+        
         # NO enriquecer con datos del cliente para mejorar rendimiento (comentado temporalmente)
         # enriquecer_pedido_con_datos_cliente(pedido)
     
     # Filtrar pedidos que quedaron sin items (solo para estados que no sean facturación)
     if not es_facturacion:
-        pedidos = [p for p in pedidos if len(p.get("items", [])) > 0]
+        pedidos_con_saldo = [p for p in pedidos_con_saldo if len(p.get("items", [])) > 0]
     
-    return pedidos
+    return pedidos_con_saldo
 
 @router.post("/{pedido_id}/facturar")
 async def facturar_pedido(
