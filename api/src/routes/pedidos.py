@@ -5282,11 +5282,13 @@ async def actualizar_pago(
     pago = data.get("pago")
     monto = data.get("monto")
     metodo = data.get("metodo")
+    nombre_quien_envia = data.get("nombre_quien_envia")  # Obtener nombre_quien_envia del frontend
 
     # Debug: Log de los datos recibidos
     debug_log(f"DEBUG PAGO: Pedido {pedido_id}")
     debug_log(f"DEBUG PAGO: Datos recibidos: {data}")
     debug_log(f"DEBUG PAGO: Método recibido: {metodo} (tipo: {type(metodo).__name__})")
+    debug_log(f"DEBUG PAGO: Nombre quien envía: {nombre_quien_envia}")
 
     if pago not in ["sin pago", "abonado", "pagado"]:
         raise HTTPException(status_code=400, detail="Valor de pago inválido")
@@ -5329,6 +5331,9 @@ async def actualizar_pago(
                 # Si no es ObjectId, mantener como string (puede ser nombre o ID string)
                 registro["metodo"] = str(metodo) if metodo else None
             debug_log(f"DEBUG PAGO: Método guardado en registro: {registro['metodo']}")
+        if nombre_quien_envia:
+            registro["nombre_quien_envia"] = str(nombre_quien_envia)
+            debug_log(f"DEBUG PAGO: Nombre quien envía guardado en registro: {registro['nombre_quien_envia']}")
         debug_log(f"DEBUG PAGO: Registro completo a guardar: {registro}")
         update["$push"] = {"historial_pagos": registro}
 
@@ -6572,6 +6577,7 @@ async def agregar_abono_pedido(
         numero_referencia = data.get("numero_referencia")
         comprobante_url = data.get("comprobante_url")
         concepto = data.get("concepto")
+        nombre_quien_envia = data.get("nombre_quien_envia")  # Obtener nombre_quien_envia del frontend
         
         if monto <= 0:
             raise HTTPException(status_code=400, detail="El monto debe ser mayor que 0")
@@ -6610,6 +6616,8 @@ async def agregar_abono_pedido(
             nuevo_abono["comprobante_url"] = comprobante_url
         if concepto:
             nuevo_abono["concepto"] = concepto
+        if nombre_quien_envia:
+            nuevo_abono["nombre_quien_envia"] = str(nombre_quien_envia)
         
         # Si el abono se aprueba automáticamente, actualizar total_abonado
         if estado in ["abonado", "pagado"]:

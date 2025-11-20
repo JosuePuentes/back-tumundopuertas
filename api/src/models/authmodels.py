@@ -205,6 +205,7 @@ class RegistroPago(BaseModel):
     monto: float
     estado: str  # "abonado", "pagado", "sin pago"
     metodo: Optional[str] = None  # ID del método de pago
+    nombre_quien_envia: Optional[str] = None  # Nombre del titular que envía el pago
 
 class Adicional(BaseModel):
     """Modelo para adicionales en pedidos"""
