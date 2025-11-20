@@ -6387,12 +6387,16 @@ async def get_pagos_pedido(pedido_id: str):
         
         saldo_pendiente = total_pedido - total_abonado
         
+        # Calcular si puede facturar: total_abonado >= total_pedido (con tolerancia de 0.01)
+        puede_facturar = total_abonado >= (total_pedido - 0.01)
+        
         return {
             "pedido_id": pedido_id,
             "historial_pagos": historial_pagos,
             "total_abonado": total_abonado,
             "total_pedido": total_pedido,
             "saldo_pendiente": saldo_pendiente,
+            "puedeFacturar": puede_facturar,  # Campo para indicar si el pedido puede ser facturado
             "estado_pago": pedido.get("pago", "")
         }
         
